@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
     id("moe.lolosia.keel.classpath")
+    // Host 主动引入 ABI 静态库；插件工程由 moe.lolosia.keel.plugin 自动带
+    id("moe.lolosia.keel.abi")
 }
 
 group = "moe.lolosia.keel"

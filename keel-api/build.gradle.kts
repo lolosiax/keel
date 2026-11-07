@@ -6,26 +6,28 @@ plugins {
 group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
 
-val abiDir = file("src/nativeInterop/cinterop")
-val abiDef = abiDir.resolve("keelabi.def")
+// ABI 头文件归 keel-abi 所有（契约与实现同属一个构建）；def 仍留在本构建。
+// TODO 暂停跨构建读取头文件：等 keel-abi 发布头文件产物后改成构建期解压。
+val abiIncludeDir = file("../keel-abi/src/nativeCpp")
+val abiDef = file("src/nativeInterop/cinterop/keelabi.def")
 
 kotlin {
     mingwX64 {
         compilations.getByName("main").cinterops.create("keelabi") {
             defFile = abiDef
-            includeDirs(abiDir)
+            includeDirs(abiIncludeDir)
         }
     }
     linuxArm64 {
         compilations.getByName("main").cinterops.create("keelabi") {
             defFile = abiDef
-            includeDirs(abiDir)
+            includeDirs(abiIncludeDir)
         }
     }
     linuxX64 {
         compilations.getByName("main").cinterops.create("keelabi") {
             defFile = abiDef
-            includeDirs(abiDir)
+            includeDirs(abiIncludeDir)
         }
     }
 

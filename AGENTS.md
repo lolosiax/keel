@@ -31,6 +31,8 @@
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin` | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
+| `keel-abi-gradle-plugin/` | `keel-abi-gradle-plugin` | ABI 注入插件 `moe.lolosia.keel.abi`（解出静态库并挂 linkerOpts） | 是 |
+| `keel-abi/` | `keel-abi` | 跨运行时 ABI 的 C 实现与每目标静态库（`nativeCpp/keel_abi.h` 是唯一布局来源） | 是 |
 | `keel-classpath/` | `keel-classpath` | 独立资源 Classpath 库（zip / 目录 / 前缀视图），不依赖 keel-api | 是 |
 | `keel-classpath-full/` | `keel-classpath-full` | Host 注册表、`ClasspathRef`、租约、跨模块代理 | 是 |
 | `keel-api/` | `keel-api` | 插件契约：生命周期、上下文、消息、调度（`moe.lolosia.keel.api`） | 是 |

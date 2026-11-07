@@ -28,6 +28,9 @@ import java.util.Locale
 class KeelPluginPackagingPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
+        // ABI 静态库由这里统一注入：插件工程只写 moe.lolosia.keel.plugin，不手动加 linkerOpts
+        project.pluginManager.apply("moe.lolosia.keel.abi")
+
         val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java)
 
         val packageTask = project.tasks.register("keelPackage", Zip::class.java) { task ->

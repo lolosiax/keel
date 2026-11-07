@@ -61,22 +61,32 @@
 
 ### 加载时序（正确做法）
 
+`bootstrap` 完全在 C 里执行，**不触碰 Kotlin**：它只保存函数表、建 inbox、起事件泵线程就返回。
+插件真正「启动」是 Host 投递的第一条事件，结果无论成败都以 `COMPLETE` 事件回投 Host。
+
 ```
-Host 线程                          C shim(host)                C shim(plugin dylib)
-   │ dlopen/LoadLibrary ──────────────>│
-   │ 取符号 keel_plugin_bootstrap ────>│
-   │ 调用 bootstrap(host_api) ────────>│ 保存 host 表、创建 inbox
-   │                                   │ pthread_create ──┐
-   │                                   │                  ↓ 新线程（插件 Worker）
-   │                                   │         keel_plugin_worker_main(api)
-   │                                   │                  ↓ 首次进入插件 Kotlin 运行时
-   │                                   │         读 plugin.json、构造 Plugin、
-   │                                   │         StableRef.create、进入事件循环
-   │ <──── bootstrap 返回 ─────────────│
+Host 线程                    C shim(host)          C shim(plugin dylib)
+   │ dlopen/LoadLibrary ─────────>│
+   │ dlsym keel_plugin_bootstrap ─>│
+   │ dlsym plugin.json.entry ─────>│   (取地址，不调用)
+   │ bootstrap(host_api, worker_main, &api)
+   │                              │ 保存表 + 建 inbox
+   │                              │ CreateThread ──┐ 事件泵线程（只进插件运行时）
+   │ <──── bootstrap 返回 ────────│                │
+   │ push COMMAND{subject=START, correlation=N} ──>│
+   │                              │                │ pop → START
+   │                              │                │ worker_main(&api)   ← 首次进入插件 Kotlin
+   │                              │                │ 回填 on_event
+   │ <──── COMPLETE{correlation=N, status} ────────│
+   │ status==OK → 启用；否则记录失败并丢弃该插件   │
 ```
 
 **反例**：Host 直接 `dlopen` 后调用插件导出的 `create()`。这个调用发生在 Host 线程上，
 会让插件运行时初始化在 Host 线程里；该线程之后还要跑 Host 的 Kotlin 代码 → 两运行时同线程。
+
+**另一个反例**：在 `bootstrap` 里直接调用 Kotlin 入口再起线程。那样「启动」发生在调用
+`bootstrap` 的那个线程上（也就是 Host 线程），同样踩到上面的问题。必须让线程先起来，
+再在泵线程上执行第一条消息。
 
 ---
 
@@ -86,20 +96,23 @@ Host 线程                          C shim(host)                C shim(plugin d
 | --- | --- | --- |
 | 结构体、枚举、函数指针、导出符号声明 | `keel-api/src/nativeInterop/cinterop/keel_abi.h` | 唯一布局来源，Host 与插件都通过 cinterop 使用 |
 | cinterop 绑定 | `keel-api/src/nativeInterop/cinterop/keelabi.def` | 包名 `moe.lolosia.keel.abi.c`，只给框架内部用 |
-| 队列 / 句柄表 / 分配器实现 | C 源码（DEMO 落地） | 每个二进制各带一份，`-fvisibility=hidden` |
-| 唯一对外导出 | 插件 dylib 的 `keel_plugin_bootstrap` / `keel_plugin_shutdown` | Kotlin 工厂（如 hello 的 `create`）只由 bootstrap 在 Worker 线程调用 |
+| 队列 / 句柄表 / 分配器实现 | 顶层 `keel-abi` 构建 | 每目标编成静态库，Host / 插件各自链接一份 |
+| 唯一对外导出 | 插件 dylib 的 `keel_plugin_bootstrap` / `keel_plugin_shutdown` | Kotlin 工厂（`plugin.json.entry`）只由泵线程调用 |
 
 要点：
 
 - **结构体通过指针传**，不要按值传（Kotlin 的 `CValue` 每次字段访问可能复制，热路径代价高）。
 - 结构体只用定宽类型，禁止 `long`、位域、`#pragma pack`；布局由编译器保证，Kotlin 侧不手写 `@CStruct`。
 - C 实现必须编译进**最终二进制**：Kotlin/Native 库不会替消费者携带 C 对象文件。
-  DEMO 阶段把它做成按目标的静态库（`keel-abi-<target>`）随 Maven 发布，Host / 插件链接它。
+  所以做成按目标的静态库（`keel-abi`，输出 `libkeel_abi.a`），Host / 插件在链接期各自并入一份。
 - 每个副本有自己的全局状态（队列、分配器、句柄表）——这是有意的：
   句柄表只在 Host 副本里使用，队列则各自拥有自己的收件箱。
+- 队列节点内存**一次性预分配**（定长环形缓冲），运行期不再 `malloc` / `free`；
+  只有载荷是动态的，由发送方分配、发送方 release，避免跨 CRT 释放。
 
-`keel_abi.h` 已包含：`KeelStatus`、`KeelEventKind`、`KeelEvent`、`KeelEventRelease`、
-`KeelHostApi`、`KeelPluginApi`、队列函数、`keel_plugin_bootstrap`。
+`keel_abi.h` 已包含：`KeelStatus`、`KeelEventKind`、`KEEL_SUBJECT_START`、`KeelEvent`、
+`KeelEventRelease`、`KeelHostApi`、`KeelPluginApi`、`KeelPluginWorkerMain` / `KeelPluginHandlers`、
+队列函数、`keel_plugin_bootstrap`。
 
 ---
 
@@ -125,31 +138,51 @@ typedef struct KeelEvent {
     uint64_t source;        // 发送方模块 id，0 = Host
     uint64_t target;        // 接收方模块 id，0 = Host
     uint64_t correlation;   // 请求 / 应答配对
-    uint64_t subject;       // 句柄、服务 id、回调 id、事件类型 id
+    uint64_t subject;       // 句柄、服务 id、回调 id、KEEL_SUBJECT_START
     uint32_t payload_size;
-    uint32_t reserved;
+    int32_t  status;        // KeelStatus；COMPLETE 用来回传结果
+    void *payload;          // 发送方分配的载荷，可为 NULL
+    KeelEventRelease release; // 发送方二进制的纯 C 归还函数，可为 NULL
+    void *release_user;
 } KeelEvent;
 ```
 
+- 事件**自包含**：载荷地址、长度、归还函数都在结构体里。队列只做结构体拷贝，
+  不接管载荷所有权；接收方复制完载荷后调用 `release(release_user, &event)`。
 - 载荷是独立缓冲区，二进制格式（Protobuf / CBOR / 自定义定长结构），**不用 JSON**。
-- 载荷归属：**发送方分配，接收方复制后调用发送方给的 `KeelEventRelease`**。
-  归还函数必须是纯 C（通常就是发送方 C shim 里的 `keel_event_release_default`），
+- 归还函数必须是纯 C（通常就是发送方 C shim 里的 `keel_event_release_default`），
   不能用 Kotlin 的 `ByteArray` 或另一个 CRT 的 `free`。
 - 背压：队列有界。控制类事件（命令 / 取消 / 关闭）阻塞等待或返回 `KEEL_ERR_FULL`；
   总线类事件满了丢最新并计数，不能阻塞发送方 Worker。
 
-### 4.3 Worker 循环（插件侧）
+### 4.3 启动握手
+
+插件启动不是 `bootstrap` 的同步副作用，而是一次事件往返：
+
+```
+Host:   push COMMAND { subject = KEEL_SUBJECT_START, correlation = N }
+泵线程:  pop → worker_main(&api, &handlers)  ← 该线程第一次进入 Kotlin
+        → handlers.on_event 由 Kotlin 回填
+        → push COMPLETE { correlation = N, status = 启动结果 }  到 Host inbox
+Host:   status == OK 才标记启用；否则记失败、关闭该插件队列
+```
+
+启动失败的原因（manifest 非法、Kotlin 初始化异常等）一律折进 `status`，
+错误细节走载荷（UTF-8 消息），Host 不需要区分「bootstrap 失败」与「启动失败」。
+
+### 4.4 事件泵循环（插件侧，C 实现）
 
 ```
 loop:
-  status = keel_queue_pop(inbox, &event, timeout, &release, &user)
-  if status == TIMEOUT: 跑本地定时器；continue
-  if kind == SHUTDOWN: 释放句柄、退出
-  dispatch(event)              # 在插件运行时里查表 / 构造 Kotlin 对象
-  release(user, &event)        # 复制完载荷后归还
+  status = keel_queue_pop(inbox, &event, timeout)
+  if status == TIMEOUT: continue                    # 泵线程是 C，不做定时任务
+  if status == CLOSED:  break
+  if kind == SHUTDOWN:  on_event(&event); break      # Kotlin 释放句柄
+  dispatch(event)                                    # START → worker_main；其余 → on_event
+  release(user, &event)                              # 复制完载荷后归还
 ```
 
-Host 侧对称：Host 也有 inbox 与 Worker，负责处理插件发来的请求 / 完成 / 取消。
+Host 侧对称：Host 也有 inbox 与自己的 Worker，负责处理插件发来的请求 / 完成 / 取消。
 Ktor 协程不直接处理队列事件，只做「投递 + 挂起等待本地完成」。
 
 ---
@@ -402,11 +435,17 @@ queue.start()
 
 ### DEMO（可行性）
 
-1. C shim：队列（有界、mutex/cond）、`keel_event_release_default`、句柄表 skeleton。
-2. `keel_plugin_bootstrap`：创建 Worker 线程，线程内首次进入 Kotlin。
-3. `hello` 插件改成 Worker 模型：bootstrap → 读 `plugin.json` → 构造 Plugin → 收事件。
-4. Host：加载 dylib、取 bootstrap、投递 `COMMAND`、收 `COMPLETE`。
-5. 验收：Host 线程从未进入插件运行时；插件线程从未进入 Host 运行时；队列在 10 分钟内稳定。
+1. 顶层 `keel-abi`：C 源码 + 每目标静态库（`libkeel_abi.a`）。
+   先做队列（定长环形缓冲、mutex/cond、超时）与 `keel_event_release_default`，
+   用纯 C 的收发测试程序验证，不接 Kotlin。
+2. `keel_plugin_bootstrap` / `keel_plugin_shutdown`：只建 inbox、起事件泵线程、join，
+   全程不触碰 Kotlin。
+3. `hello` 插件改成 Worker 模型：导出 `plugin.json.entry`，收到 `START` 时构造 Plugin、
+   回填 `on_event`，随后收事件。
+4. Host：加载 dylib、解析 entry、`bootstrap`、投递 `START`、等 `COMPLETE`；
+   失败只记日志，不影响其它插件。
+5. 验收：`bootstrap` 返回时插件 Kotlin 尚未运行；`worker_main` 只在泵线程执行；
+   Host 线程从未进入插件运行时；队列在 10 分钟内稳定。
 
 ### P0
 
