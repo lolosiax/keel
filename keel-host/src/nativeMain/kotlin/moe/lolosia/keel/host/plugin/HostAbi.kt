@@ -23,7 +23,9 @@ internal fun unregisterPluginInbox(pluginId: ULong) {
 internal fun pluginInbox(pluginId: ULong): CPointer<KeelQueue>? = pluginInboxes[pluginId]
 
 /**
- * 向已登记的插件投递一条无载荷事件。
+ * 向已登记的插件投递一条事件。
+ *
+ * 载荷由 Host 自己的 CRT 分配并挂上默认 release；队列拒收时在这里归还。
  *
  * @return false 表示目标不在线，或队列已满 / 已关闭
  */
@@ -33,9 +35,17 @@ internal fun pushToPlugin(
     subject: ULong,
     correlation: ULong,
     status: Int = KEEL_OK.toInt(),
+    payload: ByteArray? = null,
 ): Boolean {
     val inbox = pluginInbox(pluginId) ?: return false
-    return memScoped {
+
+    val bytes = payload?.takeIf { it.isNotEmpty() }
+    val buffer = bytes?.let { data -> keel_payload_alloc(data.size.toUInt()) ?: return false }
+    if (buffer != null) {
+        bytes.usePinned { keel_payload_copy(buffer, it.addressOf(0), bytes.size.toUInt()) }
+    }
+
+    val pushed = memScoped {
         val event = alloc<KeelEvent>()
         event.size = sizeOf<KeelEvent>().toUInt()
         event.kind = kind.toUShort()
@@ -44,8 +54,23 @@ internal fun pushToPlugin(
         event.correlation = correlation
         event.subject = subject
         event.status = status
+        event.payload = buffer
+        event.payload_size = (bytes?.size ?: 0).toUInt()
+        if (buffer != null) {
+            keel_event_set_default_release(event.ptr)
+        }
         keel_queue_push(inbox, event.ptr, 0u) == KEEL_OK
     }
+
+    if (!pushed && buffer != null) {
+        memScoped {
+            val event = alloc<KeelEvent>()
+            event.payload = buffer
+            event.payload_size = bytes.size.toUInt()
+            keel_event_release_default(null, event.ptr)
+        }
+    }
+    return pushed
 }
 
 /**

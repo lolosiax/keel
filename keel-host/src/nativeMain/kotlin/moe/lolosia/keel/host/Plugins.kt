@@ -101,7 +101,7 @@ internal actual fun loadPluginsFromCli(
 
     // 有 HTTP 但没有显式 serve 选项时常驻，否则服务一启动就退出
     val effectiveServe = serveMillis ?: if (httpPort != null) 0L else null
-    httpPort?.let { HostHttp.start(it) }
+    httpPort?.let { HostHttp.start(it, runtimes.firstOrNull()?.pluginId) }
 
     if (effectiveServe != null) {
         val label = if (effectiveServe == 0L) "直到进程结束" else "${effectiveServe}ms"
