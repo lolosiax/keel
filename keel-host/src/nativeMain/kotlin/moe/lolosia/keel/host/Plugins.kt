@@ -16,13 +16,18 @@ import moe.lolosia.keel.host.plugin.currentTargetName
 import moe.lolosia.keel.host.plugin.startPlugin
 
 /**
- * `--plugins <dir> [cacheDir] [--serve | --serve-ms=<n>]`：扫描目录、校验 `.keel`、
- * 解出动态库并启动插件。
+ * `--plugins <dir> [cacheDir] [--http=<port>] [--serve | --serve-ms=<n>]`：
+ * 扫描目录、校验 `.keel`、解出动态库并启动插件。
  *
- * 启动成功后每个插件都在自己的 Worker 线程上跑；带 `--serve` 时主线程进入事件循环，
- * 结束时逐个投 SHUTDOWN。
+ * 启动成功后每个插件都在自己的 Worker 线程上跑；`--http` 启动 Host 的 Ktor 引擎，
+ * 带 serve 选项时主线程进入事件循环，结束时先停 HTTP 再逐个投 SHUTDOWN。
  */
-internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?, serveMillis: Long?) {
+internal actual fun loadPluginsFromCli(
+    pluginsDir: String,
+    cacheDir: String?,
+    serveMillis: Long?,
+    httpPort: Int?,
+) {
     val dir = pluginsDir.trimEnd('/', '\\')
     val cache = cacheDir?.trimEnd('/', '\\') ?: "$dir/.cache"
     val host = HostClasspath(EmptyClasspath)
@@ -94,16 +99,22 @@ internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?, se
         Log.info("failed: 0", tag = "Loader")
     }
 
-    if (serveMillis != null) {
-        val label = if (serveMillis == 0L) "直到进程结束" else "${serveMillis}ms"
+    // 有 HTTP 但没有显式 serve 选项时常驻，否则服务一启动就退出
+    val effectiveServe = serveMillis ?: if (httpPort != null) 0L else null
+    httpPort?.let { HostHttp.start(it) }
+
+    if (effectiveServe != null) {
+        val label = if (effectiveServe == 0L) "直到进程结束" else "${effectiveServe}ms"
         Log.info("serving ($label)", tag = "Host")
         val deadline =
-            if (serveMillis == 0L) null else TimeSource.Monotonic.markNow() + serveMillis.milliseconds
+            if (effectiveServe == 0L) null else TimeSource.Monotonic.markNow() + effectiveServe.milliseconds
         while (deadline == null || !deadline.hasPassedNow()) {
             HostPump.serve()
         }
         Log.info("serve finished", tag = "Host")
     }
+
+    HostHttp.stop()
 
     if (runtimes.isNotEmpty()) {
         Log.info("shutdown")

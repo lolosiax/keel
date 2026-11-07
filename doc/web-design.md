@@ -177,6 +177,10 @@ Host → 插件：HTTP_STREAM_CANCEL{ correlation }                // 客户端�
 ## 7. 并发与 Worker
 
 - 插件运行时可以有多个 Worker 线程；每个线程只属于该插件运行时。
+- Host 的 Ktor handler 与事件泵是**两个执行者**，不需要合并：handler 用
+  `suspendCancellableCoroutine` 把请求投给插件 inbox 并挂起，泵线程处理完
+  `HTTP_RESPONSE` 后按 correlation resume。`ApplicationCall` / `Continuation`
+  只留在 Host 运行时，绝不跨 ABI；跨边界只有快照与 correlation。
 - **DEMO**：1 个 Worker + 协程多路复用，I/O 型请求可并发；CPU 密集 handler 会串行。
 - **P0**：按插件配置 `workers = N` 启动 Worker 池：
   - 每个 Worker 一个 inbox，Host 按负载分发新请求；
@@ -227,6 +231,7 @@ Host → 插件：HTTP_STREAM_CANCEL{ correlation }                // 客户端�
 ### DEMO
 
 - Host：Ktor CIO + 同一端口 + catch-all + 路由表 + `HTTP_REQUEST/RESPONSE`；
+  （Ktor 引擎与 `/healthz` 已在 mingwX64 验证，catch-all 与事件桥接待做）
 - 插件：`@Controller` + `@GET` + `@Path` / `@Query`，返回 `@Serializable` DTO；
 - 无中间件移植（先装最小 Auth / Envelope）；
 - 单 Worker，body 内存上限。

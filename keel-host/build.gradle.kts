@@ -43,6 +43,9 @@ kotlin {
             // 独立构建时从 Maven 取；在根 composite 下由本地构建替换
             api("moe.lolosia.keel:keel-api:${libs.versions.keel.get()}")
             api("moe.lolosia.keel:keel-classpath-full:${libs.versions.keel.get()}")
+            // Host 独占 HTTP 引擎；插件不依赖 Ktor
+            implementation(libs.ktor.server.core)
+            implementation(libs.ktor.server.cio)
         }
     }
 }
