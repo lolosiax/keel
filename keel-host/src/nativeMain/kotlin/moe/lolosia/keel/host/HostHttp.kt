@@ -17,10 +17,14 @@ import moe.lolosia.keel.abi.c.KEEL_OK
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_HTTP
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.error.KeelErrorPayload
+import moe.lolosia.keel.api.error.KeelRemoteException
 import moe.lolosia.keel.api.web.HttpRequest
 import moe.lolosia.keel.api.web.HttpRouteRequest
 import moe.lolosia.keel.api.web.HttpRouteResponse
+import moe.lolosia.keel.host.plugin.HostEvent
 import moe.lolosia.keel.host.plugin.HostPump
+import moe.lolosia.keel.host.plugin.PluginNames
 import moe.lolosia.keel.host.route.HostRoutes
 
 /**
@@ -100,8 +104,12 @@ internal object HostHttp {
                 try {
                     proceed()
                 } catch (e: Throwable) {
-                    // 对应 ErrorWebFilter：记下响应片段，异常本身交给引擎（Ktor 会经 KtorLogBridge 落 error）
-                    call.attributes.put(ResponseSnippetKey, snippet("${e::class.simpleName}: ${e.message}".encodeToByteArray()))
+                    // 对应 ErrorWebFilter：先记完整错误链，再把异常交回引擎
+                    Log.error("$method $path 处理失败", cause = e, tag = "HTTP OUT")
+                    call.attributes.put(
+                        ResponseSnippetKey,
+                        snippet(e.toString().substringBefore('\n').encodeToByteArray()),
+                    )
                     throw e
                 } finally {
                     val status = call.response.status()?.value ?: 500
@@ -149,6 +157,20 @@ internal object HostHttp {
         engine = null
     }
 
+    /** 把插件的错误信封重建成 [KeelRemoteException]；载荷缺失时给出状态码说明。 */
+    private fun remoteError(pluginId: ULong, reply: HostEvent): KeelRemoteException {
+        val payload = reply.payload?.let {
+            runCatching { Json.decodeFromString<KeelErrorPayload>(it.decodeToString()) }.getOrNull()
+        }
+        return KeelRemoteException(
+            plugin = PluginNames.of(pluginId),
+            remoteType = payload?.type ?: "PluginFailure",
+            remoteMessage = payload?.message ?: "插件返回 status=${reply.status}",
+            remoteTrace = payload?.trace.orEmpty(),
+            truncated = payload?.truncated ?: false,
+        )
+    }
+
     private suspend fun dispatch(call: ApplicationCall) {
         val path = call.request.path()
         val method = call.request.httpMethod.value
@@ -172,6 +194,10 @@ internal object HostHttp {
         ).encodeToByteArray()
 
         val reply = HostPump.request(match.pluginId, KEEL_SUBJECT_HTTP.toULong(), payload, 30_000)
+        if (reply != null && reply.status != KEEL_OK.toInt()) {
+            // 插件把异常编码成信封回投；在这里重建成可读的远端异常再抛给引擎
+            throw remoteError(match.pluginId, reply)
+        }
         val response = reply?.payload?.let {
             try {
                 Json.decodeFromString<HttpRouteResponse>(it.decodeToString())

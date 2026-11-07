@@ -4,7 +4,6 @@ import kotlinx.cinterop.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
-import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -41,6 +40,12 @@ internal object PluginRoutes : Routes {
         send(inbox, KEEL_SUBJECT_ROUTE_REGISTER, json.encodeToByteArray())
     }
 
+    /**
+     * 按 routeId 执行 handler。
+     *
+     * 异常不在这里吞掉：原样抛给 [PluginWorker] 的分发边界，由它编码成错误信封回投 Host，
+     * 这样 Host 才能重建完整的 `caused by` 链。
+     */
     fun dispatch(
         routeId: String,
         request: HttpRequest,
@@ -48,12 +53,7 @@ internal object PluginRoutes : Routes {
     ): HttpResponse {
         val entry = entries.firstOrNull { it.descriptor.routeId == routeId }
             ?: return HttpResponse(status = 404, body = ResponseBody.Text("route not found: $routeId"))
-        return try {
-            entry.handler(request, pathParameters)
-        } catch (e: Throwable) {
-            Log.error("路由 $routeId 执行失败", cause = e)
-            HttpResponse(status = 500, body = ResponseBody.Text(e.message ?: "handler failed"))
-        }
+        return entry.handler(request, pathParameters)
     }
 
     /** 把插件响应压成跨 ABI 的一次性响应。 */

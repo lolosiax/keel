@@ -39,6 +39,13 @@ class HelloPlugin : Plugin {
             Log.warn("/crash: 即将触发随机内存故障")
             crashRandomly()
         }
+        // 错误传递自检：抛一个带 cause 的异常，验证跨运行时的错误栈与 caused by
+        context.routes.register(RouteDescriptor("GET", "/boom", "hello#boom")) { _, _ ->
+            throw IllegalStateException(
+                "boom from plugin",
+                IllegalArgumentException("inner cause from plugin"),
+            )
+        }
         Log.info("loaded ${context.metadata.id}")
     }
 

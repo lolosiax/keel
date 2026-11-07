@@ -6,6 +6,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
+import moe.lolosia.keel.api.error.*
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -86,6 +87,16 @@ private val warnedKinds = mutableSetOf<Int>()
  */
 private fun dispatch(event: CPointer<KeelEvent>?) {
     val e = event?.pointed ?: return
+    try {
+        dispatchEvent(e)
+    } catch (t: Throwable) {
+        // 异常绝不能让 staticCFunction 抛回 C 侧，否则整个进程 terminate
+        Log.error("事件处理失败（kind=${e.kind}）", cause = t)
+        if (e.kind == KEEL_EVENT_COMMAND.toUShort()) replyError(e, t)
+    }
+}
+
+private fun dispatchEvent(e: KeelEvent) {
     val kind = e.kind.toInt()
     when (kind) {
         KEEL_EVENT_SHUTDOWN.toInt() -> PluginWorker.disable()
@@ -99,6 +110,16 @@ private fun dispatch(event: CPointer<KeelEvent>?) {
 
         else -> warnOnce(kind)
     }
+}
+
+/** 把错误编码成信封回给 Host；Host 侧据此重建 `KeelRemoteException`。 */
+private fun replyError(request: KeelEvent, error: Throwable) {
+    val payload = error.toKeelError(plugin = PluginWorker.pluginId.toString())
+    replyCompleteWithPayload(
+        request,
+        Json.encodeToString(payload).encodeToByteArray(),
+        KEEL_ERR_FAILED.toInt(),
+    )
 }
 
 private fun warnOnce(kind: Int) {
@@ -150,7 +171,11 @@ private fun handleHttp(event: KeelEvent) {
 }
 
 /** 回一条带载荷的 COMPLETE；载荷用本二进制的 CRT 分配。 */
-private fun replyCompleteWithPayload(request: KeelEvent, payload: ByteArray) {
+private fun replyCompleteWithPayload(
+    request: KeelEvent,
+    payload: ByteArray,
+    status: Int = KEEL_OK.toInt(),
+) {
     val inbox = PluginWorker.hostInbox ?: return
     val buffer = keel_payload_alloc(payload.size.toUInt()) ?: return
     payload.usePinned { keel_payload_copy(buffer, it.addressOf(0), payload.size.toUInt()) }
@@ -163,7 +188,7 @@ private fun replyCompleteWithPayload(request: KeelEvent, payload: ByteArray) {
         out.target = 0uL
         out.correlation = request.correlation
         out.subject = request.subject
-        out.status = KEEL_OK.toInt()
+        out.status = status
         out.payload = buffer
         out.payload_size = payload.size.toUInt()
         keel_event_set_default_release(out.ptr)
