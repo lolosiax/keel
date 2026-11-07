@@ -1,16 +1,13 @@
 package moe.lolosia.keel.classpath.full
 
-import moe.lolosia.keel.classpath.Classpath
-import moe.lolosia.keel.classpath.FileZipClasspath
-import kotlin.concurrent.Volatile
+import moe.lolosia.keel.classpath.*
+import kotlin.concurrent.*
 
 /**
  * Host 侧注册表实现。
  *
- * 当前实现把 `.keel` 整包读进内存（[FileZipClasspath] 的现状）；
- * 后续换成文件型随机读后，这里不需要改。
- *
  * 注册/卸载假定由 Host 的插件加载线程单线程调用；读取侧只读快照。
+ * `.keel` 的读取由 [FileZipClasspath] 按文件随机读，不整包载入。
  */
 class DefaultClasspathRegistry(
     override val host: Classpath,

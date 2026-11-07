@@ -1,10 +1,10 @@
 package moe.lolosia.keel.api
 
-import moe.lolosia.keel.api.config.Config
-import moe.lolosia.keel.api.event.EventBus
-import moe.lolosia.keel.api.messaging.Messenger
-import moe.lolosia.keel.api.service.ServiceRegistry
-import moe.lolosia.keel.classpath.Classpath
+import moe.lolosia.keel.api.config.*
+import moe.lolosia.keel.api.event.*
+import moe.lolosia.keel.api.messaging.*
+import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.classpath.*
 
 /**
  * 插件可见的宿主服务面。
@@ -18,7 +18,7 @@ interface KeelServer {
      * **主线配置**（`application.yaml`）。
      *
      * 与插件自己的 `ctx.config` 是同一个 [Config] 接口；区别只在底层：
-     * 插件访问主线配置时，读和写都委托给 Host（见 doc/config-design.md §3.1）。
+     * 插件访问主线配置时，读和写都委托给 Host。
      */
     val config: Config
 

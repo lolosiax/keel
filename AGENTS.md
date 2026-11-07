@@ -35,7 +35,7 @@
 | `keel-abi-gradle-plugin/` | `keel-abi-gradle-plugin` | ABI 注入插件 `moe.lolosia.keel.abi`（解出静态库并挂 linkerOpts） | 是 |
 | `keel-abi/` | `keel-abi` | 跨运行时 ABI 的 C 实现与每目标静态库（`nativeCpp/keel_abi.h` 是唯一布局来源） | 是 |
 | `keel-classpath/` | `keel-classpath` | 独立资源 Classpath 库（zip / 目录 / 前缀视图），不依赖 keel-api | 是 |
-| `keel-classpath-full/` | `keel-classpath-full` | Host 注册表、`ClasspathRef`、租约、跨模块代理 | 是 |
+| `keel-classpath-full/` | `keel-classpath-full` | Host 注册表、`ClasspathRef`、generation 失效、跨模块代理 | 是 |
 | `keel-api/` | `keel-api` | 插件契约：生命周期、上下文、消息、调度（`moe.lolosia.keel.api`） | 是 |
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
 | `keel-launcher/` | `keel-launcher` | 单文件发行版入口，静态链接 Host 并内嵌插件 | 是（可执行文件） |
@@ -70,12 +70,21 @@ gradlew -p keel-plugin-hello linkReleaseSharedLibLinuxArm64
 gradlew -p keel-classpath-gradle-plugin publish
 gradlew -p keel-plugin-gradle-plugin publish
 gradlew -p keel-publish-gradle-plugin publish
+gradlew -p keel-abi-gradle-plugin publish
 gradlew -p keel-router-ksp publish
+gradlew -p keel-plugin-ksp publish
 ```
 
 - **改了公共 API 至少跑**：`gradlew -p keel-api build` + `gradlew -p keel-plugin-hello build`（消费方必须能编过）。
 - 单独构建 `keel-host` / `keel-launcher` / `keel-plugin-*` 时，`keel-api`（以及 `keel-host`）必须已发布到 Maven；否则用根聚合，或加 `--include-build ../keel-api`。
 - Kotlin/Native 首次编译会下载 konan 工具链；Windows 上链接前先确认没有旧的 `keel*.exe` 进程占用输出文件。
+- **KSP 生成约定**（`keel-router-ksp` / `keel-plugin-ksp` 都适用）：
+  - 汇总多个源文件的输出，`Dependencies` 必须写 `Dependencies(aggregating = true, *sourceFiles)`；
+    只写 `aggregating = true` 会漏扫未改动文件，症状是「编译通过但接口全 404」。
+  - 会创建文件的处理器不要在首轮 `deferred`：KSP 会重跑同一轮，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`。
+  - 处理器依赖必须赶在 `ksp<target>` 配置创建时挂上（用 `configurations.configureEach`）；
+    晚于 KSP 的 `afterEvaluate` 再加就只有空 classpath，症状是「KSP 跑完但什么都没生成」。
+- **当前没有自动化测试**（`commonTest` 未接入）；验证靠编译 + `keel-host --inspect` / `--plugins` 冒烟。
 
 ## 3. 版本、坐标与命名
 
@@ -89,10 +98,15 @@ gradlew -p keel-router-ksp publish
 | `keel-api` | 插件契约 |
 | `keel-host` | 主进程库（launcher 静态链接） |
 | `keel-launcher` | 单文件可执行产物 |
+| `keel-classpath` | 独立资源 Classpath 库 |
+| `keel-classpath-full` | Host 注册表 / `ClasspathRef` / 跨模块代理 |
+| `keel-abi` | C ABI 静态库 + 头文件工件 |
 | `keel-plugin-<id>` | 功能插件，`<id>` 与 `plugin.json` 的 `id` 一致 |
-| `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-router-ksp` | 构建期工具 |
+| `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` | 构建期 Gradle 插件 |
+| `keel-router-ksp` / `keel-plugin-ksp` | 构建期 KSP 处理器 |
 
-- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.router`。
+- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.abi`。
+- `keel-router-ksp` / `keel-plugin-ksp` 是 **KSP 处理器**，不是 Gradle 插件，没有插件 ID。
 
 ## 4. 代码风格
 
@@ -100,11 +114,23 @@ gradlew -p keel-router-ksp publish
 
 1. **不写 `public`**：Kotlin 默认即 public；只有 `internal` / `private` 显式标注。
 2. **import 用通配**：`import moe.lolosia.keel.api.*`，不逐条展开；同包不写 import。
-3. **注释只写正经 KDoc**：用途 / 参数 / 不变量 / 真实约束。不写「改动历史」「参照方案第几节」。
-4. **一个 `.kt` 只放一个顶层类型**；`private` 顶层声明（常量、单文件辅助函数）可随宿主文件放。
-5. **散装函数 / 常量放同包 `package.kt`**；扩展函数按「被扩展的库」分域。
-6. 不要把平台相关的 C interop 代码放 commonMain：`@CName`、`StableRef`、`CPointer` 一律进 `nativeMain` / 具体目标源集。
-7. 日志走 API 的 `PluginLogger`，不要在库里 `println`；Host 侧统一一个 `Log` 门面。
+3. **注释只写正经 KDoc**：用途 / 参数 / 不变量 / 真实约束。
+   - 不写「改动历史」「迁移自哪里」「参照方案第几节」这类叙述 —— 那是 git 的事。
+   - 注释里**不要出现 `/*`**：Kotlin 块注释可嵌套，`/db/*` 会把后面的代码吞掉并报 `Unclosed comment`。
+4. **一个 `.kt` 只放一个顶层类型**（class / object / interface / enum），嵌套类与内部类随宿主保留。
+   - 例外 1：`keel-api/src/commonMain/.../api/web/Annotations.kt`（注解集中一处）。
+   - 例外 2：KSP 处理器允许 `XxxProvider` + `private class XxxProcessor` 同文件。
+   - `private` 顶层声明不受此限：单行常量、只服务本文件的辅助函数，就近放使用处。
+5. **散装函数 / 常量放同包 `package.kt`**；工厂函数（如 `classpathFromZipFile`）也属于散装函数。
+6. **扩展函数的归属**：
+   - 扩展**外部库**类型 → 按库分域到 `util/<库名>`，域内按 `<接收者类型名>Ext.kt` 分文件；
+   - 扩展**自研**类型 → 与类型同域；
+   - 只服务单个文件的 `private` 扩展留在原文件。
+7. 不要把平台相关的 C interop 代码放 commonMain：`@CName`、`StableRef`、`CPointer` 一律进 `nativeMain` / 具体目标源集。
+8. **控制器专属 DTO 作为该 `object` 的内部类**；跨控制器共用才提成独立文件（或进 `dto/` 包）。
+9. **时间字段统一 `kotlin.time.Instant`**，不要用 `LocalDateTime`；只有日志展示本地时间。
+10. 日志走 API 的 `PluginLogger`，不要在库里 `println`；Host 侧统一一个 `Log` 门面。
+    - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
 
 ## 5. 插件 API 与跨运行时边界
 
@@ -136,12 +162,20 @@ gradlew -p keel-router-ksp publish
 ABI 头文件在 [`keel-abi/src/nativeCpp/keel_abi.h`](keel-abi/src/nativeCpp/keel_abi.h)，
 **改 ABI 先改文档与头文件，再改实现**。
 
+- **不透明结构体给 cinterop 一个占位完整定义**：`keel_abi.h` 里 `KeelQueueTag` 在 `KEEL_CINTEROP`
+  下是一个只有 `void *reserved` 的完整结构体（宏由 `keelabi.def` 的 `compilerOpts` 注入），
+  C 实现侧才看到真正的前向声明。这样 cinterop 把类型生成到 `moe.lolosia.keel.abi.c`，而不是
+  IDE 中间源集索引不到的 `cnames.structs`。Kotlin 侧只能持有该类型的指针，**不得解引用、分配、
+  按值传递或 `sizeof`**；真要操作内部布局时，移除这个分支并把真实布局放进头文件。
+
 ## 6. 插件工程约定
 
-- 每个插件是顶层 `keel-plugin-<id>/` 目录下的**独立 Gradle 构建**，内部固定分成 `api` / `impl` 两个子项目：
-  - `api`：`@ModuleService` 接口 + DTO + KSP 生成的客户端（消费方只依赖它）；
-  - `impl`：实现 + `@KeelPluginMain` + KSP 生成的分发器 / Worker 入口（产出 dylib）。
-  - 两个子项目的构建脚本由 `moe.lolosia.keel.plugin` 配置，**不要手改**；开发者只写接口和实现。
+- 每个插件是顶层 `keel-plugin-<id>/` 目录下的**独立 Gradle 构建**。
+  - **当前形态（单项目）**：`build.gradle.kts` 里 `plugins { id("moe.lolosia.keel.plugin") }`，
+    用 `keelPlugin { target("mingwX64") }` 选择打包目标；`plugin.json` 放在
+    `src/commonMain/resources/plugin.json`，由打包插件复制到 `.keel` 根部。
+  - **目标形态（P0）**：内部拆成 `api` / `impl` 两个子项目（`api` 放 `@ModuleService` 接口 + DTO +
+    生成的客户端，`impl` 放实现 + `@KeelPluginMain`）。当前**不要**按 `api` / `impl` 建目录。
   - Worker 入口不手写：`moe.lolosia.keel.plugin` 自动 apply KSP，并把 `keel-plugin-ksp`
     挂到每个 native 目标的 `ksp<target>` 配置上；`@KeelPluginMain` 类由处理器生成
     `keel_plugin_worker_main`，开发者只实现 `Plugin` 生命周期钩子。
@@ -151,16 +185,17 @@ ABI 头文件在 [`keel-abi/src/nativeCpp/keel_abi.h`](keel-abi/src/nativeCpp/ke
 
 ```
 keel-plugin-<id>/
-  settings.gradle.kts                  # 由 settings 插件 include(":api", ":impl")
-  build.gradle.kts                     # plugins { id("moe.lolosia.keel.plugin") } + keel { pluginId = "<id>" }
-  api/src/commonMain/kotlin/.../api/XxxApi.kt      # 接口 + DTO（@ModuleService）
-  impl/src/commonMain/kotlin/.../XxxPlugin.kt      # 实现（@ModuleServiceProvider）+ 入口（@KeelPluginMain）
+  settings.gradle.kts                          # 独立构建；按需 includeBuild 依赖的 Gradle 插件
+  build.gradle.kts                             # plugins { id("moe.lolosia.keel.plugin") } + keelPlugin { target(...) }
+  src/commonMain/kotlin/.../XxxPlugin.kt       # 实现（@KeelPluginMain）
+  src/commonMain/resources/plugin.json         # 部署清单（id / version / entry / lib / resources / requires）
 ```
 
-- **不要手写**代理、分发器、CBOR 编解码、服务注册、`plugin.json`、Maven 发布配置；
-  这些由 Gradle 插件 + KSP 生成，机制见 [doc/codegen-design.md](doc/codegen-design.md)。
-- 消费方模块只加一行 `keel { requires("<id>") }`，然后 `ctx.<id>.method(...)`；
-  同一模块内调用返回本地实现，跨模块返回生成的客户端。
+- **目标形态**：代理、分发器、CBOR 编解码、服务注册、`plugin.json`、Maven 发布配置由 Gradle 插件 + KSP 生成，
+  机制见 [doc/codegen-design.md](doc/codegen-design.md)。
+  **当前落地**：`plugin.json` 由开发者手写在 `src/commonMain/resources/`，KSP 只生成 Worker 入口；其余生成能力尚未实现。
+- **目标形态**：消费方模块只加一行 `keelPlugin { requires("<id>") }`，然后 `ctx.<id>.method(...)`；
+  同一模块内调用返回本地实现，跨模块返回生成的客户端。当前消费方仍需手写 `ServiceKey` / 代理。
 - 新增插件 = 在顶层新建 `keel-plugin-<id>/` + 在根 `settings.gradle.kts` 加一行 `includeBuild`；不要塞进某个聚合目录。
 
 - `plugin.json` 是部署单元的唯一清单；**不要**靠扫描类路径或反射找插件（Native 上没有反射）。
@@ -192,10 +227,10 @@ keel.username=<user>
 keel.password=<password>
 ```
 
-- 自建 Maven 通常是内网 HTTP 或自签 HTTPS，仓库配置需 `isAllowInsecureProtocol = true`（各 `keel-*-gradle-plugin` / `keel-router-ksp` 的 `build.gradle.kts` 与各构建的 `settings.gradle.kts` 已处理）。
+- 自建 Maven 通常是内网 HTTP 或自签 HTTPS，仓库配置需 `isAllowInsecureProtocol = true`（各 `keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` 的 `build.gradle.kts` 与各构建的 `settings.gradle.kts` 已处理）。
 - **凭据、内网地址、口令一律不入库**，包括本文档与 `doc/`；用占位符。
 - 构建期工具各自在自己的 `build.gradle.kts` 里配置发布仓库，没有统一入口；功能插件用 `moe.lolosia.keel.publish` 插件，不要在业务构建里手写 `publishing {}`。
-- 发布顺序：`keel-*-gradle-plugin` / `keel-router-ksp` → `keel-api` → `keel-host` → `keel-plugin-*` → `keel-launcher`。改了 `keel-api` 必须确认消费方重新编译。
+- 发布顺序：`keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` → `keel-abi` → `keel-classpath` → `keel-api` → `keel-classpath-full` → `keel-host` → `keel-plugin-*` → `keel-launcher`。改了 `keel-api` 必须确认消费方重新编译。
 
 ## 8. Monorepo 与 Sparse Checkout
 
@@ -229,5 +264,62 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 
 - 泰山派上自建 Maven 的**实际地址、端口、仓库路径与鉴权方式**（找到后写进本机 `local.properties`，并把 `doc/roadmap.md` 的占位符替换掉）。
 - capability provider（以 Lua 为示例）的可行性、默认分发形态（外部纯 C 库 vs 静态内嵌）与中间件沙箱边界，见 [doc/capability-design.md](doc/capability-design.md)。
-- 目标 Kotlin/Native 版本与三个平台的实际可编译性（DEMO 第一件事就是跑通）。
+- 目标 Kotlin/Native 版本已固定为 `gradle/libs.versions.toml` 的 `2.4.20`，三个目标的编译已跑通；
+  仍需在板子上做一次 `linuxArm64` 运行时验证（`dlopen` / `dlsym` / 事件泵）。
 - Launcher 在三个平台上能否**内存加载**插件动态库；不能时统一的回退目录与清理策略。
+
+## 11. 文件地图
+
+```
+keel-classpath/src/commonMain/kotlin/moe/lolosia/keel/classpath/
+  Classpath.kt                        只读资源接口（`of(pluginId)` 默认 fail-closed）
+  ClasspathResource.kt                流式资源句柄
+  ByteArrayClasspathResource.kt       默认流式句柄
+  PrefixedClasspath.kt                `.keel` 的 `resources/` 前缀视图
+  EmptyClasspath.kt / ClasspathNotFoundException.kt / ClasspathExt.kt / package.kt
+keel-classpath/src/nativeMain/…/classpath/
+  DiskClasspath.kt                    目录回退
+  ZipClasspath.kt                     内存映像 zip（嵌入模式）
+  ZipFileClasspath.kt                 文件型 zip：只读 EOCD / 中央目录 / 目标条目
+  FileZipClasspath.kt                 文件型 zip 门面
+  package.kt                          工厂函数（`classpathFromZipFile` / `classpathFromDirectory`）
+  ZipInflate.kt                       共享 raw deflate
+  EmbeddedClasspath.kt / EmbeddedClasspathImage.kt   读取内嵌 `classpath.zip`
+  RandomAccessFile.kt                 平台随机读（expect）
+keel-classpath/src/{linux,mingwX64}Main/…/classpath/  RandomAccessFile actual
+keel-classpath-full/src/commonMain/…/classpath/full/
+  ClasspathRef / ClasspathRegistry / CompositeClasspath / GuardedClasspath / RegistryClasspath
+  ClasspathTransport / RemoteClasspath / HostClasspathTransport / PluginClasspathEntry
+keel-classpath-full/src/nativeMain/…/classpath/full/DefaultClasspathRegistry.kt
+keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
+  Plugin / PluginContext / PluginMetadata / PluginRegistry / KeelServer / PluginLogger / Scheduler / TaskHandle
+  annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
+  auth/Authorizer.kt
+  callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
+  config/      Config / package.kt
+  event/       Event / EventBus / EventHandler / EventPriority / EventType / Subscription
+  messaging/   Message / Messenger
+  service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceUnavailableException
+  web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody / UserSnapshot
+keel-api/src/nativeMain/…/api/worker/PluginWorker.kt   `@CName` Worker 入口分发
+keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
+keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
+keel-host/src/commonMain/…/host/Log.kt                Host 日志门面
+keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 实现）
+keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
+keel-host/src/nativeMain/…/host/plugin/
+  PluginLoader / LoadedPlugin / PluginRuntime / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
+  NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / package.native.kt
+keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs / package actual
+keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
+keel-abi/src/nativeCpp/
+  keel_abi.h                          唯一 ABI 布局来源（不透明句柄 + KEEL_CINTEROP 占位分支）
+  keel_platform.h                     线程 / 同步原语（不导出、不进 Kotlin）
+  keel_queue.c / keel_event.c / keel_plugin.c
+keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（当前占位）
+keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口
+keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin
+  src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi）
+keel-plugin-hello/                     示例插件（单项目形态）
+doc/                                   设计与计划
+```

@@ -21,7 +21,7 @@ import org.gradle.api.publish.PublishingExtension
  * 地址与账号也可由 `keel.repo` / `keel.username` / `keel.password` 提供，
  * 建议放在 `local.properties`（已被 `.gitignore` 忽略）。
  *
- * DEMO 阶段只负责仓库注册；产物打包（按目标归档原生库与资源）在 P0 补齐。
+ * 只负责注册发布仓库；产物打包（按目标归档原生库与资源）不在本插件内。
  */
 class KeelPublishPlugin : Plugin<Project> {
 

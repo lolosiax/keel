@@ -11,7 +11,7 @@
 
 #include <stdlib.h>
 
-struct KeelQueue {
+struct KeelQueueTag {
     KeelEvent *slots;
     uint32_t capacity;
     uint32_t head;

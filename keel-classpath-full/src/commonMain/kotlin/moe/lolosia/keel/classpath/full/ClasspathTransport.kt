@@ -4,7 +4,7 @@ package moe.lolosia.keel.classpath.full
  * 跨运行时 Classpath 读取的传输层。
  *
  * Host 侧实现直接用注册表；插件侧实现走事件泵 / C ABI。
- * 先只定义一次性字节读取，流式与分块在后续扩展。
+ * 只提供一次性字节读取；流式与分块不在本接口内。
  */
 interface ClasspathTransport {
 

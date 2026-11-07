@@ -12,7 +12,7 @@ keelPlugin {
 }
 
 kotlin {
-    // 插件以动态库交付；launcher 发行版改为静态并入（见 doc/roadmap.md）
+    // 插件以动态库交付；launcher 发行版另行静态并入，不改变插件产物形态
     mingwX64 { binaries.sharedLib { baseName = "keel-plugin-hello" } }
     linuxArm64 { binaries.sharedLib { baseName = "keel-plugin-hello" } }
     linuxX64 { binaries.sharedLib { baseName = "keel-plugin-hello" } }

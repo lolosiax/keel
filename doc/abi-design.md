@@ -118,6 +118,12 @@ Host 线程                    C shim(host)          C shim(plugin dylib)
 `KeelEventRelease`、`KeelHostApi`、`KeelPluginApi`、`KeelPluginWorkerMain` / `KeelPluginHandlers`、
 队列函数、`keel_plugin_bootstrap`。
 
+- **不透明句柄给 cinterop 一份占位完整定义**：`KeelQueueTag` 在 `KEEL_CINTEROP`
+  （由 `keelabi.def` 的 `compilerOpts` 注入）下是一个只有 `void *reserved` 的完整结构体，
+  C 实现侧仍只看到前向声明。这样 cinterop 把类型生成到 `moe.lolosia.keel.abi.c`，而不是
+  IDE 中间源集索引不到的 `cnames.structs`。Kotlin 侧只能持有指针，**不得解引用、分配、
+  按值传递或 `sizeof`**；真要操作内部布局时，移除这个分支并把真实布局放进头文件。
+
 ---
 
 ## 4. 事件泵
@@ -479,4 +485,4 @@ queue.start()
 
 ---
 
-*本文与 `keel-api/src/nativeInterop/cinterop/keel_abi.h` 同步维护；改 ABI 先改此文档与头文件，再改实现。*
+*本文与 `keel-abi/src/nativeCpp/keel_abi.h` 同步维护；改 ABI 先改此文档与头文件，再改实现。*

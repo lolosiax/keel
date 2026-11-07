@@ -38,7 +38,7 @@ internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?) {
             println("    started: plugin_id=${runtime.pluginId}")
         } catch (e: Exception) {
             startFailures++
-            println("    start failed: ${e.message}")
+            Log.warn("    start failed: ${e.message}")
         }
     }
 

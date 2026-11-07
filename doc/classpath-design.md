@@ -22,16 +22,18 @@ keel-classpath                 独立 KMP 库，不依赖 keel-api
       ▲
 keel-api                       暴露 PluginContext.classpath 的类型
       ▲
-keel-classpath-full            Host 注册表 / 租约 / 跨模块代理
+keel-classpath-full            Host 注册表 / generation 失效 / 跨模块代理
       ▲
 keel-host
 
-keel-classpath-gradle-plugin   构建期打包 / 嵌入
+keel-classpath-gradle-plugin   普通产物的 classpath.zip 嵌入
+keel-plugin-gradle-plugin      .keel 打包
 ```
 
 - `keel-classpath`：`Classpath`、`ZipClasspath`、`FileZipClasspath`、`DiskClasspath`、`EmptyClasspath`、`PrefixedClasspath`、路径规范化、流式句柄。可在普通 Kotlin/Native 项目单独使用。
-- `keel-classpath-full`：注册表、`ClasspathRef`、generation / lease、Host 回落、跨插件代理、卸载取消；只有它知道 `.keel` 的真实路径。
-- `keel-classpath-gradle-plugin`：普通 exe/dll/so 的 `classpath.zip` 嵌入；插件 `.keel` 打包；自动给 `impl` 加 `keel-classpath-full`。
+- `keel-classpath-full`：注册表、`ClasspathRef`、generation 失效、Host 回落、跨插件代理、卸载取消；只有它知道 `.keel` 的真实路径。
+- `keel-classpath-gradle-plugin`：普通 exe/dll/so 的 `classpath.zip` 嵌入。
+- `keel-plugin-gradle-plugin`：插件 `.keel` 打包；自动给插件工程加 `keel-classpath-full`。
 
 ---
 
@@ -156,10 +158,12 @@ pluginId -> PluginClasspathEntry(
 
 | 文件 | 内容 |
 | --- | --- |
-| `Classpath.kt` | 接口 + `ClasspathResource` |
+| `Classpath.kt` | 接口（`open` / `list` / `exists` / `lastModified` / `of`） |
+| `ClasspathResource.kt` | 流式资源句柄 |
 | `ByteArrayClasspathResource.kt` | 默认流式句柄 |
 | `ZipClasspath.kt` | 内存映像 zip，STORED / DEFLATED |
 | `FileZipClasspath.kt` | 磁盘 zip；通过 `ZipFileClasspath` 只读中央目录与目标条目 |
+| `package.kt` | 路径规范化 + `classpathFromZipFile` / `classpathFromDirectory` |
 | `RandomAccessFile.kt` | 平台文件随机读（Linux / mingw 各一份 actual） |
 | `DiskClasspath.kt` | 目录回退 |
 | `PrefixedClasspath.kt` | `.keel` 的 `resources/` 前缀视图 |
@@ -207,7 +211,7 @@ pluginId -> PluginClasspathEntry(
 
 ### 7.2 插件模式
 
-已落地 `moe.lolosia.keel.plugin`（`keel-classpath-gradle-plugin/`）：
+已落地 `moe.lolosia.keel.plugin`（`keel-plugin-gradle-plugin/`）：
 
 - `keelPlugin { }` 扩展：`manifest` / `buildType` / `targets` / `resources` / `packageName`
   / `autoAddClasspathFull` / `keelVersion`；
@@ -239,7 +243,7 @@ resources/hello.txt
 | `FileStoreClasspath.kt` | `keel-classpath-full`（抽象 FileStore） |
 | `ClasspathHolder.kt` | `keel-classpath` 保留；`-full` 增加每模块安装 |
 | `EmbeddedClasspath.*` 平台实际 | 普通构建留给 `-full` / Gradle 生成代码；插件走 `.keel` |
-| `NativeClasspath.kt` / `ClasspathExtension.kt` | `keel-classpath-gradle-plugin` |
+| `NativeClasspath.kt` / `ClasspathExtension.kt` | `KeelClasspathPlugin.kt` / `KeelClasspathExtension.kt`（`keel-classpath-gradle-plugin`） |
 | `StaticClasspathConfig` / `ClasspathController` | 留在 Host Web 层 |
 
 ---

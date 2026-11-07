@@ -7,7 +7,7 @@ group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
 
 // ABI 头文件归 keel-abi 所有（契约与实现同属一个构建）；def 仍留在本构建。
-// TODO 暂停跨构建读取头文件：等 keel-abi 发布头文件产物后改成构建期解压。
+// 当前直接读兄弟目录的头文件；等 keel-abi 发布 include 产物后改为构建期解压。
 val abiIncludeDir = file("../keel-abi/src/nativeCpp")
 val abiDef = file("src/nativeInterop/cinterop/keelabi.def")
 

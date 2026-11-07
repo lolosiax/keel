@@ -1,9 +1,6 @@
 package moe.lolosia.keel.host.plugin
 
 import kotlin.experimental.ExperimentalNativeApi
-import kotlin.native.CpuArchitecture
-import kotlin.native.OsFamily
-import kotlin.native.Platform
 
 /**
  * 当前 Host 二进制的 K/N 目标名，用于在 `.keel` 的 `lib` 映射里选库。

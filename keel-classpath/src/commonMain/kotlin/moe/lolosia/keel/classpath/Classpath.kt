@@ -6,7 +6,7 @@ package moe.lolosia.keel.classpath
  * 这不是 JVM 的类加载器：Kotlin/Native 的代码在链接期就固定了，
  * 这里只负责模板、静态文件、默认配置等**资源**的读取。
  *
- * 路径约定与 backend 保持一致：
+ * 路径约定：
  * - 以 classpath 根为基准，如 `static/home/index.html`；
  * - 允许前导 `/`，允许 `\` 分隔；
  * - 不支持 `..` 上跳。
@@ -57,16 +57,4 @@ interface Classpath {
      */
     fun of(pluginId: String): Classpath =
         throw ClasspathNotFoundException(pluginId)
-}
-
-/** 流式资源句柄。 */
-interface ClasspathResource : AutoCloseable {
-
-    val path: String
-
-    /** 未压缩大小；未知时返回 -1。 */
-    val size: Long
-
-    /** 读入 [buffer]；返回读取字节数，结束返回 -1。 */
-    fun read(buffer: ByteArray, offset: Int = 0, length: Int = buffer.size): Int
 }

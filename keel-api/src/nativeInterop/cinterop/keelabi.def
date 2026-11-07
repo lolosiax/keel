@@ -1,2 +1,4 @@
 headers = keel_abi.h
 package = moe.lolosia.keel.abi.c
+# 让 cinterop 看到完整（占位）的 KeelQueueTag；C 实现侧仍然只看到不透明声明。
+compilerOpts = -DKEEL_CINTEROP

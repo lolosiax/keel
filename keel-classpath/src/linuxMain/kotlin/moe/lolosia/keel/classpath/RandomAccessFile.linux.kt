@@ -2,13 +2,7 @@ package moe.lolosia.keel.classpath
 
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
-import platform.posix.SEEK_END
-import platform.posix.SEEK_SET
-import platform.posix.fclose
-import platform.posix.fopen
-import platform.posix.fread
-import platform.posix.fseek
-import platform.posix.ftell
+import platform.posix.*
 
 internal actual class RandomAccessFile actual constructor(path: String) : AutoCloseable {
 

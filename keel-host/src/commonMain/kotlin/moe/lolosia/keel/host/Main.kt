@@ -17,9 +17,9 @@ internal expect fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?)
 internal expect fun embeddedResource(path: String): String?
 
 /**
- * Host 入口：装配插件加载器、消息总线与调度器，并把 Ktor 引擎拉起。
+ * Host 入口。
  *
- * 当前是骨架：只打印版本信息，加载器与引擎在 DEMO 阶段接入（见 doc/roadmap.md）。
+ * 目前只处理 `--inspect` / `--plugins`；其余参数打印版本与内嵌资源信息。
  */
 fun main(args: Array<String>) {
     when (args.firstOrNull()) {
@@ -42,6 +42,6 @@ fun main(args: Array<String>) {
         }
     }
 
-    println("keel host 0.1.0-SNAPSHOT (skeleton)")
-    println("embedded host.txt: ${embeddedResource("host.txt")}")
+    Log.info("keel host 0.1.0-SNAPSHOT")
+    Log.info("embedded host.txt: ${embeddedResource("host.txt")}")
 }

@@ -13,9 +13,10 @@
 
 1. 在 `api` 子项目里写一个 `@ModuleService` 接口（加 DTO）；
 2. 在 `impl` 子项目里写实现类 + 一个 `@KeelPluginMain` 类；
-3. 根 `build.gradle.kts` 里写一个 `keel { pluginId = "queue" }`。
+3. 根 `build.gradle.kts` 里写一个 `keelPlugin { pluginId = "queue" }`（`pluginId` 为目标形态；当前手写 `plugin.json`）。
 
-其余全部由 `moe.lolosia.keel.plugin` Gradle 插件 + `keel-ksp` 生成：
+其余**目标形态**由 `moe.lolosia.keel.plugin` Gradle 插件 + `keel-plugin-ksp` 生成
+（当前 `keel-plugin-ksp` 只生成 Worker 入口，其余尚未实现）：
 
 - `api` / `impl` 两个子项目的构建脚本、发布配置；
 - 服务 Key、客户端代理、`ctx.queue` 访问器；
@@ -32,12 +33,12 @@
 
 ## 2. 开发者视角
 
-### 2.1 目录（由 `keel init` 模板生成）
+### 2.1 目录（目标形态，由 `keel init` 模板生成；当前是单项目）
 
 ```
 keel-plugin-queue/
-├── settings.gradle.kts        # 引入 :api / :impl，由 settings 插件提供
-├── build.gradle.kts           # 只有 plugins + keel { pluginId = "queue" }
+├── settings.gradle.kts        # 引入 :api / :impl，由 settings 插件提供（尚未实现）
+├── build.gradle.kts           # 只有 plugins + keelPlugin { pluginId = "queue" }
 ├── api/
 │   ├── build.gradle.kts       # 生成/模板，不手改
 │   └── src/commonMain/kotlin/moe/lolosia/keel/plugins/queue/api/
@@ -117,8 +118,8 @@ class FooPlugin : Plugin {
 ## 3. 构建期流水线
 
 ```
-moe.lolosia.keel.settings   → settings 插件：include(":api", ":impl")
-moe.lolosia.keel.plugin     → 根插件：keel { } DSL，配置两个子项目
+（目标，尚未实现）moe.lolosia.keel.settings → settings 插件：include(":api", ":impl")
+moe.lolosia.keel.plugin                   → 根插件：keel { } DSL，配置两个子项目
         ├─ :api  → KMP 库 + KSP + 发布 keel-plugin-<id>-api
         └─ :impl → KMP sharedLib + KSP + 发布 keel-plugin-<id>
 ```
@@ -128,14 +129,14 @@ moe.lolosia.keel.plugin     → 根插件：keel { } DSL，配置两个子项目
 `moe.lolosia.keel.plugin`：
 
 1. 应用 `org.jetbrains.kotlin.multiplatform`、`kotlin.plugin.serialization`、KSP；
-2. 给 `:api` 加 `keel-api` + `keel-ksp` 依赖，配置 KMP 库与 `maven-publish`；
-3. 给 `:impl` 加 `:api` + `keel-api` + `keel-ksp`，配置 `sharedLib`；
+2. 给 `:api` 加 `keel-api` + `keel-plugin-ksp` 依赖，配置 KMP 库与 `maven-publish`；
+3. 给 `:impl` 加 `:api` + `keel-api` + `keel-plugin-ksp`，配置 `sharedLib`；
 4. 注册 `keelManifest`：把 `pluginId` / `version` / `requires` / `services` 写成
    `build/generated/keel/resources/plugin.json`，自动并入 `impl` 资源；
 5. 配置发布：`keel-plugin-<id>`（impl）与 `keel-plugin-<id>-api`（api）；
 6. 给消费方 `requires("queue")` 自动加 `implementation("moe.lolosia.keel.plugins:keel-plugin-queue-api:<版本>")`。
 
-`moe.lolosia.keel.settings`（只写一行）：
+`moe.lolosia.keel.settings`（目标形态，尚未实现；只写一行）：
 
 - 根据目录自动 `include(":api")` / `include(":impl")`；
 - 统一版本目录与仓库。
@@ -306,8 +307,10 @@ A Worker: CALLBACK_INVOKE { owner=A, id=7, payload } → 查表 → 调用用户
 
 ### DEMO
 
-- `moe.lolosia.keel.settings` / `moe.lolosia.keel.plugin` 最小版：目录约定 + KSP + plugin.json；
-- `keel-ksp`：单个 `@ModuleService`，值参数 / 返回值，生成 Key / Client / Accessor / Dispatcher / Worker 入口；
+- `moe.lolosia.keel.settings` / `moe.lolosia.keel.plugin` 最小版：目录约定 + KSP + plugin.json
+  （`moe.lolosia.keel.settings` 尚未实现；当前是单项目 + 手写 `plugin.json`）；
+- `keel-plugin-ksp`：单个 `@ModuleService`，值参数 / 返回值，生成 Key / Client / Accessor / Dispatcher / Worker 入口
+  （当前只生成 Worker 入口）；
 - 普通方法用阻塞重入泵；无回调；
 - 验收：A、B 各只写 2 个 Kotlin 文件 + 1 个 Gradle 块，调用跑通。
 
@@ -340,4 +343,4 @@ A Worker: CALLBACK_INVOKE { owner=A, id=7, payload } → 查表 → 调用用户
 
 ---
 
-*本文件描述目标形态；其中 `keel-ksp` 与 Gradle 插件按「实施阶段」逐项落地。*
+*本文件描述目标形态；其中 `keel-plugin-ksp` / `keel-router-ksp` 与 Gradle 插件按「实施阶段」逐项落地。*

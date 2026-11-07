@@ -1,10 +1,10 @@
 package moe.lolosia.keel.api
 
-import kotlinx.coroutines.CoroutineScope
-import moe.lolosia.keel.api.callback.CallbackRegistry
-import moe.lolosia.keel.api.config.Config
-import moe.lolosia.keel.api.service.ModuleDirectory
-import moe.lolosia.keel.classpath.Classpath
+import kotlinx.coroutines.*
+import moe.lolosia.keel.api.callback.*
+import moe.lolosia.keel.api.config.*
+import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.classpath.*
 
 /**
  * 宿主注入给插件的运行时上下文。
@@ -23,7 +23,7 @@ interface PluginContext {
 
     /**
      * 跨模块入口。`ctx.modules.require(QueueApiKey)` 拿到的是本地代理，
-     * 方法调用经事件泵转发（见 doc/abi-design.md §6）。
+     * 方法调用经事件泵转发，不跨运行时传递 Kotlin 对象或 continuation。
      */
     val modules: ModuleDirectory
 

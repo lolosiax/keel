@@ -2,7 +2,6 @@ package moe.lolosia.keel.classpath
 
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.COpaquePointer
-import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.reinterpret
 

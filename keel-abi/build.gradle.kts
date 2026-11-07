@@ -1,4 +1,4 @@
-import java.util.Properties
+import java.util.*
 
 /**
  * 跨运行时 ABI 的唯一实现：C 源码 + 每目标静态库。

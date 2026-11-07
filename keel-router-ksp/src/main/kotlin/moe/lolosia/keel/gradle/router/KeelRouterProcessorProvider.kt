@@ -9,10 +9,8 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 /**
  * Web 路由生成器的 KSP 入口。
  *
- * 目标形态：扫描插件里的控制器注解，生成路由注册表（无反射），
- * 与 `lolosia-backend` 的 `RouterProcessor` 同源。
- *
- * 当前为占位实现：不产生任何文件，仅验证处理器能被 KSP 加载。
+ * 扫描插件里的控制器注解，生成路由注册表（无反射）。
+ * 当前只验证处理器能被 KSP 加载，不产生文件；生成逻辑待实现。
  */
 class KeelRouterProcessorProvider : SymbolProcessorProvider {
 

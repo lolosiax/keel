@@ -56,7 +56,24 @@ typedef enum KeelEventKind {
  */
 #define KEEL_SUBJECT_START 1u
 
-typedef struct KeelQueue KeelQueue;
+/*
+ * 不透明队列句柄。
+ *
+ * C 实现侧只看到前向声明，真正的布局在 keel_queue.c 里。
+ *
+ * cinterop 侧给一个完整的占位定义：cinterop 只会把完整结构体生成到配置的包
+ * （`moe.lolosia.keel.abi.c`），不完整声明会被放进合成包 `cnames.structs`，
+ * 而合成包在 IDE 的中间源集分析里不可见。
+ *
+ * 占位字段与实际布局无关：Kotlin 侧只持有指针，不得解引用、分配、按值传递或读写该类型。
+ */
+#ifdef KEEL_CINTEROP
+typedef struct KeelQueueTag {
+    void *reserved;
+} KeelQueue;
+#else
+typedef struct KeelQueueTag KeelQueue;
+#endif
 
 /* 不透明句柄：C 层引用计数表的槽位地址，任何语言都不得解引用。 */
 typedef void *KeelHandle;

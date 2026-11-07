@@ -41,11 +41,12 @@
         └────────────── 依赖 keel-api（构建期 Maven 坐标）──────────────┘
 
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin
-keel-router-ksp（构建期，不在运行时图里）
+keel-router-ksp / keel-plugin-ksp（构建期，不在运行时图里）
   ├─ moe.lolosia.keel.publish    按目标打包并发布插件到自建 Maven
   ├─ moe.lolosia.keel.classpath  resources → classpath.zip → 嵌入可执行文件
   ├─ moe.lolosia.keel.plugin     插件资源 → .keel 包
-  └─ keel-router-ksp             控制器注解 → 路由注册表（无反射）
+  ├─ keel-router-ksp             控制器注解 → 路由注册表（无反射）
+  └─ keel-plugin-ksp             @KeelPluginMain → Worker 入口
 ```
 
 **仓库即架构**：`keel-api` / `keel-host` / `keel-launcher` / `keel-plugin-*` 是顶层独立 Gradle 构建，
@@ -62,7 +63,7 @@ keel-router-ksp（构建期，不在运行时图里）
 1. **Gradle 工具链**
    - `moe.lolosia.keel.publish`：把插件工程的原生库（按 `mingwX64` / `linuxArm64` / `linuxX64`）与 `plugin.json` 打成工件，发布到自建 Maven。
    - `moe.lolosia.keel.classpath`：把 `src/commonMain/resources` 打成 `classpath.zip`（先不做嵌入）。
-   - `moe.lolosia.keel.plugin` + `keel-ksp`：从 `@ModuleService` 接口生成客户端 / 分发器 / 访问器
+   - `moe.lolosia.keel.plugin` + `keel-plugin-ksp`：从 `@ModuleService` 接口生成客户端 / 分发器 / 访问器
      （见 [codegen-design.md](codegen-design.md)）；DEMO 先支持单个服务、值参数 / 返回值。
    - `keel-router-ksp`：生成 `@Controller` 路由表（DEMO 先支持 GET + `@Path` / `@Query` + DTO 返回）。
 2. **插件加载器（Host）**

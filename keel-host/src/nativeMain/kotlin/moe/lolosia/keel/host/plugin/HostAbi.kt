@@ -1,20 +1,7 @@
 package moe.lolosia.keel.host.plugin
 
-import cnames.structs.KeelQueue
-import kotlinx.cinterop.CPointer
-import kotlinx.cinterop.alloc
-import kotlinx.cinterop.invoke
-import kotlinx.cinterop.memScoped
-import kotlinx.cinterop.nativeHeap
-import kotlinx.cinterop.ptr
-import kotlinx.cinterop.sizeOf
-import kotlinx.cinterop.staticCFunction
-import moe.lolosia.keel.abi.c.KEEL_ABI_VERSION
-import moe.lolosia.keel.abi.c.KEEL_OK
-import moe.lolosia.keel.abi.c.KeelEvent
-import moe.lolosia.keel.abi.c.KeelHostApi
-import moe.lolosia.keel.abi.c.keel_queue_create
-import moe.lolosia.keel.abi.c.keel_queue_pop
+import kotlinx.cinterop.*
+import moe.lolosia.keel.abi.c.*
 
 /** 与插件 inbox 同量级：覆盖启动、关闭与少量回投事件。 */
 private const val HOST_INBOX_CAPACITY = 256u
@@ -28,14 +15,14 @@ private fun hostInboxRef(): CPointer<KeelQueue>? = hostInbox
  * Host 侧 ABI 端点：一份 `KeelHostApi` + 一个进程内收件箱。
  *
  * 每个二进制各带一份 `keel_queue_*` 实现，但队列结构布局一致，插件可以往这个
- * 队列里 push（见 doc/abi-design.md）。
+ * 队列里 push；队列只按值搬运 `KeelEvent`，不接管载荷所有权。
  */
 internal val hostAbi: CPointer<KeelHostApi> = nativeHeap.alloc<KeelHostApi>().also { api ->
     api.abi_version = KEEL_ABI_VERSION
     api.struct_size = sizeOf<KeelHostApi>().toUInt()
     api.host_id = 0uL
     api.host_inbox = staticCFunction(::hostInboxRef)
-    // 句柄表还没落地：插件暂时不能申请跨运行时句柄
+    // 句柄表未接入：handle_* 恒为 null，插件不能申请跨运行时句柄
     api.handle_new = null
     api.handle_retain = null
     api.handle_release = null

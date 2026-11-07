@@ -1,10 +1,6 @@
 package moe.lolosia.keel.host.plugin
 
-import platform.posix.SEEK_END
-import platform.posix.fclose
-import platform.posix.fopen
-import platform.posix.fseek
-import platform.posix.ftell
+import platform.posix.*
 
 internal actual fun fileSizeOrNull(path: String): Long? {
     val file = fopen(path, "rb") ?: return null
