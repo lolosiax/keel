@@ -75,6 +75,12 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_PING 2u
 
 /*
+ * 定时唤醒：事件泵在 timeout 后没有收到事件时，向插件分发表投一条
+ * COMMAND + KEEL_SUBJECT_TIMER（无载荷）的事件；调度器据此在 Worker 线程上跑到期任务。
+ */
+#define KEEL_SUBJECT_TIMER 3u
+
+/*
  * 不透明队列句柄。
  *
  * C 实现侧只看到前向声明，真正的布局在 keel_queue.c 里。
@@ -219,6 +225,14 @@ KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
 KEEL_EXPORT void keel_plugin_shutdown(void);
 
 /* 以下函数在每个二进制里各有一份（hidden），用于跨运行时队列操作。 */
+
+/*
+ * 设置事件泵的下一次唤醒时间（相对当前时刻的毫秒数）。
+ *
+ * 只能由拥有该 inbox 的 Worker 线程调用；delay_ms < 0 表示取消定时唤醒。
+ * 到点且 inbox 为空时，泵线程投 KEEL_SUBJECT_TIMER 事件给插件分发表。
+ */
+void keel_plugin_set_wakeup(int64_t delay_ms);
 
 /* 创建有界队列；节点内存一次性预分配，运行期不再 malloc / free。 */
 KeelQueue *keel_queue_create(uint32_t capacity);

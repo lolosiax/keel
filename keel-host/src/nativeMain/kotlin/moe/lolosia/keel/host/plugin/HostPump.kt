@@ -25,6 +25,11 @@ internal object HostPump {
         }
     }
 
+    /** 阻塞等待并处理一条事件；长驻 Host 的主循环每轮调用一次。 */
+    fun serve(timeoutMs: UInt = 200u) {
+        popHostEventRaw(timeoutMs) { event -> dispatch(event) }
+    }
+
     /**
      * 处理一条原始事件。
      *

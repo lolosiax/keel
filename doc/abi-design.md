@@ -202,6 +202,10 @@ loop:
   release(user, &event)                              # 复制完载荷后归还
 ```
 
+定时唤醒：Kotlin 调度器调用 `keel_plugin_set_wakeup(delay_ms)` 设定最近截止时间，
+泵线程把 pop 超时设成该值；超时且队列为空时投 `COMMAND{subject = KEEL_SUBJECT_TIMER}`
+给分发表。任务仍然只在 Worker 线程执行，不引入第二个线程。
+
 Host 侧对称：Host 也有 inbox 与自己的 Worker，负责处理插件发来的请求 / 完成 / 取消。
 Ktor 协程不直接处理队列事件，只做「投递 + 挂起等待本地完成」。
 

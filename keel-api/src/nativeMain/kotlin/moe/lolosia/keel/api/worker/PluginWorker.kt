@@ -40,6 +40,7 @@ object PluginWorker {
         PluginWorker.hostInbox = api.pointed.host?.pointed?.host_inbox
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
+        WorkerScheduler.reset()
         val metadata = PluginMetadata(
             id = pluginId.toString(),
             name = "",
@@ -64,6 +65,7 @@ object PluginWorker {
     internal fun disable() {
         plugin?.onDisable()
         plugin = null
+        WorkerScheduler.reset()
     }
 }
 
@@ -84,6 +86,7 @@ private fun dispatch(event: CPointer<KeelEvent>?) {
 
         KEEL_EVENT_COMMAND.toInt() -> when (e.subject) {
             KEEL_SUBJECT_PING.toULong() -> replyComplete(e, KEEL_OK.toInt())
+            KEEL_SUBJECT_TIMER.toULong() -> WorkerScheduler.tick()
             else -> warnOnce(kind)
         }
 

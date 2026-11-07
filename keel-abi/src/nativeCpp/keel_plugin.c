@@ -22,6 +22,8 @@ typedef struct KeelPluginState {
     KeelQueue *inbox;
     keel_thread_t thread;
     uint64_t seq;
+    /* 下一次定时唤醒的绝对毫秒；0 表示不定时唤醒 */
+    uint64_t wake_at_ms;
     int started;
 } KeelPluginState;
 
@@ -67,13 +69,49 @@ static void start_worker(KeelPluginState *state, const KeelEvent *request) {
     reply_to_host(state, request, status);
 }
 
+void keel_plugin_set_wakeup(int64_t delay_ms) {
+    if (delay_ms < 0) {
+        g_plugin.wake_at_ms = 0;
+        return;
+    }
+    g_plugin.wake_at_ms = keel_now_ms() + (uint64_t)delay_ms;
+}
+
+/* 本轮 pop 的超时：没有定时任务就永久等待，已到期就立即返回。 */
+static uint32_t pump_timeout(const KeelPluginState *state) {
+    if (!state->wake_at_ms) return KEEL_WAIT_FOREVER;
+
+    uint64_t now = keel_now_ms();
+    if (state->wake_at_ms <= now) return 0;
+
+    uint64_t delta = state->wake_at_ms - now;
+    /* 保留 KEEL_WAIT_FOREVER 作哨兵，超大间隔退化为分片等待 */
+    return delta >= KEEL_WAIT_FOREVER ? KEEL_WAIT_SLICE_MS : (uint32_t)delta;
+}
+
 static KEEL_THREAD_RETURN pump_main(KEEL_THREAD_ARG arg) {
     KeelPluginState *state = (KeelPluginState *)arg;
     KeelEvent event;
 
     for (;;) {
-        KeelStatus status = keel_queue_pop(state->inbox, &event, KEEL_WAIT_FOREVER);
+        KeelStatus status = keel_queue_pop(state->inbox, &event, pump_timeout(state));
         if (status == KEEL_ERR_CLOSED) break;
+
+        if (status == KEEL_ERR_TIMEOUT) {
+            /* 定时唤醒：投一个无载荷的 TIMER 事件，由 Kotlin 调度器跑到期任务 */
+            state->wake_at_ms = 0;
+            if (state->started && state->handlers.on_event) {
+                KeelEvent timer;
+                memset(&timer, 0, sizeof(timer));
+                timer.size = (uint32_t)sizeof(timer);
+                timer.kind = KEEL_EVENT_COMMAND;
+                timer.source = state->api.plugin_id;
+                timer.subject = KEEL_SUBJECT_TIMER;
+                state->handlers.on_event(&timer);
+            }
+            continue;
+        }
+
         if (status != KEEL_OK) continue;
 
         if (event.kind == KEEL_EVENT_SHUTDOWN) {
@@ -143,5 +181,6 @@ KEEL_EXPORT void keel_plugin_shutdown(void) {
 
     keel_queue_destroy(g_plugin.inbox);
     g_plugin.inbox = NULL;
+    g_plugin.wake_at_ms = 0;
     g_plugin.started = 0;
 }

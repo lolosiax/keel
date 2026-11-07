@@ -109,4 +109,15 @@ static inline void keel_thread_join(keel_thread_t *thread) {
 
 #endif
 
+/* 单调时钟，毫秒；只用于事件泵的定时唤醒，不用于业务时间。 */
+static inline uint64_t keel_now_ms(void) {
+#ifdef _WIN32
+    return (uint64_t)GetTickCount64();
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)(ts.tv_nsec / 1000000);
+#endif
+}
+
 #endif /* KEEL_PLATFORM_H */

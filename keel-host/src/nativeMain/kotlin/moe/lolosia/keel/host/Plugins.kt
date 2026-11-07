@@ -1,5 +1,7 @@
 package moe.lolosia.keel.host
 
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.KEEL_ABI_VERSION
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
@@ -14,11 +16,13 @@ import moe.lolosia.keel.host.plugin.currentTargetName
 import moe.lolosia.keel.host.plugin.startPlugin
 
 /**
- * `--plugins <dir> [cacheDir]`：扫描目录、校验 `.keel`、解出动态库并启动插件。
+ * `--plugins <dir> [cacheDir] [--serve | --serve-ms=<n>]`：扫描目录、校验 `.keel`、
+ * 解出动态库并启动插件。
  *
- * 启动成功后每个插件都在自己的 Worker 线程上跑；进程退出前逐个投 SHUTDOWN。
+ * 启动成功后每个插件都在自己的 Worker 线程上跑；带 `--serve` 时主线程进入事件循环，
+ * 结束时逐个投 SHUTDOWN。
  */
-internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?) {
+internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?, serveMillis: Long?) {
     val dir = pluginsDir.trimEnd('/', '\\')
     val cache = cacheDir?.trimEnd('/', '\\') ?: "$dir/.cache"
     val host = HostClasspath(EmptyClasspath)
@@ -88,6 +92,17 @@ internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?) {
         }
     } else {
         Log.info("failed: 0", tag = "Loader")
+    }
+
+    if (serveMillis != null) {
+        val label = if (serveMillis == 0L) "直到进程结束" else "${serveMillis}ms"
+        Log.info("serving ($label)", tag = "Host")
+        val deadline =
+            if (serveMillis == 0L) null else TimeSource.Monotonic.markNow() + serveMillis.milliseconds
+        while (deadline == null || !deadline.hasPassedNow()) {
+            HostPump.serve()
+        }
+        Log.info("serve finished", tag = "Host")
     }
 
     if (runtimes.isNotEmpty()) {
