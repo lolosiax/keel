@@ -5,6 +5,7 @@ import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
 
 /**
@@ -22,6 +23,7 @@ internal class PluginContextImpl(
     override val callbacks: CallbackRegistry get() = error("回调尚未实现")
     override val config: Config get() = error("配置尚未实现")
     override val classpath: Classpath = EmptyClasspath
+    override val routes: Routes get() = PluginRoutes
     override val scheduler: Scheduler get() = WorkerScheduler
     override val scope: CoroutineScope get() = error("协程作用域尚未实现")
 }

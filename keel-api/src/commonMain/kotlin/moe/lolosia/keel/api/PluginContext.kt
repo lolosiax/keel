@@ -4,6 +4,7 @@ import kotlinx.coroutines.*
 import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
 
 /**
@@ -44,6 +45,11 @@ interface PluginContext {
      * 对方的 `.keel` 路径；插件卸载后旧引用读取会立即失效。
      */
     val classpath: Classpath
+
+    /**
+     * 本插件的 HTTP 路由表：注册后由 Worker 在启用时统一发给 Host。
+     */
+    val routes: Routes
 
     /** 兼容日志入口；新代码用 [Log]，才能拿到调用点来源。 */
     val logger: PluginLogger

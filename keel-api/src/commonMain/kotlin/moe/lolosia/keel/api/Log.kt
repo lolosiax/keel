@@ -95,4 +95,19 @@ object Log {
         message: String,
         cause: Throwable? = null,
     ) = sink.log(level, site, tag, message, cause)
+
+    /**
+     * 带自定义来源列的日志（HTTP 中间件用）。
+     *
+     * [source] 为纯文本用于对齐，[sourceAnsi] 为着色后的同一段；[moduleAnsi] 强制模块列颜色。
+     */
+    fun emitSource(
+        level: LogLevel,
+        tag: String,
+        source: String,
+        sourceAnsi: String?,
+        message: String,
+        cause: Throwable? = null,
+        moduleAnsi: String? = null,
+    ) = sink.logWithSource(level, tag, source, sourceAnsi, message, cause, moduleAnsi)
 }

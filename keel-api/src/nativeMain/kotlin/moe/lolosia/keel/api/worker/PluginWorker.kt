@@ -1,8 +1,12 @@
 package moe.lolosia.keel.api.worker
 
 import kotlinx.cinterop.*
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
+import moe.lolosia.keel.api.web.*
 
 /**
  * 插件 Worker 的通用运行时。
@@ -50,10 +54,12 @@ object PluginWorker {
         val context = PluginContextImpl(metadata, logger)
 
         return try {
+            PluginRoutes.reset()
             val instance = factory()
             instance.onLoad(context)
             instance.onEnable()
             plugin = instance
+            PluginRoutes.publish()
             out.pointed.on_event = staticCFunction(::dispatch)
             KEEL_OK
         } catch (e: Throwable) {
@@ -87,6 +93,7 @@ private fun dispatch(event: CPointer<KeelEvent>?) {
         KEEL_EVENT_COMMAND.toInt() -> when (e.subject) {
             KEEL_SUBJECT_PING.toULong() -> replyComplete(e, KEEL_OK.toInt())
             KEEL_SUBJECT_TIMER.toULong() -> WorkerScheduler.tick()
+            KEEL_SUBJECT_HTTP.toULong() -> handleHttp(e)
             else -> warnOnce(kind)
         }
 
@@ -113,5 +120,55 @@ private fun replyComplete(request: KeelEvent, status: Int) {
         out.subject = request.subject
         out.status = status
         keel_queue_push(inbox, out.ptr, 0u)
+    }
+}
+
+/** 处理 Host 转来的 HTTP 请求：解码快照 → 查路由表 → 回一次性响应。 */
+private fun handleHttp(event: KeelEvent) {
+    val bytes = if (event.payload_size > 0u) {
+        event.payload?.reinterpret<ByteVar>()?.readBytes(event.payload_size.toInt())
+    } else {
+        null
+    }
+    val request = bytes?.let {
+        try {
+            Json.decodeFromString<HttpRouteRequest>(it.decodeToString())
+        } catch (e: Throwable) {
+            Log.error("HTTP 请求载荷无法解码", cause = e)
+            null
+        }
+    }
+    if (request == null) {
+        val wire = HttpRouteResponse(status = 400, body = "bad request".encodeToByteArray())
+        replyCompleteWithPayload(event, Json.encodeToString(wire).encodeToByteArray())
+        return
+    }
+
+    val response = PluginRoutes.dispatch(request.routeId, request.request, request.pathParameters)
+    val wire = PluginRoutes.toWire(response)
+    replyCompleteWithPayload(event, Json.encodeToString(wire).encodeToByteArray())
+}
+
+/** 回一条带载荷的 COMPLETE；载荷用本二进制的 CRT 分配。 */
+private fun replyCompleteWithPayload(request: KeelEvent, payload: ByteArray) {
+    val inbox = PluginWorker.hostInbox ?: return
+    val buffer = keel_payload_alloc(payload.size.toUInt()) ?: return
+    payload.usePinned { keel_payload_copy(buffer, it.addressOf(0), payload.size.toUInt()) }
+
+    memScoped {
+        val out = alloc<KeelEvent>()
+        out.size = sizeOf<KeelEvent>().toUInt()
+        out.kind = KEEL_EVENT_COMPLETE.toUShort()
+        out.source = PluginWorker.pluginId
+        out.target = 0uL
+        out.correlation = request.correlation
+        out.subject = request.subject
+        out.status = KEEL_OK.toInt()
+        out.payload = buffer
+        out.payload_size = payload.size.toUInt()
+        keel_event_set_default_release(out.ptr)
+        if (keel_queue_push(inbox, out.ptr, 0u) != KEEL_OK) {
+            keel_event_release_default(null, out.ptr)
+        }
     }
 }

@@ -28,7 +28,11 @@ object Ansi {
 
     const val BRIGHT_BLACK = 90
 
+    const val BRIGHT_GREEN = 92
+
     const val BRIGHT_BLUE = 94
+
+    const val BRIGHT_CYAN = 96
 
     /** Spring `defaults.xml` 里 logger 名的颜色：`%clr(...logger...){cyan}`。 */
     const val LOGGER = CYAN

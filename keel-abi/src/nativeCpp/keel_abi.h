@@ -80,6 +80,18 @@ typedef enum KeelLogLevel {
  */
 #define KEEL_SUBJECT_TIMER 3u
 
+/* 插件启用时把路由描述表（JSON）注册给 Host。 */
+#define KEEL_SUBJECT_ROUTE_REGISTER 4u
+
+/* Host 把一次 HTTP 请求交给插件处理，载荷是 HttpRouteRequest。 */
+#define KEEL_SUBJECT_HTTP 5u
+
+/*
+ * Host 内部唤醒：外部线程（Ktor）提交请求后投一条，让泵线程立刻结束阻塞式 pop，
+ * 不必等 200ms 超时。只在 Host 收件箱里流转，插件不会收到。
+ */
+#define KEEL_SUBJECT_WAKE 6u
+
 /*
  * 不透明队列句柄。
  *

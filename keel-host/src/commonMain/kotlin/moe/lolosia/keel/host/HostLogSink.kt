@@ -34,4 +34,28 @@ object HostLogSink : LogSink {
             ),
         )
     }
+
+    override fun logWithSource(
+        level: LogLevel,
+        tag: String?,
+        source: String,
+        sourceAnsi: String?,
+        message: String,
+        cause: Throwable?,
+        moduleAnsi: String?,
+    ) {
+        println(
+            LogLineFormatter.format(
+                timestamp = formatLocalTimestamp(),
+                level = level,
+                module = tag ?: "Host",
+                source = source,
+                message = message,
+                cause = cause,
+                color = useColor,
+                moduleAnsi = moduleAnsi,
+                sourceAnsi = if (useColor) sourceAnsi else null,
+            ),
+        )
+    }
 }

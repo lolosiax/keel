@@ -107,6 +107,7 @@ private fun awaitComplete(manifest: KeelPackageManifest, correlation: ULong, tim
             handleLogEvent(event)
             continue
         }
+        if (HostPump.handleSnapshot(event)) continue
         if (event.kind != KEEL_EVENT_COMPLETE.toInt()) continue
         if (event.correlation != correlation) continue
         if (event.status != KEEL_OK.toInt()) {

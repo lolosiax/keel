@@ -1,8 +1,5 @@
 package moe.lolosia.keel.host
 
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.TimeSource
-import moe.lolosia.keel.abi.c.KEEL_ABI_VERSION
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.log.ModuleColors
@@ -30,16 +27,12 @@ internal actual fun loadPluginsFromCli(
 ) {
     val dir = pluginsDir.trimEnd('/', '\\')
     val cache = cacheDir?.trimEnd('/', '\\') ?: "$dir/.cache"
+
+    HostBootstrap.printStartupInfo()
+
     val host = HostClasspath(EmptyClasspath)
     val result = PluginLoader(host, cache).loadAll(dir)
 
-    printBanner(KEEL_VERSION, currentTargetName)
-    Log.info("version: $KEEL_VERSION")
-    Log.info("executable: ${executablePath()}")
-    Log.info("working dir: ${currentWorkingDirectory()}")
-    Log.info("os: ${platformDescription()}")
-    Log.info("target: $currentTargetName")
-    Log.info("abi: $KEEL_ABI_VERSION")
     Log.info("plugins: $dir", tag = "Loader")
     Log.info("cache: $cache", tag = "Loader")
     Log.info("loaded ${result.loaded.size} plugin(s)", tag = "Loader")
@@ -58,8 +51,10 @@ internal actual fun loadPluginsFromCli(
         }
         val authors = manifest.authors.joinToString().ifBlank { "unknown" }
         val libEntry = manifest.libraryFor(currentTargetName) ?: "?"
+        val build = manifest.buildInfo
+        val buildText = if (build == null) "" else " build ${build.gitSha} (${build.commitTime})"
         Log.info(
-            "loaded $displayName (${manifest.id}) v${manifest.version} by $authors",
+            "loaded $displayName (${manifest.id}) v${manifest.version}$buildText by $authors",
             tag = "Loader",
         )
         Log.info("  source: ${plugin.keelPath}!/$libEntry", tag = "Loader")
@@ -99,27 +94,6 @@ internal actual fun loadPluginsFromCli(
         Log.info("failed: 0", tag = "Loader")
     }
 
-    // 有 HTTP 但没有显式 serve 选项时常驻，否则服务一启动就退出
-    val effectiveServe = serveMillis ?: if (httpPort != null) 0L else null
-    httpPort?.let { HostHttp.start(it, runtimes.firstOrNull()?.pluginId) }
-
-    if (effectiveServe != null) {
-        val label = if (effectiveServe == 0L) "直到进程结束" else "${effectiveServe}ms"
-        Log.info("serving ($label)", tag = "Host")
-        val deadline =
-            if (effectiveServe == 0L) null else TimeSource.Monotonic.markNow() + effectiveServe.milliseconds
-        while (deadline == null || !deadline.hasPassedNow()) {
-            HostPump.serve()
-        }
-        Log.info("serve finished", tag = "Host")
-    }
-
-    HostHttp.stop()
-
-    if (runtimes.isNotEmpty()) {
-        Log.info("shutdown")
-        runtimes.forEach { it.shutdown() }
-        HostPump.drain()
-        Log.info("stopped ${runtimes.size} plugin(s)")
-    }
+    // 运行期交给 HostRuntime：HTTP 入口、事件循环、停机
+    HostRuntime.run(runtimes, serveMillis, httpPort)
 }

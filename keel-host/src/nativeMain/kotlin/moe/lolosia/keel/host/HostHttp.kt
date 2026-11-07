@@ -1,27 +1,61 @@
 package moe.lolosia.keel.host
 
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.util.AttributeKey
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.KEEL_OK
+import moe.lolosia.keel.abi.c.KEEL_SUBJECT_HTTP
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.web.HttpRequest
+import moe.lolosia.keel.api.web.HttpRouteRequest
+import moe.lolosia.keel.api.web.HttpRouteResponse
 import moe.lolosia.keel.host.plugin.HostPump
+import moe.lolosia.keel.host.route.HostRoutes
 
 /**
  * Host 独占的 HTTP 入口。
  *
- * 插件路由接入前提供健康检查与一次插件往返：
  * - `/healthz`：Host 自身存活；
- * - `/ping`：经事件泵向插件发 PING 并等 COMPLETE，验证「HTTP 线程挂起 → 泵线程 resume」。
+ * - `/ping`：经事件泵向插件发 PING 并等 COMPLETE；
+ * - 其余路径：按已注册的路由表分发到插件，载荷是 `HttpRouteRequest` 快照。
  *
- * 请求进入插件时，handler 用挂起（`suspendCancellableCoroutine` 的等价语义）把工作交给
- * 事件泵，不把 `ApplicationCall` 或 `Continuation` 传过 C ABI。
+ * 请求进入插件时，handler 用 `HostPump.request` 挂起（`suspendCancellableCoroutine`
+ * 的等价语义），由泵线程投递并 resume；`ApplicationCall` / `Continuation` 不跨 ABI。
  */
 internal object HostHttp {
+
+    /** 请求体在 Monitoring 阶段读一次，后续分发直接复用（避免二次读流）。 */
+    private val RequestBodyKey = AttributeKey<ByteArray>("keel.http.requestBody")
+
+    /** 出站日志要打印的响应片段，由具体 handler 在响应前写入。 */
+    private val ResponseSnippetKey = AttributeKey<String>("keel.http.responseSnippet")
+
+    private const val BODY_LIMIT = 200
+
+    private fun snippet(bytes: ByteArray): String {
+        val text = bytes.decodeToString()
+        return if (text.length <= BODY_LIMIT) text else
+            text.take(BODY_LIMIT) + "...(${text.length - BODY_LIMIT} more)"
+    }
+
+    private suspend fun ApplicationCall.respondLoggedText(
+        text: String,
+        status: HttpStatusCode = HttpStatusCode.OK,
+    ) {
+        attributes.put(ResponseSnippetKey, snippet(text.encodeToByteArray()))
+        respondText(text, status = status)
+    }
 
     private var engine: EmbeddedServer<*, *>? = null
 
@@ -29,23 +63,77 @@ internal object HostHttp {
     fun start(port: Int, pingPluginId: ULong?) {
         if (engine != null) return
 
-        val server = embeddedServer(CIO, port = port) {
+        val listenPort = port
+        val environment = applicationEnvironment {
+            log = KtorLogBridge
+        }
+
+        val server = embeddedServer(
+            CIO,
+            environment,
+            configure = {
+                connectors.add(
+                    EngineConnectorBuilder().apply {
+                        host = "0.0.0.0"
+                        this.port = listenPort
+                    },
+                )
+            },
+        ) {
+            // 入站 / 出站日志：模块列固定 HTTP IN / HTTP OUT [status]，来源列是客户端地址
+            intercept(ApplicationCallPipeline.Monitoring) {
+                val mark = TimeSource.Monotonic.markNow()
+                val remote = remoteInfoOf(call)
+                val method = call.request.httpMethod.value
+                val path = call.request.path()
+
+                // 请求体只在这里读一次；POST/PUT/PATCH 之外的请求体忽略
+                val requestBody = when (method) {
+                    "POST", "PUT", "PATCH" -> call.receiveText().encodeToByteArray()
+                    else -> ByteArray(0)
+                }
+                call.attributes.put(RequestBodyKey, requestBody)
+
+                HttpLog.inbound(method, path, remote)
+                if (requestBody.isNotEmpty()) HttpLog.inboundBody(remote, snippet(requestBody))
+
+                try {
+                    proceed()
+                } catch (e: Throwable) {
+                    // 对应 ErrorWebFilter：记下响应片段，异常本身交给引擎（Ktor 会经 KtorLogBridge 落 error）
+                    call.attributes.put(ResponseSnippetKey, snippet("${e::class.simpleName}: ${e.message}".encodeToByteArray()))
+                    throw e
+                } finally {
+                    val status = call.response.status()?.value ?: 500
+                    HttpLog.outbound(status, method, path, remote, mark.elapsedNow().inWholeMilliseconds)
+                    call.attributes.getOrNull(ResponseSnippetKey)?.let {
+                        HttpLog.outboundBody(status, remote, it)
+                    }
+                }
+            }
+
             routing {
                 get("/healthz") {
-                    call.respondText("ok")
+                    call.respondLoggedText("ok")
                 }
 
                 get("/ping") {
                     val id = pingPluginId
                     if (id == null) {
-                        call.respondText("没有已启动的插件", status = HttpStatusCode.ServiceUnavailable)
+                        call.respondLoggedText("没有已启动的插件", HttpStatusCode.ServiceUnavailable)
                         return@get
                     }
                     val reply = HostPump.request(id, KEEL_SUBJECT_PING.toULong(), null, 2000)
                     if (reply != null && reply.status == KEEL_OK.toInt()) {
-                        call.respondText("ok")
+                        call.respondLoggedText("ok")
                     } else {
-                        call.respondText("插件未响应", status = HttpStatusCode.GatewayTimeout)
+                        call.respondLoggedText("插件未响应", HttpStatusCode.GatewayTimeout)
+                    }
+                }
+
+                route("{...}") {
+                    handle {
+                        dispatch(call)
                     }
                 }
             }
@@ -59,5 +147,50 @@ internal object HostHttp {
     fun stop() {
         engine?.stop(500, 2000)
         engine = null
+    }
+
+    private suspend fun dispatch(call: ApplicationCall) {
+        val path = call.request.path()
+        val method = call.request.httpMethod.value
+        val match = HostRoutes.match(method, path)
+        if (match == null) {
+            call.respondLoggedText("not found", HttpStatusCode.NotFound)
+            return
+        }
+
+        // 请求体已在 Monitoring 阶段读过，这里直接复用，避免二次读流
+        val body = call.attributes.getOrNull(RequestBodyKey) ?: ByteArray(0)
+        val request = HttpRequest(
+            method = method,
+            path = path,
+            query = call.request.queryParameters.entries().associate { it.key to it.value },
+            headers = call.request.headers.entries().associate { it.key to it.value.joinToString(",") },
+            body = body,
+        )
+        val payload = Json.encodeToString(
+            HttpRouteRequest(match.routeId, match.pathParameters, request)
+        ).encodeToByteArray()
+
+        val reply = HostPump.request(match.pluginId, KEEL_SUBJECT_HTTP.toULong(), payload, 30_000)
+        val response = reply?.payload?.let {
+            try {
+                Json.decodeFromString<HttpRouteResponse>(it.decodeToString())
+            } catch (e: Throwable) {
+                Log.warn("插件响应无法解码：${e.message}", tag = "Http")
+                null
+            }
+        }
+        if (response == null) {
+            call.respondLoggedText("插件无响应", HttpStatusCode.GatewayTimeout)
+            return
+        }
+
+        // 出站日志要打印的响应体（截断）
+        call.attributes.put(ResponseSnippetKey, snippet(response.body))
+        call.respondBytes(
+            bytes = response.body,
+            contentType = ContentType.parse(response.contentType),
+            status = HttpStatusCode.fromValue(response.status),
+        )
     }
 }

@@ -23,6 +23,23 @@ internal fun unregisterPluginInbox(pluginId: ULong) {
 internal fun pluginInbox(pluginId: ULong): CPointer<KeelQueue>? = pluginInboxes[pluginId]
 
 /**
+ * 唤醒 Host 泵线程：投一条无载荷的 WAKE 事件，让阻塞中的 pop 立刻返回。
+ *
+ * 供 Ktor 等外部线程在提交请求后调用；事件本身不代表业务。
+ */
+internal fun wakeHostPump() {
+    memScoped {
+        val event = alloc<KeelEvent>()
+        event.size = sizeOf<KeelEvent>().toUInt()
+        event.kind = KEEL_EVENT_COMMAND.toUShort()
+        event.source = 0uL
+        event.target = 0uL
+        event.subject = KEEL_SUBJECT_WAKE.toULong()
+        keel_queue_push(hostInbox, event.ptr, 0u)
+    }
+}
+
+/**
  * 向已登记的插件投递一条事件。
  *
  * 载荷由 Host 自己的 CRT 分配并挂上默认 release；队列拒收时在这里归还。

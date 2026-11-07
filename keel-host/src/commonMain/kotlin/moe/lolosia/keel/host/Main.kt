@@ -1,8 +1,7 @@
 package moe.lolosia.keel.host
 
 import moe.lolosia.keel.api.Log
-
-internal const val KEEL_VERSION = "0.1.0-SNAPSHOT"
+import moe.lolosia.keel.host.build.BuildInfo
 
 /**
  * `--inspect <path>` 诊断入口：读取 `.keel` 的 manifest 与 `resources/`，
@@ -11,14 +10,14 @@ internal const val KEEL_VERSION = "0.1.0-SNAPSHOT"
 internal expect fun inspectKeelPackage(path: String)
 
 /**
- * `--plugins <dir> [cacheDir] [--http=<port>] [--serve | --serve-ms=<n>]`：
+ * `--plugins <dir> [cacheDir] [--once] [--http=<port>] [--serve-ms=<n>]`：
  * 扫描目录下的 `.keel`，校验后解出动态库并启动插件。
  *
  * 启动是「投 START、等 COMPLETE」，Host 线程从不进入插件运行时。
- * 默认启动、体检、清空收件箱后退出；带 `--serve` 时进入长驻事件循环；
- * 带 `--http` 时同时启动 Ktor（未显式给出 serve 选项则常驻）。
+ * 默认常驻（事件循环），`--once` 表示启动、体检后立即退出；
+ * 带 `--http` 时同时启动 Ktor。
  *
- * @param serveMillis null 表示不常驻；0 表示一直服务到进程被杀；其它值表示服务时长
+ * @param serveMillis null 表示不常驻（`--once`）；0 表示一直服务；其它值表示服务时长
  */
 internal expect fun loadPluginsFromCli(
     pluginsDir: String,
@@ -51,16 +50,18 @@ fun main(args: Array<String>) {
             if (args.size < 2) {
                 println(
                     "用法：keel-host --plugins <插件目录> [缓存目录] " +
-                        "[--http=<端口>] [--serve | --serve-ms=<毫秒>]"
+                        "[--once] [--http=<端口>] [--serve-ms=<毫秒>]"
                 )
                 return
             }
             val dir = args[1]
             var cache: String? = null
+            var once = false
             var serveMillis: Long? = null
             var httpPort: Int? = null
             args.drop(2).forEach { arg ->
                 when {
+                    arg == "--once" -> once = true
                     arg == "--serve" -> serveMillis = 0L
                     arg.startsWith("--serve-ms=") ->
                         serveMillis = arg.substringAfter('=').toLongOrNull()
@@ -74,11 +75,13 @@ fun main(args: Array<String>) {
                     else -> error("无法识别的参数：$arg")
                 }
             }
-            loadPluginsFromCli(dir, cache, serveMillis, httpPort)
+            // 默认常驻；--once 才「启动、体检后退出」
+            val effectiveServe = serveMillis ?: if (once) null else 0L
+            loadPluginsFromCli(dir, cache, effectiveServe, httpPort)
             return
         }
     }
 
-    Log.info("keel host $KEEL_VERSION")
+    Log.info("keel host ${BuildInfo.BUILD_ID}")
     Log.info("embedded host.txt: ${embeddedResource("host.txt")}")
 }

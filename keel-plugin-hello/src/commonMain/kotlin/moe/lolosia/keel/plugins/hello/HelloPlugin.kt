@@ -5,6 +5,9 @@ import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.TaskHandle
 import moe.lolosia.keel.api.annotation.KeelPluginMain
+import moe.lolosia.keel.api.web.HttpResponse
+import moe.lolosia.keel.api.web.ResponseBody
+import moe.lolosia.keel.api.web.RouteDescriptor
 
 /**
  * 最小示例插件：演示生命周期与上下文注入。
@@ -19,6 +22,18 @@ class HelloPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
+        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) { _, _ ->
+            HttpResponse(body = ResponseBody.Text("hello from keel plugin"))
+        }
+        // 带 JSON 入参的回显接口，用于验证请求体透传
+        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { request, _ ->
+            HttpResponse(
+                body = ResponseBody.Text(
+                    text = request.body.decodeToString(),
+                    contentType = "application/json; charset=utf-8",
+                ),
+            )
+        }
         Log.info("loaded ${context.metadata.id}")
     }
 

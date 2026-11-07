@@ -1,5 +1,7 @@
 package moe.lolosia.keel.gradle.plugin
 
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 import moe.lolosia.keel.gradle.logger.KeelLoggerGradlePlugin
 import org.gradle.api.Action
 import org.gradle.api.Plugin
@@ -36,6 +38,43 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         project.plugins.apply(KeelLoggerGradlePlugin::class.java)
 
         val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java)
+        val manifest = project.file(extension.manifest)
+
+        // 构建期把 git sha / 提交时间合并进 plugin.json；不改仓库里的源文件
+        val processedManifest = project.layout.buildDirectory.file("generated/keel/plugin.json")
+        val processManifest = project.tasks.register("keelProcessManifest") { task ->
+            task.group = "keel"
+            task.description = "把构建信息（git sha / 提交时间）合并进 plugin.json"
+            val source = manifest
+            val root = project.projectDir
+            val providers = project.providers
+            task.inputs.file(source)
+            task.outputs.file(processedManifest)
+            task.doLast {
+                require(source.isFile) { "keelPlugin.manifest 不存在：$source" }
+                fun git(vararg args: String): String = runCatching {
+                    providers.exec {
+                        it.workingDir = root
+                        it.commandLine("git", *args)
+                    }.standardOutput.asText.get().trim()
+                }.getOrDefault("")
+
+                val sha = git("rev-parse", "--short", "HEAD").ifBlank { "unknown" }
+                val commitTime = git("log", "-1", "--format=%cI").ifBlank { "unknown" }
+
+                @Suppress("UNCHECKED_CAST")
+                val json = JsonSlurper().parse(source) as Map<String, Any?>
+                val merged = json + (
+                    "buildInfo" to mapOf(
+                        "gitSha" to sha,
+                        "commitTime" to commitTime,
+                    )
+                )
+                val out = processedManifest.get().asFile
+                out.parentFile.mkdirs()
+                out.writeText(JsonOutput.prettyPrint(JsonOutput.toJson(merged)) + "\n")
+            }
+        }
 
         val packageTask = project.tasks.register("keelPackage", Zip::class.java) { task ->
             task.group = "keel"
@@ -50,8 +89,8 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
             task.isReproducibleFileOrder = true
             task.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-            val manifest = project.file(extension.manifest)
-            task.from(manifest, Action<CopySpec> { it.into("") })
+            task.dependsOn(processManifest)
+            task.from(processedManifest, Action<CopySpec> { it.into("") })
 
             task.from(project.file("src/commonMain/resources"), Action<CopySpec> {
                 it.into("resources")
@@ -63,10 +102,6 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
             task.from(extension.resources.map { project.file(it) }, Action<CopySpec> {
                 it.into("resources")
             })
-
-            task.doFirst {
-                require(manifest.isFile) { "keelPlugin.manifest 不存在：${manifest}" }
-            }
         }
 
         project.plugins.withId("org.jetbrains.kotlin.multiplatform") {

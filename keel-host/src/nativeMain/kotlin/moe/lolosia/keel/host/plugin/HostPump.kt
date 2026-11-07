@@ -5,10 +5,14 @@ import kotlinx.cinterop.pointed
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.web.RouteDescriptor
+import moe.lolosia.keel.host.route.HostRoutes
 
 /** 一次 Host → 插件的在途请求；[reply] 由泵线程完成。 */
 internal class HostRequest(
@@ -79,6 +83,8 @@ internal object HostPump {
     ): HostEvent? {
         val request = HostRequest(pluginId, subject, payload, timeoutMs)
         incoming.send(request)
+        // 泵线程可能正阻塞在 200ms 的 pop 里；投一条 WAKE 让它立刻处理新请求
+        wakeHostPump()
         return withTimeoutOrNull(timeoutMs) { request.reply.await() }
     }
 
@@ -91,6 +97,15 @@ internal object HostPump {
         val e = event.pointed
         val kind = e.kind.toInt()
 
+        // Host 内部唤醒：立刻把外部线程提交的请求转给插件，不再等 pop 超时
+        if (kind == KEEL_EVENT_COMMAND.toInt() &&
+            e.target == 0uL &&
+            e.subject == KEEL_SUBJECT_WAKE.toULong()
+        ) {
+            dispatchIncoming()
+            return false
+        }
+
         if (kind == KEEL_EVENT_COMPLETE.toInt()) {
             val request = pending.remove(e.correlation)
             if (request != null) {
@@ -101,6 +116,14 @@ internal object HostPump {
 
         if (kind == KEEL_EVENT_LOG.toInt()) {
             handleLogEvent(snapshotOf(event))
+            return false
+        }
+
+        if (kind == KEEL_EVENT_COMMAND.toInt() &&
+            e.target == 0uL &&
+            e.subject == KEEL_SUBJECT_ROUTE_REGISTER.toULong()
+        ) {
+            handleSnapshot(snapshotOf(event))
             return false
         }
 
@@ -121,6 +144,29 @@ internal object HostPump {
     private fun warnOnce(key: String, reason: String) {
         if (!warned.add(key)) return
         Log.warn("丢弃事件 $key：$reason", tag = "EventBus")
+    }
+
+    /**
+     * 处理不依赖原始指针的事件（启动等待期、阻塞请求期间使用）。
+     *
+     * 目前只认路由注册；返回 true 表示事件已被消费。
+     */
+    fun handleSnapshot(event: HostEvent): Boolean {
+        if (event.kind != KEEL_EVENT_COMMAND.toInt() ||
+            event.target != 0uL ||
+            event.subject != KEEL_SUBJECT_ROUTE_REGISTER.toULong()
+        ) {
+            return false
+        }
+
+        val payload = event.payload ?: return true
+        try {
+            val descriptors = Json.decodeFromString<List<RouteDescriptor>>(payload.decodeToString())
+            HostRoutes.register(event.source, descriptors)
+        } catch (err: Throwable) {
+            Log.warn("路由注册失败：${err.message}", tag = "Router")
+        }
+        return true
     }
 
     private fun dispatchIncoming() {
@@ -184,6 +230,7 @@ internal object HostPump {
                 event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation ->
                     return event.status == KEEL_OK.toInt()
 
+                handleSnapshot(event) -> Unit
                 else -> warnOnce("kind=${event.kind}->${event.target}", "请求期间收到无关事件")
             }
         }

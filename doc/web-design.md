@@ -84,6 +84,7 @@ RouteDescriptor(
 ```
 
 - 插件 Worker 启用时发 `ROUTE_REGISTER { descriptors }`；Host 校验后**原子替换**路由表。
+  （当前已实现：插件用 `ctx.routes.register` 手工注册，Host 存线性表；KSP 生成待做。）
 - 插件 disable 时发 `ROUTE_UNREGISTER`；在途请求返回 503 或按配置排水。
 - 冲突（同 method + 同 path 已属于别的插件）**拒绝注册**并记日志，不允许静默覆盖。
 
