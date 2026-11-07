@@ -1,0 +1,13 @@
+{
+  "id": "hello",
+  "name": "Hello Plugin",
+  "version": "0.1.0",
+  "abiVersion": 1,
+  "entry": "keel_plugin_hello_create",
+  "lib": {
+    "mingwX64": "lib/mingwX64/keel_plugin_hello.dll"
+  },
+  "resources": "resources/",
+  "requires": [],
+  "description": "最小示例插件"
+}

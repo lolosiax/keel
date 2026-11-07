@@ -1,0 +1,2 @@
+headers = keel_abi.h
+package = moe.lolosia.keel.abi.c
