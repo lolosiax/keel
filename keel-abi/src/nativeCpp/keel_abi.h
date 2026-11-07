@@ -281,6 +281,17 @@ void keel_payload_copy(void *dst, const void *src, uint32_t size);
 /* 把 release 字段指向本二进制的 keel_event_release_default。 */
 void keel_event_set_default_release(KeelEvent *event);
 
+/*
+ * Host 专用的退出钩子：安装 Ctrl+C（Windows 另有 Ctrl+Break / Close）/ SIGINT / SIGTERM。
+ *
+ * 处理函数只置一个原子标志，不做任何 Kotlin 调用；Host 的主循环轮询
+ * [keel_shutdown_requested] 后走正常的停插件流程。
+ */
+void keel_install_shutdown_hook(void);
+
+/* @return 1 表示已收到中断请求 */
+int keel_shutdown_requested(void);
+
 #ifdef __cplusplus
 }
 #endif

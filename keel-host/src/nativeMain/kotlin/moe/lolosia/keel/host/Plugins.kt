@@ -28,6 +28,8 @@ internal actual fun loadPluginsFromCli(
     val dir = pluginsDir.trimEnd('/', '\\')
     val cache = cacheDir?.trimEnd('/', '\\') ?: "$dir/.cache"
 
+    // 尽早接管 Ctrl+C，启动阶段的中断也走优雅停机
+    HostBootstrap.installShutdownHook()
     HostBootstrap.printStartupInfo()
 
     val host = HostClasspath(EmptyClasspath)
