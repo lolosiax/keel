@@ -1,6 +1,7 @@
 package moe.lolosia.keel.host
 
 import moe.lolosia.keel.abi.c.KEEL_ABI_VERSION
+import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.log.ModuleColors
 import moe.lolosia.keel.classpath.EmptyClasspath
@@ -63,6 +64,16 @@ internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?) {
         } catch (e: Exception) {
             startFailures++
             Log.warn("start failed: ${manifest.id}: ${e.message}", tag = "Loader")
+        }
+    }
+
+    // 最小请求 / 应答回路：确认每个插件都能收到事件并按 correlation 回包
+    runtimes.forEach { runtime ->
+        val ok = HostPump.requestPlugin(runtime.pluginId, KEEL_SUBJECT_PING.toULong())
+        if (ok) {
+            Log.info("ping ${runtime.pluginName} ok", tag = "Loader")
+        } else {
+            Log.warn("ping ${runtime.pluginName} 未响应", tag = "Loader")
         }
     }
 

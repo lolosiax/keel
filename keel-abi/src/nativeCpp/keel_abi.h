@@ -67,6 +67,14 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_START 1u
 
 /*
+ * 健康检查：Host 投递 COMMAND + KEEL_SUBJECT_PING，插件必须回一条
+ * status = KEEL_OK、correlation 相同的 COMPLETE。
+ *
+ * 这是最小请求 / 应答回路，用于验证事件收发、转发与 correlation 配对。
+ */
+#define KEEL_SUBJECT_PING 2u
+
+/*
  * 不透明队列句柄。
  *
  * C 实现侧只看到前向声明，真正的布局在 keel_queue.c 里。

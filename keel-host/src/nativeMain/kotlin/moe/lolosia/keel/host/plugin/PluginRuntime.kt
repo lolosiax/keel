@@ -17,6 +17,8 @@ private typealias BootstrapFn =
  */
 internal class PluginRuntime(
     val pluginId: ULong,
+    /** manifest 里的 id，仅用于日志与运维面。 */
+    val pluginName: String,
     private val shutdownFn: CPointer<CFunction<() -> Unit>>?,
 ) {
 
@@ -89,7 +91,7 @@ internal fun startPlugin(
 
     val shutdownFn = library.symbol("keel_plugin_shutdown")
         ?.reinterpret<CFunction<() -> Unit>>()
-    return PluginRuntime(pluginId, shutdownFn)
+    return PluginRuntime(pluginId, manifest.id, shutdownFn)
 }
 
 /** 等这次启动对应的 `COMPLETE`；期间其它插件的事件直接丢弃。 */
@@ -117,4 +119,5 @@ private fun awaitComplete(manifest: KeelPackageManifest, correlation: ULong, tim
 
 private var correlationCounter = 0uL
 
-private fun nextCorrelation(): ULong = ++correlationCounter
+/** Host 发起请求时使用的 correlation 源；启动握手与 ping 共用。 */
+internal fun nextCorrelation(): ULong = ++correlationCounter

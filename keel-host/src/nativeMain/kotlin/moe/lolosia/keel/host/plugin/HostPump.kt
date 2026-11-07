@@ -2,6 +2,8 @@ package moe.lolosia.keel.host.plugin
 
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.pointed
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
 
@@ -54,5 +56,35 @@ internal object HostPump {
     private fun warnOnce(key: String, reason: String) {
         if (!warned.add(key)) return
         Log.warn("丢弃事件 $key：$reason", tag = "EventBus")
+    }
+
+    /**
+     * Host 向插件发起一次请求：投 COMMAND，等同 correlation 的 COMPLETE。
+     *
+     * 等待期间顺带消费日志事件；其它事件告警一次后丢弃。
+     *
+     * @return true 表示插件回了 `KEEL_OK`
+     */
+    fun requestPlugin(pluginId: ULong, subject: ULong, timeoutMs: UInt = 2000u): Boolean {
+        val correlation = nextCorrelation()
+        if (!pushToPlugin(pluginId, KEEL_EVENT_COMMAND.toInt(), subject, correlation)) {
+            return false
+        }
+
+        val mark = TimeSource.Monotonic.markNow()
+        val timeout = timeoutMs.toLong().milliseconds
+        while (true) {
+            val remaining = timeout - mark.elapsedNow()
+            if (remaining <= 0.milliseconds) return false
+
+            val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: return false
+            when {
+                event.kind == KEEL_EVENT_LOG.toInt() -> handleLogEvent(event)
+                event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation ->
+                    return event.status == KEEL_OK.toInt()
+
+                else -> warnOnce("kind=${event.kind}->${event.target}", "请求期间收到无关事件")
+            }
+        }
     }
 }

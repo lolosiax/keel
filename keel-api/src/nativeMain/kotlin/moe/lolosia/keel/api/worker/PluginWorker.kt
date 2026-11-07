@@ -1,8 +1,6 @@
 package moe.lolosia.keel.api.worker
 
-import kotlinx.cinterop.CPointer
-import kotlinx.cinterop.pointed
-import kotlinx.cinterop.staticCFunction
+import kotlinx.cinterop.*
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
 
@@ -16,6 +14,10 @@ object PluginWorker {
 
     /** 当前插件实例；只在 Worker 线程读写。 */
     internal var plugin: Plugin? = null
+
+    /** 当前插件 id 与 Host 收件箱；进入 Worker 时一次性填好，之后只读。 */
+    internal var pluginId: ULong = 0uL
+    internal var hostInbox: CPointer<KeelQueue>? = null
 
     /**
      * 构造插件实例并回填 C 侧的事件分发表。
@@ -34,6 +36,8 @@ object PluginWorker {
         if (api.pointed.abi_version != KEEL_ABI_VERSION) return KEEL_ERR_UNSUPPORTED
 
         val pluginId = api.pointed.plugin_id
+        PluginWorker.pluginId = pluginId
+        PluginWorker.hostInbox = api.pointed.host?.pointed?.host_inbox
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
         val metadata = PluginMetadata(
@@ -69,15 +73,42 @@ private val warnedKinds = mutableSetOf<Int>()
 /**
  * 事件分发入口；`on_event` 不能捕获状态，所以放在顶层。
  *
- * 目前只有 SHUTDOWN 有处理器；其它事件显式告警一次，避免「发了没人管」还查不到线索。
+ * 目前处理 SHUTDOWN 与健康检查 PING；其它事件显式告警一次，
+ * 避免「发了没人管」还查不到线索。
  */
 private fun dispatch(event: CPointer<KeelEvent>?) {
     val e = event?.pointed ?: return
     val kind = e.kind.toInt()
     when (kind) {
         KEEL_EVENT_SHUTDOWN.toInt() -> PluginWorker.disable()
-        else -> if (warnedKinds.add(kind)) {
-            Log.warn("插件暂不处理事件 kind=$kind（分发尚未接入）")
+
+        KEEL_EVENT_COMMAND.toInt() -> when (e.subject) {
+            KEEL_SUBJECT_PING.toULong() -> replyComplete(e, KEEL_OK.toInt())
+            else -> warnOnce(kind)
         }
+
+        else -> warnOnce(kind)
+    }
+}
+
+private fun warnOnce(kind: Int) {
+    if (warnedKinds.add(kind)) {
+        Log.warn("插件暂不处理事件 kind=$kind（分发尚未接入）")
+    }
+}
+
+/** 回一条无载荷的 COMPLETE，correlation / subject 原样带回。 */
+private fun replyComplete(request: KeelEvent, status: Int) {
+    val inbox = PluginWorker.hostInbox ?: return
+    memScoped {
+        val out = alloc<KeelEvent>()
+        out.size = sizeOf<KeelEvent>().toUInt()
+        out.kind = KEEL_EVENT_COMPLETE.toUShort()
+        out.source = PluginWorker.pluginId
+        out.target = 0uL
+        out.correlation = request.correlation
+        out.subject = request.subject
+        out.status = status
+        keel_queue_push(inbox, out.ptr, 0u)
     }
 }

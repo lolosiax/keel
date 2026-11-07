@@ -23,6 +23,32 @@ internal fun unregisterPluginInbox(pluginId: ULong) {
 internal fun pluginInbox(pluginId: ULong): CPointer<KeelQueue>? = pluginInboxes[pluginId]
 
 /**
+ * 向已登记的插件投递一条无载荷事件。
+ *
+ * @return false 表示目标不在线，或队列已满 / 已关闭
+ */
+internal fun pushToPlugin(
+    pluginId: ULong,
+    kind: Int,
+    subject: ULong,
+    correlation: ULong,
+    status: Int = KEEL_OK.toInt(),
+): Boolean {
+    val inbox = pluginInbox(pluginId) ?: return false
+    return memScoped {
+        val event = alloc<KeelEvent>()
+        event.size = sizeOf<KeelEvent>().toUInt()
+        event.kind = kind.toUShort()
+        event.source = 0uL
+        event.target = pluginId
+        event.correlation = correlation
+        event.subject = subject
+        event.status = status
+        keel_queue_push(inbox, event.ptr, 0u) == KEEL_OK
+    }
+}
+
+/**
  * Host 侧 ABI 端点：一份 `KeelHostApi` + 一个进程内收件箱。
  *
  * 每个二进制各带一份 `keel_queue_*` 实现，但队列结构布局一致，插件可以往这个

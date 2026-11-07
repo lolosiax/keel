@@ -171,6 +171,9 @@ typedef struct KeelEvent {
   （TRACE / DEBUG / INFO / WARN / ERROR / FATAL），`payload` 是 UTF-8 日志正文。
   发送方用 `keel_payload_alloc` 分配、`keel_payload_copy` 写入，
   再用 `keel_event_set_default_release` 挂上本二进制的归还函数。
+- 健康检查用 `KEEL_SUBJECT_PING`：Host 投 `COMMAND{subject=PING, correlation=N}`，
+  插件回 `COMPLETE{correlation=N, status=KEEL_OK}`。这是最小请求 / 应答回路，
+  Host 在每个插件启动完成后执行一次；插件侧主动发起的请求尚未接入。
 
 ### 4.3 启动握手
 
