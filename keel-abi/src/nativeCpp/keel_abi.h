@@ -336,6 +336,16 @@ void keel_crash_register_module(const char *name, const char *library_path);
  */
 int keel_watchdog_watch(uint64_t parent_pid);
 
+/*
+ * 符号与地址工具（日志 / 错误信封共用）。
+ *
+ * keel_symbol_demangle: 把 `_Z...` 还原成 C++ 声明；成功返回 1，失败返回 0。
+ * keel_locate_address:  运行时地址 → 模块名 + 模块内偏移；成功返回 1。
+ */
+int keel_symbol_demangle(const char *mangled, char *out, uint32_t capacity);
+
+int keel_locate_address(uint64_t address, char *module, uint32_t capacity, uint64_t *rva);
+
 #ifdef __cplusplus
 }
 #endif

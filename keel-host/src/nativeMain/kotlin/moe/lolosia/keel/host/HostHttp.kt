@@ -17,8 +17,10 @@ import moe.lolosia.keel.abi.c.KEEL_OK
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_HTTP
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.error.KeelRemoteException
+import moe.lolosia.keel.api.error.toKeelError
 import moe.lolosia.keel.api.web.HttpRequest
 import moe.lolosia.keel.api.web.HttpRouteRequest
 import moe.lolosia.keel.api.web.HttpRouteResponse
@@ -158,17 +160,36 @@ internal object HostHttp {
     }
 
     /** 把插件的错误信封重建成 [KeelRemoteException]；载荷缺失时给出状态码说明。 */
-    private fun remoteError(pluginId: ULong, reply: HostEvent): KeelRemoteException {
+    private fun remoteError(pluginId: ULong, reply: HostEvent, callSite: Throwable): KeelRemoteException {
         val payload = reply.payload?.let {
             runCatching { Json.decodeFromString<KeelErrorPayload>(it.decodeToString()) }.getOrNull()
         }
         return KeelRemoteException(
             plugin = PluginNames.of(pluginId),
-            remoteType = payload?.type ?: "PluginFailure",
-            remoteMessage = payload?.message ?: "插件返回 status=${reply.status}",
-            remoteTrace = payload?.trace.orEmpty(),
-            truncated = payload?.truncated ?: false,
+            chain = payload?.chain?.takeIf { it.isNotEmpty() }
+                ?: listOf(KeelErrorEntry("PluginFailure", "插件返回 status=${reply.status}")),
+            // 丢掉 `Throwable.<init>` 这类构造帧，只留真正调用方
+            callerFrames = callSite.toKeelError().chain.firstOrNull()?.frames.orEmpty()
+                .dropWhile { it.symbol.startsWith("kfun:kotlin.Throwable#<init>") },
         )
+    }
+
+    /** 与前端约定的错误体：`{ "data": null, "code": 500, "msg": "..." }`。 */
+    private fun errorBody(message: String): String = """{"data":null,"code":500,"msg":${jsonString(message)}}"""
+
+    private fun jsonString(text: String): String = buildString {
+        append('"')
+        for (ch in text) {
+            when (ch) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(ch)
+            }
+        }
+        append('"')
     }
 
     private suspend fun dispatch(call: ApplicationCall) {
@@ -193,10 +214,21 @@ internal object HostHttp {
             HttpRouteRequest(match.routeId, match.pathParameters, request)
         ).encodeToByteArray()
 
+        // 进消息泵之前先留一份调用方栈：出错时要能看到「谁发起的」，
+        // 而不是泵唤醒后调度器留下的那一串无意义帧
+        val callSite = Throwable()
+
         val reply = HostPump.request(match.pluginId, KEEL_SUBJECT_HTTP.toULong(), payload, 30_000)
         if (reply != null && reply.status != KEEL_OK.toInt()) {
-            // 插件把异常编码成信封回投；在这里重建成可读的远端异常再抛给引擎
-            throw remoteError(match.pluginId, reply)
+            val error = remoteError(match.pluginId, reply, callSite)
+            // 自己记录并返回 JSON，不再把异常抛给 Ktor（避免它再打一遍 Unhandled）
+            Log.error("$method $path 处理失败\n$error", tag = "HTTP OUT")
+            call.respondText(
+                text = errorBody(error.chain.firstOrNull()?.message ?: "插件执行失败"),
+                contentType = ContentType.Application.Json,
+                status = HttpStatusCode.InternalServerError,
+            )
+            return
         }
         val response = reply?.payload?.let {
             try {

@@ -35,3 +35,6 @@ internal object HostBootstrap {
         Log.info("working dir: ${currentWorkingDirectory()}", tag = "Bootstrap")
     }
 }
+
+/** 由 `main` 在看门狗启动前调用，保证横幅排在所有日志之前。 */
+internal actual fun printStartupBanner() = HostBootstrap.printStartupInfo()

@@ -1235,6 +1235,150 @@ static const char *keel_pretty_symbol(const char *raw, char *buffer, size_t capa
     return buffer;
 }
 
+/* 对外的符号还原入口：上层（Kotlin 日志）只关心“转换成功没有”。 */
+int keel_symbol_demangle(const char *mangled, char *out, uint32_t capacity) {
+    char buffer[1024];
+    const char *pretty;
+    if (!mangled || !out || capacity < 2) return 0;
+    pretty = keel_pretty_symbol(mangled, buffer, sizeof buffer);
+    if (pretty == mangled) return 0;
+    keel_copy(out, capacity, pretty);
+    return 1;
+}
+
+/* 运行时地址 → 模块名 + 模块内偏移，跨平台各用各的 API。 */
+int keel_locate_address(uint64_t address, char *module, uint32_t capacity, uint64_t *rva) {
+    if (!address || !module || !capacity) return 0;
+#ifdef _WIN32
+    {
+        HMODULE handle = NULL;
+        wchar_t wide[KEEL_PATH_MAX];
+        char path[KEEL_PATH_MAX];
+        const char *base_name;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                (LPCWSTR)(uintptr_t)address, &handle) || !handle) {
+            return 0;
+        }
+        if (!GetModuleFileNameW(handle, wide, KEEL_PATH_MAX)) return 0;
+        keel_wide_to_utf8(wide, path, sizeof path);
+        base_name = strrchr(path, '\\');
+        keel_copy(module, (size_t)capacity, base_name ? base_name + 1 : path);
+        if (rva) *rva = address - (uint64_t)(uintptr_t)handle;
+        return 1;
+    }
+#else
+    {
+        Dl_info info;
+        const char *base_name;
+        if (!dladdr((void *)(uintptr_t)address, &info) || !info.dli_fname) return 0;
+        base_name = strrchr(info.dli_fname, '/');
+        keel_copy(module, (size_t)capacity, base_name ? base_name + 1 : info.dli_fname);
+        if (rva) *rva = address - (uint64_t)(uintptr_t)info.dli_fbase;
+        return 1;
+    }
+#endif
+}
+
+
+/* 去掉 C++ 模板参数 `<...>`（支持嵌套）：报告只看函数本体，模板实参没意义。 */
+static void keel_drop_templates(char *text) {
+    char *read = text;
+    char *write = text;
+    int depth = 0;
+    for (; *read; read++) {
+        if (*read == '<') {
+            depth++;
+            continue;
+        }
+        if (*read == '>' && depth) {
+            depth--;
+            continue;
+        }
+        if (!depth) *write++ = *read;
+    }
+    *write = '\0';
+}
+
+/* `kfun:a.b.C#m(params){}ret` → `a.b.C.m`，与 Kotlin 侧日志保持同一种写法。 */
+static void keel_pretty_kfun(char *text) {
+    size_t length;
+    const char suffix[] = ".internal";
+    char *cut;
+    char *cursor;
+    if (strncmp(text, "kfun:", 5) != 0) return;
+    memmove(text, text + 5, strlen(text + 5) + 1);
+    cut = strpbrk(text, "({");
+    if (cut) *cut = '\0';
+    for (cursor = text; *cursor; cursor++) {
+        if (*cursor == '#') *cursor = '.';
+    }
+    length = strlen(text);
+    if (length > sizeof suffix - 1 &&
+        strcmp(text + length - (sizeof suffix - 1), suffix) == 0) {
+        text[length - (sizeof suffix - 1)] = '\0';
+    }
+    /* kfun 名里也可能带泛型参数 */
+    keel_drop_templates(text);
+}
+
+/* `_<hex>_N_knbridgeM`：hex 段是「模块坐标 + 源文件路径」，还原成 `包.类.<knbridge>`。 */
+static int keel_hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return c - 'A' + 10;
+}
+
+static int keel_is_hex(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static void keel_pretty_bridge(char *text) {
+    const char *tail;
+    const char *cursor;
+    const char *marker;
+    size_t hex_length;
+    size_t index;
+    size_t out = 0;
+    char decoded[1024];
+
+    if (text[0] != '_' || strncmp(text, "_Z", 2) == 0) return;
+    tail = strstr(text, "_knbridge");
+    if (!tail) return;
+    cursor = text + 1;
+    while (cursor < tail && keel_is_hex(*cursor)) cursor++;
+    hex_length = (size_t)(cursor - (text + 1));
+    if (!hex_length || hex_length % 2 != 0 || hex_length / 2 >= sizeof decoded) return;
+    if (cursor < tail && *cursor != '_') return;
+    for (index = 0; index < hex_length / 2; index++) {
+        decoded[index] = (char)((keel_hex_value(text[1 + index * 2]) << 4) |
+                                keel_hex_value(text[2 + index * 2]));
+    }
+    decoded[index] = '\0';
+
+    marker = strstr(decoded, "/kotlin/");
+    marker = marker ? marker + 8 : decoded;
+    while (*marker && out + 16 < sizeof decoded) {
+        text[out++] = *marker == '/' ? '.' : *marker;
+        marker++;
+    }
+    text[out] = '\0';
+    if (out > 3 && strcmp(text + out - 3, ".kt") == 0) {
+        out -= 3;
+        text[out] = '\0';
+    }
+    strcat(text, ".<knbridge>");
+}
+
+/* 一行帧：符号与偏移都放在同一列（模块名对齐 28 列）。 */
+static void keel_print_frame(FILE *out, const KeelTargetModule *module, uint64_t module_offset,
+                             const char *symbol) {
+    if (symbol && *symbol) {
+        fprintf(out, "    at %-28s%s", module->name, symbol);
+    } else {
+        fprintf(out, "    at %-28s0x%llx", module->name, (unsigned long long)module_offset);
+    }
+}
 
 static KeelTargetModule *keel_target_module_of(KeelTargetModule *modules, int count,
                                                uint64_t address) {
@@ -1267,17 +1411,23 @@ static void keel_dump_candidates(FILE *out, const unsigned char *stack, size_t s
         if (has_previous && value == previous) continue;
         previous = value;
         has_previous = 1;
-        fprintf(out, "    [%02d] 0x%016llx  %s+0x%llx  (栈 +0x%zx)", printed,
-                (unsigned long long)value, module->name,
-                (unsigned long long)(value - module->start), offset);
         symbol = keel_module_symbolize(module, value, &symbol_offset);
         if (symbol) {
             char pretty[2048];
-            fprintf(out, "  %s+0x%llx",
-                    keel_pretty_symbol(symbol, pretty, sizeof pretty),
-                    (unsigned long long)symbol_offset);
+            char plain[2048];
+            keel_copy(plain, sizeof plain, keel_pretty_symbol(symbol, pretty, sizeof pretty));
+            if (strncmp(plain, "kfun:", 5) == 0) {
+                keel_pretty_kfun(plain);
+            } else if (strstr(plain, "_knbridge")) {
+                keel_pretty_bridge(plain);
+            } else {
+                keel_drop_templates(plain);
+            }
+            keel_print_frame(out, module, value - module->start, plain);
+        } else {
+            keel_print_frame(out, module, value - module->start, NULL);
         }
-        fputc('\n', out);
+        fprintf(out, "  (stack+0x%zx)\n", offset);
         printed++;
     }
     if (!printed) fputs("    (栈里没有落在模块范围内的候选返回地址)\n", out);
@@ -1322,13 +1472,27 @@ static void keel_dump_crash_site(FILE *out, const KeelCrashRecord *rec, KeelTarg
         }
     }
     if (!owner) return;
-    fprintf(out, "\n崩溃位置    : %s+0x%llx", owner->name,
-            (unsigned long long)(rec->pc - owner->start));
-    symbol = keel_module_symbolize(owner, rec->pc, &offset);
-    if (symbol) {
-        char pretty[2048];
-        fprintf(out, "  %s+0x%llx", keel_pretty_symbol(symbol, pretty, sizeof pretty),
-                (unsigned long long)offset);
+    fputs("\n崩溃位置    : ", out);
+    if (rec->pc >= owner->start) {
+        symbol = keel_module_symbolize(owner, rec->pc, &offset);
+        if (symbol) {
+            char pretty[2048];
+            char plain[2048];
+            keel_copy(plain, sizeof plain, keel_pretty_symbol(symbol, pretty, sizeof pretty));
+            if (strncmp(plain, "kfun:", 5) == 0) {
+                keel_pretty_kfun(plain);
+            } else if (strstr(plain, "_knbridge")) {
+                keel_pretty_bridge(plain);
+            } else {
+                keel_drop_templates(plain);
+            }
+            fprintf(out, "%-28s%s", owner->name, plain);
+        } else {
+            fprintf(out, "%-28s0x%llx", owner->name,
+                    (unsigned long long)(rec->pc - owner->start));
+        }
+    } else {
+        fprintf(out, "%-28s0x0", owner->name);
     }
     fputc('\n', out);
 }

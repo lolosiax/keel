@@ -42,8 +42,10 @@ class HelloPlugin : Plugin {
         // 错误传递自检：抛一个带 cause 的异常，验证跨运行时的错误栈与 caused by
         context.routes.register(RouteDescriptor("GET", "/boom", "hello#boom")) { _, _ ->
             throw IllegalStateException(
-                "boom from plugin",
-                IllegalArgumentException("inner cause from plugin"),
+                "【手工触发】/boom 故意抛出的外层异常，用来验证跨模块错误栈传递是否完整",
+                IllegalArgumentException(
+                    "【手工触发】/boom 的内层 cause，用来验证 caused by 链是否被保留",
+                ),
             )
         }
         Log.info("loaded ${context.metadata.id}")

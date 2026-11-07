@@ -30,7 +30,6 @@ internal actual fun loadPluginsFromCli(
 
     // 尽早接管 Ctrl+C，启动阶段的中断也走优雅停机
     HostBootstrap.installShutdownHook()
-    HostBootstrap.printStartupInfo()
 
     val host = HostClasspath(EmptyClasspath)
     val result = PluginLoader(host, cache).loadAll(dir)

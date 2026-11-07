@@ -7,6 +7,7 @@ import moe.lolosia.keel.api.log.LogLevel
 import moe.lolosia.keel.api.log.LogSite
 import moe.lolosia.keel.api.log.LogSiteCodec
 import moe.lolosia.keel.api.log.LogSink
+import moe.lolosia.keel.api.log.StackTraceFormat
 
 /**
  * 插件侧日志出口：把日志作为 `KEEL_EVENT_LOG` 投递到 Host 收件箱。
@@ -50,7 +51,7 @@ internal class NativePluginLogger(
     }
 
     private fun withCause(message: String, cause: Throwable?): String =
-        if (cause == null) message else "$message\n${cause.stackTraceToString()}"
+        if (cause == null) message else "$message\n${StackTraceFormat.throwable(cause)}"
 
     private fun send(level: Int, message: String) {
         val hostInbox = host?.pointed?.host_inbox ?: return

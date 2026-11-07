@@ -3,16 +3,29 @@ package moe.lolosia.keel.api.error
 import kotlinx.serialization.Serializable
 
 /**
- * 跨运行时传递的错误信封。
- *
- * [type] / [message] 是原始异常的首行；[trace] 是 `stackTraceToString()` 去掉首行后的
- * 帧文本（可能包含多段 `Caused by:`），Host 侧据此重建可读的错误链。
+ * 一帧远端栈：模块名 + 模块内偏移是主要信息，地址仅作参考，
+ * 符号保留原始形式（`kfun:` / `_Z`），由接收方格式化。
  */
+@Serializable
+data class KeelErrorFrame(
+    val module: String = "",
+    val rva: Long = 0,
+    val address: Long = 0,
+    val symbol: String = "",
+)
+
+/** 错误链的一层；帧从这里开始按 Java 风格渲染。 */
+@Serializable
+data class KeelErrorEntry(
+    val type: String,
+    val message: String = "",
+    val frames: List<KeelErrorFrame> = emptyList(),
+)
+
+/** 跨运行时传递的错误信封：外层在前，`Caused by:` 依次向后。 */
 @Serializable
 data class KeelErrorPayload(
     val plugin: String = "",
-    val type: String,
-    val message: String,
-    val trace: String,
+    val chain: List<KeelErrorEntry> = emptyList(),
     val truncated: Boolean = false,
 )

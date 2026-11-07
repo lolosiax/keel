@@ -89,19 +89,36 @@ class PluginLoader(
         host.unregister(pluginId)
     }
 
+    /**
+     * 把包内动态库落到缓存目录。
+     *
+     * 每次都重写：只比大小挡不住「同尺寸重构」（改字符串常量很容易让 dll 大小不变），
+     * 曾经因此加载到上一版插件。目标文件被正在运行的进程占用时（Windows 共享冲突、
+     * Linux ETXTBSY），退到 `name.1.dll`、`name.2.dll` …… 换名加载。
+     */
     private fun installLibrary(
         manifest: KeelPackageManifest,
         libPath: String,
         bytes: ByteArray,
     ): String {
         val dir = "$cacheRoot/${manifest.id}/${manifest.version}"
-        val dest = "$dir/${libPath.substringAfterLast('/')}"
-        // 同名同大小视为已解包：库可能仍被当前进程映射，重写会破坏正在使用的文件
-        if (fileSizeOrNull(dest) != bytes.size.toLong()) {
-            mkdirs(dir)
-            PluginFs.writeBytes(dest, bytes)
+        mkdirs(dir)
+        val fileName = libPath.substringAfterLast('/')
+        val stem = fileName.substringBeforeLast('.', fileName)
+        val suffix = fileName.removePrefix(stem)
+        var target = "$dir/$fileName"
+        var attempt = 0
+        while (true) {
+            try {
+                PluginFs.writeBytes(target, bytes)
+                return target
+            } catch (e: Throwable) {
+                attempt++
+                // 文件被占用就换名，最多试几个，避免无限增长
+                if (attempt > 8) throw e
+                target = "$dir/$stem.$attempt$suffix"
+            }
         }
-        return dest
     }
 
     private fun pluginIdOrNull(keelPath: String): String? =

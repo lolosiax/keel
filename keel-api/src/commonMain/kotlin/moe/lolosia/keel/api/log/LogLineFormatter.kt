@@ -23,7 +23,8 @@ object LogLineFormatter {
         moduleAnsi: String? = null,
         sourceAnsi: String? = null,
     ): String {
-        val text = if (cause == null) message else "$message | ${cause.stackTraceToString()}"
+        // 异常另起一行，避免和日志正文挤在同一行
+        val text = if (cause == null) message else "$message\n${StackTraceFormat.throwable(cause)}"
         val levelText = level.name.padEnd(5)
         val moduleText = module.padEnd(moduleWidth)
         val sourceText = source.padEnd(sourceWidth)

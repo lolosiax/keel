@@ -90,9 +90,13 @@ private fun dispatch(event: CPointer<KeelEvent>?) {
     try {
         dispatchEvent(e)
     } catch (t: Throwable) {
-        // 异常绝不能让 staticCFunction 抛回 C 侧，否则整个进程 terminate
-        Log.error("事件处理失败（kind=${e.kind}）", cause = t)
-        if (e.kind == KEEL_EVENT_COMMAND.toUShort()) replyError(e, t)
+        // 异常绝不能让 staticCFunction 抛回 C 侧，否则整个进程 terminate。
+        // COMMAND 的错误回投给 Host，由 Host 统一打印完整错误链；其余事件没有回包，只能本地记录。
+        if (e.kind == KEEL_EVENT_COMMAND.toUShort()) {
+            replyError(e, t)
+        } else {
+            Log.error("事件处理失败（kind=${e.kind}）", cause = t)
+        }
     }
 }
 

@@ -4,6 +4,11 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.host.build.BuildInfo
 
 /**
+ * 启动横幅与构建信息。放在看门狗/插件加载之前，保证 `keel` 徽标是第一屏内容。
+ */
+internal expect fun printStartupBanner()
+
+/**
  * `--inspect <path>` 诊断入口：读取 `.keel` 的 manifest 与 `resources/`，
  * 并验证卸载后读取立即失效。仅用于开发期验证，不影响正常启动。
  */
@@ -46,6 +51,8 @@ fun main(args: Array<String>) {
 
     // --inspect 是一次性诊断，不值得为它常驻一个看门狗进程
     if (args.firstOrNull() != "--inspect") {
+        // 横幅先于看门狗、插件加载等日志
+        printStartupBanner()
         val watchdog = startWatchdog()
         if (watchdog != 0uL) {
             Log.debug("watchdog started (pid=$watchdog)", tag = "Bootstrap")
