@@ -57,6 +57,9 @@ object PluginPackageReader {
      */
     fun read(keelPath: String): KeelPackageManifest {
         val classpath = FileZipClasspath.open(keelPath)
+        if (classpath.entries.isEmpty()) {
+            throw IllegalArgumentException("$keelPath 不是有效的 .keel（zip 无法解析或为空）")
+        }
         val bytes = classpath.read(MANIFEST_PATH)
             ?: throw IllegalArgumentException("$keelPath 缺少 $MANIFEST_PATH")
         return try {

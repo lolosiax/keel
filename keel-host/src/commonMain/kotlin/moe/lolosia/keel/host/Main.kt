@@ -6,6 +6,13 @@ package moe.lolosia.keel.host
  */
 internal expect fun inspectKeelPackage(path: String)
 
+/**
+ * `--plugins <dir> [cacheDir]`：扫描目录下的 `.keel`，校验后解出动态库并注册资源。
+ *
+ * 暂不 `dlopen`，只验证「包 → 缓存目录 → classpath 注册」这一段。
+ */
+internal expect fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?)
+
 /** 读取当前可执行文件内嵌 classpath 中的资源；未嵌入时返回 null。 */
 internal expect fun embeddedResource(path: String): String?
 
@@ -15,10 +22,26 @@ internal expect fun embeddedResource(path: String): String?
  * 当前是骨架：只打印版本信息，加载器与引擎在 DEMO 阶段接入（见 doc/roadmap.md）。
  */
 fun main(args: Array<String>) {
-    if (args.firstOrNull() == "--inspect" && args.size >= 2) {
-        inspectKeelPackage(args[1])
-        return
+    when (args.firstOrNull()) {
+        "--inspect" -> {
+            if (args.size < 2) {
+                println("用法：keel-host --inspect <.keel 路径>")
+                return
+            }
+            inspectKeelPackage(args[1])
+            return
+        }
+
+        "--plugins" -> {
+            if (args.size < 2) {
+                println("用法：keel-host --plugins <插件目录> [缓存目录]")
+                return
+            }
+            loadPluginsFromCli(args[1], args.getOrNull(2))
+            return
+        }
     }
+
     println("keel host 0.1.0-SNAPSHOT (skeleton)")
     println("embedded host.txt: ${embeddedResource("host.txt")}")
 }
