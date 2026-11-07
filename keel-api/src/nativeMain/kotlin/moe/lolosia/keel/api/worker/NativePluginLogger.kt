@@ -53,7 +53,7 @@ internal class NativePluginLogger(
         if (cause == null) message else "$message\n${cause.stackTraceToString()}"
 
     private fun send(level: Int, message: String) {
-        val hostInbox = host?.pointed?.host_inbox?.invoke() ?: return
+        val hostInbox = host?.pointed?.host_inbox ?: return
         val bytes = message.encodeToByteArray()
         val payload = keel_payload_alloc(bytes.size.toUInt()) ?: return
         if (bytes.isNotEmpty()) {

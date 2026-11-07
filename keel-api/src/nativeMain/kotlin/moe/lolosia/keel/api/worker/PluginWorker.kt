@@ -63,10 +63,21 @@ object PluginWorker {
     }
 }
 
-/** 事件分发入口；`on_event` 不能捕获状态，所以放在顶层。 */
+/** 已经告警过的事件类型；只在 Worker 线程访问。 */
+private val warnedKinds = mutableSetOf<Int>()
+
+/**
+ * 事件分发入口；`on_event` 不能捕获状态，所以放在顶层。
+ *
+ * 目前只有 SHUTDOWN 有处理器；其它事件显式告警一次，避免「发了没人管」还查不到线索。
+ */
 private fun dispatch(event: CPointer<KeelEvent>?) {
     val e = event?.pointed ?: return
-    if (e.kind.toUInt() == KEEL_EVENT_SHUTDOWN) {
-        PluginWorker.disable()
+    val kind = e.kind.toInt()
+    when (kind) {
+        KEEL_EVENT_SHUTDOWN.toInt() -> PluginWorker.disable()
+        else -> if (warnedKinds.add(kind)) {
+            Log.warn("插件暂不处理事件 kind=$kind（分发尚未接入）")
+        }
     }
 }

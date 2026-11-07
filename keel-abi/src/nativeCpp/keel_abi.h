@@ -131,7 +131,13 @@ typedef struct KeelHostApi {
 
     uint64_t host_id;
 
-    KeelQueue *(*host_inbox)(void);
+    /*
+     * Host 收件箱：bootstrap 前由 Host 填好，之后只读。
+     *
+     * 必须是指针字段而不是函数指针：插件在自己的 Worker 线程上调用函数指针会进入
+     * Host 的 Kotlin 运行时，违反「一个线程只能进入一个运行时」。
+     */
+    KeelQueue *host_inbox;
 
     /*
      * 把宿主侧（或插件侧）钉住的 StableRef 注册为跨运行时句柄。

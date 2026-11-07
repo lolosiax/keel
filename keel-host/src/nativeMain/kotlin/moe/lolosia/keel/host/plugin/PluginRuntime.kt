@@ -23,6 +23,8 @@ internal class PluginRuntime(
     /** 让 C 侧投递 SHUTDOWN 并 join 泵线程；调用后该插件不再处理事件。 */
     fun shutdown() {
         shutdownFn?.invoke()
+        // 队列已在 keel_plugin_shutdown 里销毁，之后不能再往里转发事件
+        unregisterPluginInbox(pluginId)
     }
 }
 
@@ -59,6 +61,7 @@ internal fun startPlugin(
     }
     val inbox = api.inbox
         ?: throw IllegalStateException("${manifest.id} bootstrap 未返回 inbox")
+    registerPluginInbox(pluginId, inbox)
 
     val correlation = nextCorrelation()
     memScoped {
@@ -76,7 +79,13 @@ internal fun startPlugin(
         }
     }
 
-    awaitComplete(manifest, correlation, timeoutMs)
+    try {
+        awaitComplete(manifest, correlation, timeoutMs)
+    } catch (e: Exception) {
+        // 启动失败时插件不会再有 Worker，登记要一并撤回
+        unregisterPluginInbox(pluginId)
+        throw e
+    }
 
     val shutdownFn = library.symbol("keel_plugin_shutdown")
         ?.reinterpret<CFunction<() -> Unit>>()

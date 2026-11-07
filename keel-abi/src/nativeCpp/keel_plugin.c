@@ -35,9 +35,9 @@ static void release_payload(KeelEvent *event) {
 }
 
 static void reply_to_host(KeelPluginState *state, const KeelEvent *request, KeelStatus status) {
-    if (!state->host || !state->host->host_inbox) return;
+    if (!state->host) return;
 
-    KeelQueue *host_inbox = state->host->host_inbox();
+    KeelQueue *host_inbox = state->host->host_inbox;
     if (!host_inbox) return;
 
     KeelEvent out;

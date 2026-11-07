@@ -131,6 +131,9 @@ Host 线程                    C shim(host)          C shim(plugin dylib)
 ### 4.1 队列
 
 - 每个模块一个 **inbox**，Host 一个 inbox；队列由**接收方**创建并拥有。
+- `KeelHostApi.host_inbox` 是**普通指针字段**（bootstrap 前填好、之后只读），不是函数指针。
+  插件在自己的 Worker 线程上调 Host 的函数指针会进入 Host 运行时，违反 §2；
+  需要「取 Host 收件箱」的地方一律直接读这个字段。
 - 发送方用自己的 C shim 副本 `keel_queue_push(receiver.inbox, ...)`：
   只写共享内存 + 唤醒，不进入接收方 Kotlin 运行时。
 - 跨平台原语：Linux 用 `pthread_mutex` + `pthread_cond`，Windows 用
