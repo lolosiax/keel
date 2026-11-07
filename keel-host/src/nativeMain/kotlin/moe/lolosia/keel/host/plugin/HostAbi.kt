@@ -40,6 +40,7 @@ internal class HostEvent(
     val correlation: ULong,
     val subject: ULong,
     val status: Int,
+    val payload: ByteArray? = null,
 )
 
 /**
@@ -51,7 +52,12 @@ internal fun popHostEvent(timeoutMs: UInt): HostEvent? = memScoped {
     val event = alloc<KeelEvent>()
     when (keel_queue_pop(hostInbox, event.ptr, timeoutMs)) {
         KEEL_OK -> {
-            // 先复制标量；载荷按契约立即归还，之后指针不再有效
+            // 先复制标量与载荷；载荷按契约立即归还，之后指针不再有效
+            val payload = if (event.payload_size > 0u) {
+                event.payload?.reinterpret<ByteVar>()?.readBytes(event.payload_size.toInt())
+            } else {
+                null
+            }
             val snapshot = HostEvent(
                 kind = event.kind.toInt(),
                 source = event.source,
@@ -59,6 +65,7 @@ internal fun popHostEvent(timeoutMs: UInt): HostEvent? = memScoped {
                 correlation = event.correlation,
                 subject = event.subject,
                 status = event.status,
+                payload = payload,
             )
             event.release?.invoke(event.release_user, event.ptr)
             snapshot

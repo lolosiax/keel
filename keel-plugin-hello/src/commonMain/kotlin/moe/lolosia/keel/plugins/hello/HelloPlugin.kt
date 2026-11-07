@@ -17,15 +17,15 @@ class HelloPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
-        context.logger.info("${context.metadata.id} loaded")
+        context.logger.info("loaded")
     }
 
     override fun onEnable() {
-        context?.let { it.logger.info("${it.metadata.id} enabled") }
+        context?.logger?.info("enabled")
     }
 
     override fun onDisable() {
-        context?.let { it.logger.info("${it.metadata.id} disabled") }
+        context?.logger?.info("disabled")
         context = null
     }
 }

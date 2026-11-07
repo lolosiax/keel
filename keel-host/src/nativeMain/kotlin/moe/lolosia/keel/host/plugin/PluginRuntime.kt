@@ -92,6 +92,10 @@ private fun awaitComplete(manifest: KeelPackageManifest, correlation: ULong, tim
         if (remaining <= 0.milliseconds) break
 
         val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: break
+        if (event.kind == KEEL_EVENT_LOG.toInt()) {
+            handleLogEvent(event)
+            continue
+        }
         if (event.kind != KEEL_EVENT_COMPLETE.toInt()) continue
         if (event.correlation != correlation) continue
         if (event.status != KEEL_OK.toInt()) {

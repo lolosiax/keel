@@ -5,9 +5,15 @@ package moe.lolosia.keel.api
  */
 interface PluginLogger {
 
+    fun trace(message: String)
+
+    fun debug(message: String)
+
     fun info(message: String)
 
     fun warn(message: String)
 
     fun error(message: String, cause: Throwable? = null)
+
+    fun fatal(message: String, cause: Throwable? = null)
 }

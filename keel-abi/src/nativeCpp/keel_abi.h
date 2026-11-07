@@ -45,8 +45,18 @@ typedef enum KeelEventKind {
     KEEL_EVENT_CANCEL = 3,
     KEEL_EVENT_BUS = 4,
     KEEL_EVENT_DISPOSE = 5,
-    KEEL_EVENT_SHUTDOWN = 6
+    KEEL_EVENT_SHUTDOWN = 6,
+    KEEL_EVENT_LOG = 7
 } KeelEventKind;
+
+typedef enum KeelLogLevel {
+    KEEL_LOG_TRACE = 0,
+    KEEL_LOG_DEBUG = 1,
+    KEEL_LOG_INFO = 2,
+    KEEL_LOG_WARN = 3,
+    KEEL_LOG_ERROR = 4,
+    KEEL_LOG_FATAL = 5
+} KeelLogLevel;
 
 /*
  * 保留 subject 值。业务 subject 从 0x1000 开始，避免与协议事件冲突。
@@ -223,6 +233,13 @@ void keel_queue_wake(KeelQueue *queue);
  * 发送方把它作为 KeelEvent.release 交给接收方，避免跨 CRT 释放。
  */
 void keel_event_release_default(void *user, const KeelEvent *event);
+
+/* 载荷分配 / 拷贝：分配方用自己的 CRT，接收方复制后调用 release 归还。 */
+void *keel_payload_alloc(uint32_t size);
+void keel_payload_copy(void *dst, const void *src, uint32_t size);
+
+/* 把 release 字段指向本二进制的 keel_event_release_default。 */
+void keel_event_set_default_release(KeelEvent *event);
 
 #ifdef __cplusplus
 }

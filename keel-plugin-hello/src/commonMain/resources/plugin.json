@@ -9,5 +9,6 @@
   },
   "resources": "resources/",
   "requires": [],
+  "authors": ["lolosia"],
   "description": "最小示例插件"
 }

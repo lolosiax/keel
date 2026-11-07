@@ -66,8 +66,11 @@ class KeelAbiPlugin : Plugin<Project> {
         val libDir = File(extractDir, "lib/${target.name}").absolutePath
         val exportSymbols = DEFAULT_EXPORTS + extension.exports
         // PE 导出表需要显式列表；Kotlin 的 @CName 符号不会自动进导出表
+        // 不要放进 extractDir：Sync 任务会清理目录，把这个文件删掉
         val defFile = if (target.konanTarget.family == Family.MINGW) {
-            File(extractDir, "keel-plugin.def")
+            project.layout.buildDirectory
+                .file("generated/keel-abi/${target.name}-def/keel-plugin.def")
+                .get().asFile
         } else {
             null
         }

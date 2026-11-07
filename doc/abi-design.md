@@ -142,7 +142,7 @@ Host 线程                    C shim(host)          C shim(plugin dylib)
 ```c
 typedef struct KeelEvent {
     uint32_t size;          // sizeof(KeelEvent)
-    uint16_t kind;          // COMMAND / COMPLETE / CANCEL / BUS / DISPOSE / SHUTDOWN
+    uint16_t kind;          // COMMAND / COMPLETE / CANCEL / BUS / DISPOSE / SHUTDOWN / LOG
     uint16_t flags;
     uint64_t seq;
     uint64_t source;        // 发送方模块 id，0 = Host
@@ -164,6 +164,10 @@ typedef struct KeelEvent {
   不能用 Kotlin 的 `ByteArray` 或另一个 CRT 的 `free`。
 - 背压：队列有界。控制类事件（命令 / 取消 / 关闭）阻塞等待或返回 `KEEL_ERR_FULL`；
   总线类事件满了丢最新并计数，不能阻塞发送方 Worker。
+- 日志事件：`KEEL_EVENT_LOG` 的 `status` 是 `KeelLogLevel`
+  （TRACE / DEBUG / INFO / WARN / ERROR / FATAL），`payload` 是 UTF-8 日志正文。
+  发送方用 `keel_payload_alloc` 分配、`keel_payload_copy` 写入，
+  再用 `keel_event_set_default_release` 挂上本二进制的归还函数。
 
 ### 4.3 启动握手
 

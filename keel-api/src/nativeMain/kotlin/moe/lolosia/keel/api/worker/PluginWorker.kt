@@ -4,7 +4,7 @@ import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.pointed
 import kotlinx.cinterop.staticCFunction
 import moe.lolosia.keel.abi.c.*
-import moe.lolosia.keel.api.Plugin
+import moe.lolosia.keel.api.*
 
 /**
  * 插件 Worker 的通用运行时。
@@ -33,9 +33,27 @@ object PluginWorker {
         if (api == null || out == null) return KEEL_ERR_INVALID
         if (api.pointed.abi_version != KEEL_ABI_VERSION) return KEEL_ERR_UNSUPPORTED
 
-        plugin = factory()
-        out.pointed.on_event = staticCFunction(::dispatch)
-        return KEEL_OK
+        val pluginId = api.pointed.plugin_id
+        val logger = NativePluginLogger(api.pointed.host, pluginId)
+        val metadata = PluginMetadata(
+            id = pluginId.toString(),
+            name = "",
+            version = "",
+            entry = "",
+        )
+        val context = PluginContextImpl(metadata, logger)
+
+        return try {
+            val instance = factory()
+            instance.onLoad(context)
+            instance.onEnable()
+            plugin = instance
+            out.pointed.on_event = staticCFunction(::dispatch)
+            KEEL_OK
+        } catch (e: Throwable) {
+            logger.error("插件生命周期失败", e)
+            KEEL_ERR_FAILED
+        }
     }
 
     internal fun disable() {

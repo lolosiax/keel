@@ -19,6 +19,7 @@ data class KeelPackageManifest(
     val lib: Map<String, String> = emptyMap(),
     val resources: String = "resources/",
     val requires: List<String> = emptyList(),
+    val authors: List<String> = emptyList(),
     val sha256: String? = null,
 ) {
 
@@ -29,5 +30,6 @@ data class KeelPackageManifest(
         name = name.ifEmpty { id },
         version = version,
         entry = entry,
+        authors = authors,
     )
 }

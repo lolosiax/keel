@@ -1,5 +1,7 @@
 package moe.lolosia.keel.host
 
+internal const val KEEL_VERSION = "0.1.0-SNAPSHOT"
+
 /**
  * `--inspect <path>` 诊断入口：读取 `.keel` 的 manifest 与 `resources/`，
  * 并验证卸载后读取立即失效。仅用于开发期验证，不影响正常启动。
@@ -42,6 +44,6 @@ fun main(args: Array<String>) {
         }
     }
 
-    Log.info("keel host 0.1.0-SNAPSHOT")
+    Log.info("keel host $KEEL_VERSION")
     Log.info("embedded host.txt: ${embeddedResource("host.txt")}")
 }

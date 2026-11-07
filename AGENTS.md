@@ -302,6 +302,8 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceUnavailableException
   web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody / UserSnapshot
 keel-api/src/nativeMain/…/api/worker/PluginWorker.kt   `@CName` Worker 入口分发
+keel-api/src/nativeMain/…/api/worker/NativePluginLogger.kt  插件日志 → Host 收件箱
+keel-api/src/nativeMain/…/api/worker/PluginContextImpl.kt   最小上下文（metadata / logger / 空 classpath）
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
 keel-host/src/commonMain/…/host/Log.kt                Host 日志门面
@@ -309,6 +311,7 @@ keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 
 keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
 keel-host/src/nativeMain/…/host/plugin/
   PluginLoader / LoadedPlugin / PluginRuntime / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
+  LogEvent / HostPump / PluginNames（日志解码与 Host 收件箱消费）
   NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / package.native.kt
 keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs / package actual
 keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
