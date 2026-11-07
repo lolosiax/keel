@@ -9,11 +9,12 @@ import moe.lolosia.keel.api.log.LogSiteCodec
 internal fun handleLogEvent(event: HostEvent) {
     val payload = event.payload?.decodeToString() ?: return
     val level = levelOf(event.status)
+    val pluginName = PluginNames.of(event.source)
     val decoded = LogSiteCodec.decode(payload)
     if (decoded != null) {
-        Log.emit(level, decoded.site, null, decoded.message)
+        Log.emit(level, decoded.site, decoded.module ?: pluginName, decoded.message)
     } else {
-        Log.emit(level, null, PluginNames.of(event.source), payload)
+        Log.emit(level, null, pluginName, payload)
     }
 }
 

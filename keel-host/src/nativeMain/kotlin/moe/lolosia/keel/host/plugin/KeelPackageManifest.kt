@@ -8,6 +8,7 @@ import moe.lolosia.keel.api.*
  *
  * @property lib 目标名 → 包内动态库相对路径
  * @property resources 资源在包内的前缀，默认 `resources/`
+ * @property color 插件日志模块名的自定义颜色（`#RRGGBB` / `#RGB`），不填则用哈希色
  */
 @Serializable
 data class KeelPackageManifest(
@@ -16,6 +17,7 @@ data class KeelPackageManifest(
     val version: String,
     val abiVersion: Int = 1,
     val entry: String,
+    val color: String? = null,
     val lib: Map<String, String> = emptyMap(),
     val resources: String = "resources/",
     val requires: List<String> = emptyList(),
@@ -31,5 +33,6 @@ data class KeelPackageManifest(
         version = version,
         entry = entry,
         authors = authors,
+        color = color,
     )
 }

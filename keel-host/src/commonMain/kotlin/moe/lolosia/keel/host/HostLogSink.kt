@@ -6,16 +6,32 @@ import moe.lolosia.keel.api.log.*
 /**
  * Host 日志出口。
  *
- * 输出格式：`yyyy-MM-dd HH:mm:ss.SSS 级别 模块 : 消息`。
- * 带调用点时模块列为 `短类名:行号`，按 [Log.displayNameWidth] 缩短并补齐；
- * 没有调用点（未改写或显式 tag）时使用 tag，默认 `host`。
+ * 输出格式：`HH:mm:ss 级别 模块 来源 : 消息`。
+ *
+ * 模块列为 Host / 插件名 / 自定义 tag，按 [Log.moduleWidth] 补齐；
+ * 来源列为 `短类名:行号`，按 [Log.displayNameWidth] 缩短并补齐；
+ * 没有调用点（未改写）时来源列显示 `-`。
+ *
+ * 终端支持 ANSI 时按 Spring Boot 风格着色：时间 faint、级别按级别取色、
+ * 模块名按哈希取色、来源列 cyan；重定向到文件或设置 `NO_COLOR` 时自动关闭。
  */
 object HostLogSink : LogSink {
 
+    private val useColor = ansiSupported()
+
     override fun log(level: LogLevel, site: LogSite?, tag: String?, message: String, cause: Throwable?) {
-        val width = Log.displayNameWidth
-        val module = site?.display(width) ?: (tag ?: "host")
-        val text = if (cause == null) message else "$message | ${cause.stackTraceToString()}"
-        println("${formatLocalTimestamp()} ${level.name.padEnd(5)} ${module.padEnd(width)} : $text")
+        val module = tag ?: "Host"
+        val source = site?.display(Log.displayNameWidth) ?: "-"
+        println(
+            LogLineFormatter.format(
+                timestamp = formatLocalTimestamp(),
+                level = level,
+                module = module,
+                source = source,
+                message = message,
+                cause = cause,
+                color = useColor,
+            ),
+        )
     }
 }

@@ -12,7 +12,11 @@ import moe.lolosia.keel.api.log.*
  */
 object Log {
 
-    /** 模块列宽度；`displayName:line` 按此宽度缩短并补齐。 */
+    /** 模块列宽度（Host / 插件名 / 自定义 tag）；默认 15。 */
+    var moduleWidth: Int = 15
+        private set
+
+    /** 来源列宽度；`displayName:line` 按此宽度缩短并补齐。 */
     var displayNameWidth: Int = 40
         private set
 
@@ -25,9 +29,11 @@ object Log {
         this.sink = sink
     }
 
-    /** 调整模块列宽度。 */
-    fun configure(displayNameWidth: Int) {
+    /** 调整模块列与来源列宽度。 */
+    fun configure(moduleWidth: Int = this.moduleWidth, displayNameWidth: Int = this.displayNameWidth) {
+        require(moduleWidth > 3) { "moduleWidth 至少为 4" }
         require(displayNameWidth > 8) { "displayNameWidth 至少为 9" }
+        this.moduleWidth = moduleWidth
         this.displayNameWidth = displayNameWidth
     }
 

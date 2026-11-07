@@ -1,6 +1,6 @@
 package moe.lolosia.keel.host
 
-/** 本地时间，格式 `yyyy-MM-dd HH:mm:ss.SSS`。 */
+/** 本地时间，格式 `HH:mm:ss`。 */
 internal expect fun formatLocalTimestamp(): String
 
 /** 当前工作目录。 */

@@ -36,11 +36,7 @@ internal class NativePluginLogger(
 
     override fun log(level: LogLevel, site: LogSite?, tag: String?, message: String, cause: Throwable?) {
         val text = withCause(message, cause)
-        val payload = when {
-            site == null -> text
-            tag == null -> LogSiteCodec.encode(site, text)
-            else -> LogSiteCodec.encode(site, "[$tag] $text")
-        }
+        val payload = if (site == null) text else LogSiteCodec.encode(site, tag, text)
         send(levelOf(level), payload)
     }
 

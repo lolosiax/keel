@@ -1,6 +1,7 @@
 {
   "id": "hello",
   "name": "Hello Plugin",
+  "color": "#FF8800",
   "version": "0.1.0",
   "abiVersion": 1,
   "entry": "keel_plugin_worker_main",

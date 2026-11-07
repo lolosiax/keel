@@ -4,15 +4,12 @@ import kotlinx.cinterop.*
 import platform.posix.*
 
 actual fun formatLocalTimestamp(): String = memScoped {
-    val now = alloc<timeval>()
-    gettimeofday(now.ptr, null)
     val seconds = alloc<time_tVar>()
-    seconds.value = now.tv_sec
-    val time = localtime(seconds.ptr) ?: return@memScoped "?"
-    val buffer = allocArray<ByteVar>(32)
-    strftime(buffer, 32uL, "%Y-%m-%d %H:%M:%S".cstr.ptr, time)
-    val millis = (now.tv_usec / 1000).toString().padStart(3, '0')
-    "${buffer.toKString()}.$millis"
+    time(seconds.ptr)
+    val local = localtime(seconds.ptr) ?: return@memScoped "?"
+    val buffer = allocArray<ByteVar>(16)
+    strftime(buffer, 16uL, "%H:%M:%S".cstr.ptr, local)
+    buffer.toKString()
 }
 
 actual fun currentWorkingDirectory(): String = memScoped {

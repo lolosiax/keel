@@ -20,6 +20,17 @@ class HelloPlugin : Plugin {
 
     override fun onEnable() {
         Log.info("enabled")
+        logLevelSamples()
+    }
+
+    /** 日志等级配色自检：每个级别各打一条。 */
+    private fun logLevelSamples() {
+        Log.trace("日志等级自检：TRACE")
+        Log.debug("日志等级自检：DEBUG")
+        Log.info("日志等级自检：INFO")
+        Log.warn("日志等级自检：WARN")
+        Log.error("日志等级自检：ERROR")
+        Log.fatal("日志等级自检：FATAL")
     }
 
     override fun onDisable() {

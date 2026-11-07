@@ -140,6 +140,15 @@ gradlew -p keel-plugin-ksp publish
     `moe.lolosia.keel.logger` 会在编译期把调用改写成带 `LogSite` 的形式（类名 / 文件 / 行号 / 包 / 类 / 函数 / 类型）。
     - `ctx.logger`（`PluginLogger`）仍然可用，但新代码优先用 `Log`，才能拿到调用点。
     - Host 侧 `HostLogSink` 与插件侧 `NativePluginLogger` 都是 `LogSink` 实现。
+    - 输出为 `HH:mm:ss 级别 模块 来源 : 消息`；模块列默认 15，Host 默认 `Host`，
+      插件默认用 manifest `name`，需要自定义时传 `tag = "Loader"` 等。
+    - 来源列默认 40，超出时保留类名，包段从右往左逐级加长直到用满预算，
+      仍放不下才从左丢段。
+    - 终端支持 ANSI 时配色：整段时间默认色；TRACE 亮灰、DEBUG 浅蓝、INFO 绿、
+      WARN 黄、ERROR 红、FATAL 红底黑字；模块名哈希取 12 色盘、来源类名 cyan、
+      `:行号` faint。重定向或 `NO_COLOR` 自动关闭，`FORCE_COLOR` / `CLICOLOR=0` 可覆盖。
+    - `plugin.json` 的 `color`（`#RRGGBB` / `#RGB`）会让该插件模块名改用 truecolor；
+      未配置时用哈希色盘。
     - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
 
 ## 5. 插件 API 与跨运行时边界
@@ -198,7 +207,7 @@ keel-plugin-<id>/
   settings.gradle.kts                          # 独立构建；按需 includeBuild 依赖的 Gradle 插件
   build.gradle.kts                             # plugins { id("moe.lolosia.keel.plugin") } + keelPlugin { target(...) }
   src/commonMain/kotlin/.../XxxPlugin.kt       # 实现（@KeelPluginMain）
-  src/commonMain/resources/plugin.json         # 部署清单（id / version / entry / lib / resources / requires）
+  src/commonMain/resources/plugin.json         # 部署清单（id / version / entry / lib / resources / requires / color）
 ```
 
 - **目标形态**：代理、分发器、CBOR 编解码、服务注册、`plugin.json`、Maven 发布配置由 Gradle 插件 + KSP 生成，
@@ -305,6 +314,7 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   Plugin / PluginContext / PluginMetadata / PluginRegistry / KeelServer / PluginLogger / Scheduler / TaskHandle
   Log.kt                              统一日志门面（of / 六个级别 / install(LogSink)）
   log/                                LogSite / LogSiteKind / LogLevel / LogSink / LogSiteCodec / StdoutLogSink
+                                      Ansi / LogLineFormatter（Spring Boot 配色与行格式）
   annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
   auth/Authorizer.kt
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
@@ -320,6 +330,7 @@ keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_C
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
 keel-host/src/commonMain/…/host/HostLogSink.kt        Host 日志出口（本地时间戳 + 调用点模块列）
 keel-host/src/commonMain/…/host/Banner.kt             启动横幅
+keel-host/src/commonMain/…/host/AnsiSupport.kt        ANSI 检测（expect）+ mingw/linux actual
 keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 实现）
 keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
 keel-host/src/nativeMain/…/host/plugin/

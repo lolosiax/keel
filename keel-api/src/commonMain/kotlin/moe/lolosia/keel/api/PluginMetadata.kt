@@ -7,6 +7,8 @@ package moe.lolosia.keel.api
  * @property version 插件版本
  * @property entry 插件 Worker 入口符号名（例如 `keel_plugin_worker_main`）；
  *   Host 只解析地址、不调用，由 `keel_plugin_bootstrap` 在事件泵线程收到 `START` 后调用它
+ * @property color 插件日志模块名的自定义颜色（`#RRGGBB` / `#RGB`）；
+ *   Host 读取 `plugin.json` 后据此使用 truecolor，未配置则用哈希色
  */
 data class PluginMetadata(
     val id: String,
@@ -15,4 +17,5 @@ data class PluginMetadata(
     val entry: String,
     val description: String = "",
     val authors: List<String> = emptyList(),
+    val color: String? = null,
 )

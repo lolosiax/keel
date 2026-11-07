@@ -7,19 +7,11 @@ actual fun formatLocalTimestamp(): String = memScoped {
     val time = alloc<SYSTEMTIME>()
     GetLocalTime(time.ptr)
     buildString {
-        append(time.wYear.toString().padStart(4, '0'))
-        append('-')
-        append(time.wMonth.toString().padStart(2, '0'))
-        append('-')
-        append(time.wDay.toString().padStart(2, '0'))
-        append(' ')
         append(time.wHour.toString().padStart(2, '0'))
         append(':')
         append(time.wMinute.toString().padStart(2, '0'))
         append(':')
         append(time.wSecond.toString().padStart(2, '0'))
-        append('.')
-        append(time.wMilliseconds.toString().padStart(3, '0'))
     }
 }
 

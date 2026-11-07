@@ -52,23 +52,64 @@ class LogSite(
         Log.emit(LogLevel.FATAL, this, tag, message, cause)
 }
 
-/** 按 Spring `%logger{40}` 的方式缩短：包段取首字母，仍超长则从左丢段并加 `…`。 */
+/**
+ * 把完整类名压缩到 [max] 列。
+ *
+ * 保留类名本身；包段先各留 1 个字符，再从右往左逐级加长（越靠后的包段允许越长），
+ * 直到用满预算。仍放不下时从左丢弃整段并加 `…`；最低每段 1 个字符。
+ */
 private fun shorten(name: String, max: Int): String {
     if (name.length <= max) return name
     val parts = name.split('.')
     if (parts.size == 1) return name.take(max)
 
     val simple = parts.last()
-    if (simple.length > max) return simple.take(max)
+    if (simple.length >= max) return simple.take(max)
 
-    val abbreviated = parts.dropLast(1).map { it.take(1) }.toMutableList()
+    val packages = parts.dropLast(1).toMutableList()
+
+    fun joinedLength(segments: Int, ellipsis: Boolean): Int =
+        (if (ellipsis) 1 else 0) + segments +
+            (segments - 1).coerceAtLeast(0) + (if (segments > 0) 1 else 0) + simple.length
+
     var dropped = false
-    while (abbreviated.isNotEmpty()) {
-        val prefix = if (dropped) "…." else ""
-        val candidate = prefix + (abbreviated + simple).joinToString(".")
-        if (candidate.length <= max) return candidate
-        abbreviated.removeAt(0)
+    while (packages.isNotEmpty() && joinedLength(packages.size, ellipsis = true) > max) {
+        packages.removeAt(0)
         dropped = true
     }
-    return if (dropped) "…$simple" else simple
+    if (packages.isEmpty()) {
+        return when {
+            max <= 1 -> simple.take(max.coerceAtLeast(0))
+            else -> "…" + simple.take(max - 1)
+        }
+    }
+
+    val lengths = IntArray(packages.size) { 1 }
+    fun currentLength(): Int =
+        (if (dropped) 1 else 0) + lengths.sum() + packages.size + simple.length
+
+    var remaining = max - currentLength()
+    var cap = 2
+    while (remaining > 0) {
+        var grew = false
+        for (index in packages.indices.reversed()) {
+            if (remaining <= 0) break
+            if (lengths[index] < packages[index].length && lengths[index] < cap) {
+                lengths[index]++
+                remaining--
+                grew = true
+            }
+        }
+        if (!grew && packages.indices.all { lengths[it] >= packages[it].length }) break
+        cap++
+    }
+
+    return buildString {
+        if (dropped) append('…')
+        packages.forEachIndexed { index, segment ->
+            if (index > 0) append('.')
+            append(segment.take(lengths[index]))
+        }
+        append('.').append(simple)
+    }
 }
