@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     id("moe.lolosia.keel.logger")
+    // launcher 静态并入 Host，也必须带上 ABI 的 C 静态库
+    id("moe.lolosia.keel.abi")
 }
 
 group = "moe.lolosia.keel"

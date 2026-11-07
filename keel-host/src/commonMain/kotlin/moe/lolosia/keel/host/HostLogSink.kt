@@ -22,16 +22,30 @@ object HostLogSink : LogSink {
     override fun log(level: LogLevel, site: LogSite?, tag: String?, message: String, cause: Throwable?) {
         val module = tag ?: "Host"
         val source = site?.display(Log.displayNameWidth) ?: "-"
-        println(
-            LogLineFormatter.format(
-                timestamp = formatLocalTimestamp(),
-                level = level,
-                module = module,
-                source = source,
-                message = message,
-                cause = cause,
-                color = useColor,
-            ),
+        val console = LogLineFormatter.format(
+            timestamp = formatLocalTimestamp(),
+            level = level,
+            module = module,
+            source = source,
+            message = message,
+            cause = cause,
+            color = useColor,
+        )
+        println(console)
+        appendLogFile(
+            if (useColor) {
+                LogLineFormatter.format(
+                    timestamp = formatLocalTimestamp(),
+                    level = level,
+                    module = module,
+                    source = source,
+                    message = message,
+                    cause = cause,
+                    color = false,
+                )
+            } else {
+                console
+            } + "\n",
         )
     }
 
@@ -44,18 +58,33 @@ object HostLogSink : LogSink {
         cause: Throwable?,
         moduleAnsi: String?,
     ) {
-        println(
-            LogLineFormatter.format(
-                timestamp = formatLocalTimestamp(),
-                level = level,
-                module = tag ?: "Host",
-                source = source,
-                message = message,
-                cause = cause,
-                color = useColor,
-                moduleAnsi = moduleAnsi,
-                sourceAnsi = if (useColor) sourceAnsi else null,
-            ),
+        val module = tag ?: "Host"
+        val console = LogLineFormatter.format(
+            timestamp = formatLocalTimestamp(),
+            level = level,
+            module = module,
+            source = source,
+            message = message,
+            cause = cause,
+            color = useColor,
+            moduleAnsi = moduleAnsi,
+            sourceAnsi = if (useColor) sourceAnsi else null,
+        )
+        println(console)
+        appendLogFile(
+            if (useColor) {
+                LogLineFormatter.format(
+                    timestamp = formatLocalTimestamp(),
+                    level = level,
+                    module = module,
+                    source = source,
+                    message = message,
+                    cause = cause,
+                    color = false,
+                )
+            } else {
+                console
+            } + "\n",
         )
     }
 }

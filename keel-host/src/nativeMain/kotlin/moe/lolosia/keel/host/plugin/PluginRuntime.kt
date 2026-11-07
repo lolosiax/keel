@@ -2,6 +2,7 @@ package moe.lolosia.keel.host.plugin
 
 import kotlinx.cinterop.*
 import moe.lolosia.keel.abi.c.*
+import moe.lolosia.keel.host.registerCrashModule
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 
@@ -45,6 +46,8 @@ internal fun startPlugin(
 ): PluginRuntime {
     val manifest = plugin.manifest
     val library = NativeLibrary(plugin.libraryPath)
+    // 崩溃归因：故障地址落在哪个模块，就归到哪个插件
+    registerCrashModule(manifest.id, plugin.libraryPath)
 
     val bootstrapAddress = library.symbol("keel_plugin_bootstrap")
         ?: throw IllegalStateException("${plugin.libraryPath} 未导出 keel_plugin_bootstrap")

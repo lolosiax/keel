@@ -11,8 +11,13 @@ import moe.lolosia.keel.host.main as runHost
  * 无法内存加载的平台退化为「解包到缓存目录再加载」，但仍只分发一个文件。
  * 目前直接转发到 Host 入口，内嵌与装配尚未接入。
  */
-fun main() {
+fun main(args: Array<String>) {
+    // --watchdog 由 Host 处理：必须原样转发，否则会再拉起一个完整 Host
+    if (args.firstOrNull() == "--watchdog") {
+        runHost(args)
+        return
+    }
     Log.install(HostLogSink)
     Log.info("keel launcher 0.1.0-SNAPSHOT")
-    runHost(emptyArray())
+    runHost(args)
 }

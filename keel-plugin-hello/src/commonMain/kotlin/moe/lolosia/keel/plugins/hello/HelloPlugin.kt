@@ -34,6 +34,11 @@ class HelloPlugin : Plugin {
                 ),
             )
         }
+        // 崩溃自检：故意制造一次原生内存故障，验证看门狗报告与插件归因
+        context.routes.register(RouteDescriptor("GET", "/crash", "hello#crash")) { _, _ ->
+            Log.warn("/crash: 即将触发随机内存故障")
+            crashRandomly()
+        }
         Log.info("loaded ${context.metadata.id}")
     }
 

@@ -32,10 +32,29 @@ internal expect fun embeddedResource(path: String): String?
 /**
  * Host 入口。
  *
- * 目前只处理 `--inspect` / `--plugins`；其余参数打印版本与内嵌资源信息。
+ * 启动顺序：`--watchdog`（看门狗进程，不加载插件）→ 文件日志 → 日志出口 →
+ * 看门狗子进程 → 崩溃处理器 → 参数分发。
  */
 fun main(args: Array<String>) {
+    if (args.firstOrNull() == "--watchdog") {
+        runWatchdog(args)
+        return
+    }
+
+    val logDir = startLogFile()
     Log.install(HostLogSink)
+
+    // --inspect 是一次性诊断，不值得为它常驻一个看门狗进程
+    if (args.firstOrNull() != "--inspect") {
+        val watchdog = startWatchdog()
+        if (watchdog != 0uL) {
+            Log.debug("watchdog started (pid=$watchdog)", tag = "Bootstrap")
+        } else {
+            Log.warn("watchdog 启动失败：崩溃时不会生成报告", tag = "Bootstrap")
+        }
+        installCrashHandler(logDir)
+    }
+
     when (args.firstOrNull()) {
         "--inspect" -> {
             if (args.size < 2) {

@@ -292,6 +292,50 @@ void keel_install_shutdown_hook(void);
 /* @return 1 表示已收到中断请求 */
 int keel_shutdown_requested(void);
 
+/*
+ * 按日切割的文本日志。
+ *
+ * 文件名固定 `<dir>/keel-YYYY-MM-DD.log`，跨日自动切换；每次写入都刷盘。
+ * 线程安全（内部互斥），可以在任意线程调用。不透明布局由 C 实现持有。
+ */
+#ifdef KEEL_CINTEROP
+typedef struct KeelLogFileTag {
+    void *reserved;
+} KeelLogFile;
+#else
+typedef struct KeelLogFileTag KeelLogFile;
+#endif
+
+/* 打开日志目录（不存在时创建）；失败返回 NULL。 */
+KeelLogFile *keel_logfile_open(const char *dir);
+
+/* 追加一段文本；调用方负责换行。 */
+void keel_logfile_write(KeelLogFile *file, const char *data, uint32_t size);
+
+void keel_logfile_close(KeelLogFile *file);
+
+/*
+ * 看门狗与崩溃归因。
+ *
+ * Host 启动时调用 keel_watchdog_spawn 拉起同一可执行文件的 `--watchdog` 子进程，
+ * 再调用 keel_crash_install 安装致命信号 / 异常处理器。处理器只把最小现场
+ * （信号、故障地址、PC/SP/BP、归因模块、构建号）写进 beacon 文件并挂住自己，
+ * 由看门狗读进程内存、生成报告、追加日志，最后终止 Host。
+ */
+uint64_t keel_watchdog_spawn(void);
+
+/* @param log_dir 日志根目录（`work/log`）；beacon 落在其下的 `crash/`。 */
+void keel_crash_install(const char *log_dir, const char *build_id);
+
+/* 登记一个已加载模块，供崩溃归因；path 是动态库文件路径。 */
+void keel_crash_register_module(const char *name, const char *library_path);
+
+/*
+ * 看门狗主循环：阻塞直到父进程正常退出（返回 0）或处理完一次崩溃（返回 1）。
+ * @param parent_pid 被监控的 Host 进程 id
+ */
+int keel_watchdog_watch(uint64_t parent_pid);
+
 #ifdef __cplusplus
 }
 #endif
