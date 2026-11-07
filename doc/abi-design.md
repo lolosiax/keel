@@ -69,7 +69,7 @@ Host 线程                    C shim(host)          C shim(plugin dylib)
    │ dlopen/LoadLibrary ─────────>│
    │ dlsym keel_plugin_bootstrap ─>│
    │ dlsym plugin.json.entry ─────>│   (取地址，不调用)
-   │ bootstrap(host_api, worker_main, &api)
+   │ bootstrap(host_api, plugin_id, worker_main, &api)
    │                              │ 保存表 + 建 inbox
    │                              │ CreateThread ──┐ 事件泵线程（只进插件运行时）
    │ <──── bootstrap 返回 ────────│                │
@@ -94,10 +94,14 @@ Host 线程                    C shim(host)          C shim(plugin dylib)
 
 | 内容 | 位置 | 说明 |
 | --- | --- | --- |
-| 结构体、枚举、函数指针、导出符号声明 | `keel-api/src/nativeInterop/cinterop/keel_abi.h` | 唯一布局来源，Host 与插件都通过 cinterop 使用 |
+| 结构体、枚举、函数指针、导出符号声明 | `keel-abi/src/nativeCpp/keel_abi.h` | 唯一布局来源，Host 与插件都通过 cinterop 使用 |
 | cinterop 绑定 | `keel-api/src/nativeInterop/cinterop/keelabi.def` | 包名 `moe.lolosia.keel.abi.c`，只给框架内部用 |
 | 队列 / 句柄表 / 分配器实现 | 顶层 `keel-abi` 构建 | 每目标编成静态库，Host / 插件各自链接一份 |
-| 唯一对外导出 | 插件 dylib 的 `keel_plugin_bootstrap` / `keel_plugin_shutdown` | Kotlin 工厂（`plugin.json.entry`）只由泵线程调用 |
+| 对外导出 | 插件 dylib 的 `keel_plugin_bootstrap` / `keel_plugin_shutdown` / `keel_plugin_worker_main` | `worker_main` 是 Kotlin `@CName` 入口，只由泵线程调用 |
+
+导出细节：Kotlin 的 `@CName` 符号在 Windows 上**不会**自动进 PE 导出表，Host 就 `dlsym` 不到。
+所以 `keel-abi-gradle-plugin` 给每个 sharedLib 生成一份 `.def` 精确列出上面三个符号
+（`keelAbi { export("...") }` 可追加），并用 `-u keel_plugin_bootstrap` 把归档成员拉进链接。
 
 要点：
 

@@ -151,7 +151,7 @@ typedef KeelStatus (*KeelPluginWorkerMain)(const KeelPluginApi *api, KeelPluginH
  *
  * 这个函数**完全在 C 里执行，不触碰 Kotlin**：
  * - 保存 host 表与 worker_main 指针；
- * - 创建 inbox 队列；
+ * - 创建 inbox 队列（填好 plugin_id，插件后续事件的 source 用它）；
  * - 创建事件泵线程并立即返回。
  *
  * 事件泵线程循环 pop inbox：
@@ -162,8 +162,11 @@ typedef KeelStatus (*KeelPluginWorkerMain)(const KeelPluginApi *api, KeelPluginH
  *
  * 因此 Host 的调用线程自始至终没有进入插件运行时；启动成功与失败都表现为
  * 一条 COMPLETE 事件，Host 按 status 决定是否继续启用。
+ *
+ * @param plugin_id Host 分配的模块 id；写进 KeelPluginApi，插件发事件时作为 source
  */
 KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
+                                            uint64_t plugin_id,
                                             KeelPluginWorkerMain worker_main,
                                             KeelPluginApi *out);
 

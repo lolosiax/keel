@@ -146,6 +146,8 @@ val archiveTasks = abiTargets.associateWith { target ->
             .map { "obj/${it.nameWithoutExtension}.o" }
 
         outputs.file(outDir.map { File(it, "libkeel_abi.a") })
+        // 没有输入声明时，改 .c 只会重编对象、归档保持旧文件
+        inputs.dir(outDir.map { File(it, "obj") })
         workingDir = outDir.get()
 
         doFirst { outDir.get().mkdirs() }

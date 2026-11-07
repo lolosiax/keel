@@ -97,7 +97,7 @@ class PluginLoader(
         val dir = "$cacheRoot/${manifest.id}/${manifest.version}"
         val dest = "$dir/${libPath.substringAfterLast('/')}"
         // 同名同大小视为已解包：库可能仍被当前进程映射，重写会破坏正在使用的文件
-        if (PluginFs.sizeOrNull(dest) != bytes.size.toLong()) {
+        if (fileSizeOrNull(dest) != bytes.size.toLong()) {
             mkdirs(dir)
             PluginFs.writeBytes(dest, bytes)
         }

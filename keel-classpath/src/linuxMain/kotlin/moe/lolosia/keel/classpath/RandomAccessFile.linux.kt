@@ -31,7 +31,7 @@ internal actual class RandomAccessFile actual constructor(path: String) : AutoCl
         return out
     }
 
-    override fun close() {
+    actual override fun close() {
         fclose(file)
     }
 }

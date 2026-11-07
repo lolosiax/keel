@@ -18,6 +18,8 @@ dependencies {
     implementation(libs.kotlin.gradle.plugin)
     // 插件工程自动带上 ABI 静态库注入；composite 下由 includeBuild 替换成本地工程
     implementation("moe.lolosia.keel.toolchain:keel-abi-gradle-plugin:${libs.versions.keel.get()}")
+    // 插件工程自动 apply KSP，并接入 Worker 入口生成器
+    implementation("com.google.devtools.ksp:symbol-processing-gradle-plugin:${libs.versions.ksp.get()}")
 }
 
 gradlePlugin {

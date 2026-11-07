@@ -30,6 +30,8 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         // ABI 静态库由这里统一注入：插件工程只写 moe.lolosia.keel.plugin，不手动加 linkerOpts
         project.pluginManager.apply("moe.lolosia.keel.abi")
+        // Worker 入口（keel_plugin_worker_main）由 KSP 生成，插件工程不手写这段胶水代码
+        project.pluginManager.apply("com.google.devtools.ksp")
 
         val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java)
 
@@ -66,6 +68,18 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         }
 
         project.plugins.withId("org.jetbrains.kotlin.multiplatform") {
+            // KSP 在自己的 afterEvaluate 里创建 `ksp<target>` 配置并固定处理器 classpath，
+            // 处理器依赖必须赶在那一刻挂上，所以这里用 configureEach 而不是 afterEvaluate
+            project.configurations.configureEach { configuration ->
+                if (!extension.enabled) return@configureEach
+                if (nativeTargetOf(project, configuration.name) == null) return@configureEach
+                val version = extension.keelVersion ?: project.version.toString()
+                project.dependencies.add(
+                    configuration.name,
+                    "moe.lolosia.keel.toolchain:keel-plugin-ksp:$version",
+                )
+            }
+
             project.afterEvaluate {
                 if (extension.enabled && extension.autoAddClasspathFull) {
                     val version = extension.keelVersion ?: project.version.toString()
@@ -107,6 +121,19 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                 }
             }
         }
+    }
+
+    /**
+     * `kspMingwX64` / `kspLinuxArm64` 这类配置对应的 native 目标；不是则返回 null。
+     *
+     * KSP 的命名规则是 `ksp` + 目标名（首字母大写）。
+     */
+    private fun nativeTargetOf(project: Project, configurationName: String): KotlinNativeTarget? {
+        if (!configurationName.startsWith("ksp")) return null
+        val targetName = configurationName.removePrefix("ksp").replaceFirstChar { it.lowercaseChar() }
+        if (targetName.isEmpty()) return null
+        val kotlin = project.extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return null
+        return kotlin.targets.findByName(targetName) as? KotlinNativeTarget
     }
 
     private fun defaultTargetName(): String {

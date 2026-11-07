@@ -7,9 +7,9 @@ package moe.lolosia.keel.host
 internal expect fun inspectKeelPackage(path: String)
 
 /**
- * `--plugins <dir> [cacheDir]`：扫描目录下的 `.keel`，校验后解出动态库并注册资源。
+ * `--plugins <dir> [cacheDir]`：扫描目录下的 `.keel`，校验后解出动态库并启动插件。
  *
- * 暂不 `dlopen`，只验证「包 → 缓存目录 → classpath 注册」这一段。
+ * 启动是「投 START、等 COMPLETE」，Host 线程从不进入插件运行时。
  */
 internal expect fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?)
 

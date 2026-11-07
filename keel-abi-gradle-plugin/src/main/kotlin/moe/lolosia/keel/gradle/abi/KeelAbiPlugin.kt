@@ -1,10 +1,13 @@
 package moe.lolosia.keel.gradle.abi
 
+import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.Sync
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
+import org.jetbrains.kotlin.gradle.plugin.mpp.SharedLibrary
+import org.jetbrains.kotlin.konan.target.Family
 import java.io.File
 
 /**
@@ -61,9 +64,47 @@ class KeelAbiPlugin : Plugin<Project> {
         }
 
         val libDir = File(extractDir, "lib/${target.name}").absolutePath
+        val exportSymbols = DEFAULT_EXPORTS + extension.exports
+        // PE 导出表需要显式列表；Kotlin 的 @CName 符号不会自动进导出表
+        val defFile = if (target.konanTarget.family == Family.MINGW) {
+            File(extractDir, "keel-plugin.def")
+        } else {
+            null
+        }
+        val defTask = defFile?.let { file ->
+            project.tasks.register("keelAbiDef${target.suffix()}", DefaultTask::class.java) { task ->
+                task.group = "keel"
+                task.description = "生成 ${target.name} 插件的符号导出列表"
+                task.outputs.file(file)
+                task.doLast {
+                    file.parentFile.mkdirs()
+                    file.writeText(
+                        buildString {
+                            appendLine("LIBRARY keel_plugin")
+                            appendLine("EXPORTS")
+                            exportSymbols.forEach { appendLine("    $it") }
+                        }
+                    )
+                }
+            }
+        }
+
         target.binaries.all { binary ->
             binary.linkerOpts("-L$libDir", "-lkeel_abi")
-            binary.linkTaskProvider.configure { it.dependsOn(extract) }
+            if (binary is SharedLibrary) {
+                // 插件的对外入口在静态库里，Kotlin 侧从不引用它：不 -u 的话归档成员不会被拉入，
+                // 生成的 dylib 里就没有 keel_plugin_bootstrap / keel_plugin_shutdown
+                binary.linkerOpts("-u", "keel_plugin_bootstrap")
+                if (defFile != null && defTask != null) {
+                    binary.linkerOpts(defFile.absolutePath)
+                    binary.linkTaskProvider.configure { it.dependsOn(defTask) }
+                }
+            }
+            binary.linkTaskProvider.configure { task ->
+                task.dependsOn(extract)
+                // linkerOpts 只是路径：静态库内容变了也得让链接任务重跑
+                task.inputs.dir(libDir)
+            }
         }
     }
 
@@ -83,4 +124,18 @@ class KeelAbiPlugin : Plugin<Project> {
 
     private fun KotlinNativeTarget.suffix(): String =
         name.replaceFirstChar { it.uppercaseChar() }
+
+    private companion object {
+        /**
+         * 插件 dylib 固定对外导出的符号。
+         *
+         * Kotlin 侧的 Worker 入口按 `keel_abi.h` 的约定命名，所以能直接列在导出表里；
+         * 用别的名字的插件通过 `keelAbi { export("...") }` 追加。
+         */
+        val DEFAULT_EXPORTS = listOf(
+            "keel_plugin_bootstrap",
+            "keel_plugin_shutdown",
+            "keel_plugin_worker_main",
+        )
+    }
 }

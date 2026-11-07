@@ -99,6 +99,7 @@ static KEEL_THREAD_RETURN pump_main(KEEL_THREAD_ARG arg) {
 }
 
 KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
+                                            uint64_t plugin_id,
                                             KeelPluginWorkerMain worker_main,
                                             KeelPluginApi *out) {
     if (!host || !worker_main || !out) return KEEL_ERR_INVALID;
@@ -113,7 +114,7 @@ KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
 
     g_plugin.api.abi_version = KEEL_ABI_VERSION;
     g_plugin.api.struct_size = (uint32_t)sizeof(KeelPluginApi);
-    g_plugin.api.plugin_id = 0; /* 由 Host 在 bootstrap 返回后填入 */
+    g_plugin.api.plugin_id = plugin_id;
     g_plugin.api.host = host;
     g_plugin.api.inbox = g_plugin.inbox;
 

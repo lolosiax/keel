@@ -31,6 +31,7 @@
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin` | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
+| `keel-plugin-ksp/` | `keel-plugin-ksp` | Worker 入口 KSP 处理器：`@KeelPluginMain` → 生成 `keel_plugin_worker_main` | 是 |
 | `keel-abi-gradle-plugin/` | `keel-abi-gradle-plugin` | ABI 注入插件 `moe.lolosia.keel.abi`（解出静态库并挂 linkerOpts） | 是 |
 | `keel-abi/` | `keel-abi` | 跨运行时 ABI 的 C 实现与每目标静态库（`nativeCpp/keel_abi.h` 是唯一布局来源） | 是 |
 | `keel-classpath/` | `keel-classpath` | 独立资源 Classpath 库（zip / 目录 / 前缀视图），不依赖 keel-api | 是 |
@@ -112,8 +113,10 @@ gradlew -p keel-router-ksp publish
 
 - **一个线程只能进入一个 Kotlin/Native 运行时**。插件 Worker 由 C 侧 `pthread_create` / `CreateThread`
   创建；插件的 `@CName` 入口只能在该 Worker 上调用，Host 线程不得直接调用。
-- 插件 dylib **对 Host 只暴露** `keel_plugin_bootstrap` / `keel_plugin_shutdown`（C 实现）；
-  Kotlin 侧的 `@CName` 工厂（如 `keel_plugin_hello_create`）只允许由 bootstrap 在 Worker 线程上调用。
+- 插件 dylib **对 Host 只暴露** `keel_plugin_bootstrap` / `keel_plugin_shutdown`（C 实现）与
+  `keel_plugin_worker_main`（Kotlin `@CName` 入口，`plugin.json.entry` 指向它）。
+  Worker 入口只允许由 bootstrap 在事件泵线程上调用；Host 只 `dlsym`、不调用。
+  mingw 上这三个符号由 `keel-abi-gradle-plugin` 生成的 `.def` 强制导出（Kotlin 符号默认不进导出表）。
   队列、句柄表、分配器都是 hidden 符号，每个二进制各带一份，不导出。
 - Kotlin 对象不跨边界：只能传 **C 结构体 / 字节 / 不透明句柄 / 纯 C 函数指针**。
   对象留在拥有者运行时，另一边拿到的是「句柄 + 本地代理」。
@@ -130,7 +133,7 @@ gradlew -p keel-router-ksp publish
   2. 是否是 suspend 能力？是 → 在 API 里用本地 `suspend` + 事件桥接，不要暴露到 ABI。
   3. 宿主升级后旧插件还能不能加载？不能 → 提升 `abiVersion` 并在 `plugin.json` 里声明兼容范围。
 
-ABI 头文件在 [`keel-api/src/nativeInterop/cinterop/keel_abi.h`](keel-api/src/nativeInterop/cinterop/keel_abi.h)，
+ABI 头文件在 [`keel-abi/src/nativeCpp/keel_abi.h`](keel-abi/src/nativeCpp/keel_abi.h)，
 **改 ABI 先改文档与头文件，再改实现**。
 
 ## 6. 插件工程约定
@@ -139,6 +142,9 @@ ABI 头文件在 [`keel-api/src/nativeInterop/cinterop/keel_abi.h`](keel-api/src
   - `api`：`@ModuleService` 接口 + DTO + KSP 生成的客户端（消费方只依赖它）；
   - `impl`：实现 + `@KeelPluginMain` + KSP 生成的分发器 / Worker 入口（产出 dylib）。
   - 两个子项目的构建脚本由 `moe.lolosia.keel.plugin` 配置，**不要手改**；开发者只写接口和实现。
+  - Worker 入口不手写：`moe.lolosia.keel.plugin` 自动 apply KSP，并把 `keel-plugin-ksp`
+    挂到每个 native 目标的 `ksp<target>` 配置上；`@KeelPluginMain` 类由处理器生成
+    `keel_plugin_worker_main`，开发者只实现 `Plugin` 生命周期钩子。
 - 插件产出**动态库**（`binaries.sharedLib`），`baseName = "keel-plugin-<id>"`；launcher 发行版另行静态并入，不改变插件工程形态。
   ⚠️ Kotlin/Native 会把 `baseName` 里的短横线换成下划线（实际产物是 `keel_plugin_hello.dll`），加载器按目录里的实际文件名扫描，不要写死。
 - 插件工程至少包含：

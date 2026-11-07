@@ -18,11 +18,23 @@ open class KeelAbiExtension {
     /** 参与注入的目标；为空则注入全部 native 目标。 */
     val targets: MutableList<String> = mutableListOf()
 
+    /**
+     * sharedLib 额外需要导出的符号。
+     *
+     * 默认已包含 `keel_plugin_bootstrap` / `keel_plugin_shutdown` / `keel_plugin_worker_main`；
+     * 只有插件用别的名字做 Worker 入口时才需要在这里追加。
+     */
+    val exports: MutableList<String> = mutableListOf()
+
     fun target(name: String) {
         targets += name
     }
 
     fun targets(vararg names: String) {
         targets += names
+    }
+
+    fun export(vararg names: String) {
+        exports += names
     }
 }

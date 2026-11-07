@@ -11,4 +11,7 @@ internal expect class RandomAccessFile(path: String) : AutoCloseable {
 
     /** 从 [offset] 读取 [length] 字节；文件不足时抛异常。 */
     fun readAt(offset: Long, length: Int): ByteArray
+
+    /** 元数据编译看不到各目标的 actual，继承来的抽象成员必须在这里显式声明。 */
+    override fun close()
 }
