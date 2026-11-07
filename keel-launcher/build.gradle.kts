@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    id("moe.lolosia.keel.logger")
 }
 
 group = "moe.lolosia.keel"

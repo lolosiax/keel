@@ -45,6 +45,7 @@ interface PluginContext {
      */
     val classpath: Classpath
 
+    /** 兼容日志入口；新代码用 [Log]，才能拿到调用点来源。 */
     val logger: PluginLogger
 
     val scheduler: Scheduler

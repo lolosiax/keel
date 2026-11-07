@@ -1,6 +1,7 @@
 package moe.lolosia.keel.host
 
 import moe.lolosia.keel.abi.c.KEEL_ABI_VERSION
+import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.classpath.EmptyClasspath
 import moe.lolosia.keel.host.classpath.HostClasspath
 import moe.lolosia.keel.host.plugin.HostPump
@@ -21,7 +22,7 @@ internal actual fun loadPluginsFromCli(pluginsDir: String, cacheDir: String?) {
     val host = HostClasspath(EmptyClasspath)
     val result = PluginLoader(host, cache).loadAll(dir)
 
-    Log.banner(KEEL_VERSION, currentTargetName)
+    printBanner(KEEL_VERSION, currentTargetName)
     Log.info("version: $KEEL_VERSION")
     Log.info("executable: ${executablePath()}")
     Log.info("working dir: ${currentWorkingDirectory()}")

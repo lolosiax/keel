@@ -1,6 +1,7 @@
 package moe.lolosia.keel.launcher
 
-import moe.lolosia.keel.host.Log
+import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.host.HostLogSink
 import moe.lolosia.keel.host.main as runHost
 
 /**
@@ -11,6 +12,7 @@ import moe.lolosia.keel.host.main as runHost
  * 目前直接转发到 Host 入口，内嵌与装配尚未接入。
  */
 fun main() {
+    Log.install(HostLogSink)
     Log.info("keel launcher 0.1.0-SNAPSHOT")
     runHost(emptyArray())
 }

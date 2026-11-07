@@ -1,5 +1,6 @@
 package moe.lolosia.keel.plugins.hello
 
+import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.annotation.KeelPluginMain
@@ -13,19 +14,15 @@ import moe.lolosia.keel.api.annotation.KeelPluginMain
 @KeelPluginMain
 class HelloPlugin : Plugin {
 
-    private var context: PluginContext? = null
-
     override fun onLoad(context: PluginContext) {
-        this.context = context
-        context.logger.info("loaded")
+        Log.info("loaded ${context.metadata.id}")
     }
 
     override fun onEnable() {
-        context?.logger?.info("enabled")
+        Log.info("enabled")
     }
 
     override fun onDisable() {
-        context?.logger?.info("disabled")
-        context = null
+        Log.info("disabled")
     }
 }

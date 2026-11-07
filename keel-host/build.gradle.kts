@@ -4,6 +4,8 @@ plugins {
     id("moe.lolosia.keel.classpath")
     // Host 主动引入 ABI 静态库；插件工程由 moe.lolosia.keel.plugin 自动带
     id("moe.lolosia.keel.abi")
+    // Host 自身代码也要带日志调用点
+    id("moe.lolosia.keel.logger")
 }
 
 group = "moe.lolosia.keel"

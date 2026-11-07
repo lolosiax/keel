@@ -35,6 +35,7 @@ object PluginWorker {
 
         val pluginId = api.pointed.plugin_id
         val logger = NativePluginLogger(api.pointed.host, pluginId)
+        Log.install(logger)
         val metadata = PluginMetadata(
             id = pluginId.toString(),
             name = "",
@@ -51,7 +52,7 @@ object PluginWorker {
             out.pointed.on_event = staticCFunction(::dispatch)
             KEEL_OK
         } catch (e: Throwable) {
-            logger.error("插件生命周期失败", e)
+            Log.error("插件生命周期失败", cause = e)
             KEEL_ERR_FAILED
         }
     }

@@ -1,5 +1,7 @@
 package moe.lolosia.keel.host
 
+import moe.lolosia.keel.api.Log
+
 internal const val KEEL_VERSION = "0.1.0-SNAPSHOT"
 
 /**
@@ -24,6 +26,7 @@ internal expect fun embeddedResource(path: String): String?
  * 目前只处理 `--inspect` / `--plugins`；其余参数打印版本与内嵌资源信息。
  */
 fun main(args: Array<String>) {
+    Log.install(HostLogSink)
     when (args.firstOrNull()) {
         "--inspect" -> {
             if (args.size < 2) {

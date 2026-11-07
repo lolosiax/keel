@@ -1,5 +1,6 @@
 package moe.lolosia.keel.gradle.plugin
 
+import moe.lolosia.keel.gradle.logger.KeelLoggerGradlePlugin
 import org.gradle.api.Action
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -31,6 +32,8 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         project.pluginManager.apply("moe.lolosia.keel.abi")
         // Worker 入口（keel_plugin_worker_main）由 KSP 生成，插件工程不手写这段胶水代码
         project.pluginManager.apply("com.google.devtools.ksp")
+        // 日志调用改写：插件工程不手动加 id("moe.lolosia.keel.logger")
+        project.plugins.apply(KeelLoggerGradlePlugin::class.java)
 
         val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java)
 

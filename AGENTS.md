@@ -33,6 +33,8 @@
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
 | `keel-plugin-ksp/` | `keel-plugin-ksp` | Worker 入口 KSP 处理器：`@KeelPluginMain` → 生成 `keel_plugin_worker_main` | 是 |
 | `keel-abi-gradle-plugin/` | `keel-abi-gradle-plugin` | ABI 注入插件 `moe.lolosia.keel.abi`（解出静态库并挂 linkerOpts） | 是 |
+| `keel-logger-gradle-plugin/` | `keel-logger-gradle-plugin` | 日志改写插件 `moe.lolosia.keel.logger`（把编译器插件挂到 KMP native） | 是 |
+| `keel-logger-compiler-plugin/` | `keel-logger-compiler-plugin` | 日志调用 IR 改写：`Log.x(...)` → `Log.of(来源...).x(...)` | 是 |
 | `keel-abi/` | `keel-abi` | 跨运行时 ABI 的 C 实现与每目标静态库（`nativeCpp/keel_abi.h` 是唯一布局来源） | 是 |
 | `keel-classpath/` | `keel-classpath` | 独立资源 Classpath 库（zip / 目录 / 前缀视图），不依赖 keel-api | 是 |
 | `keel-classpath-full/` | `keel-classpath-full` | Host 注册表、`ClasspathRef`、generation 失效、跨模块代理 | 是 |
@@ -62,6 +64,8 @@ gradlew buildAll
 
 # 单个部分
 gradlew -p keel-api build
+gradlew -p keel-logger-compiler-plugin build
+gradlew -p keel-logger-gradle-plugin build
 gradlew -p keel-host linkDebugExecutableMingwX64
 gradlew -p keel-launcher linkReleaseExecutableLinuxArm64
 gradlew -p keel-plugin-hello linkReleaseSharedLibLinuxArm64
@@ -71,6 +75,8 @@ gradlew -p keel-classpath-gradle-plugin publish
 gradlew -p keel-plugin-gradle-plugin publish
 gradlew -p keel-publish-gradle-plugin publish
 gradlew -p keel-abi-gradle-plugin publish
+gradlew -p keel-logger-gradle-plugin publish
+gradlew -p keel-logger-compiler-plugin publish
 gradlew -p keel-router-ksp publish
 gradlew -p keel-plugin-ksp publish
 ```
@@ -102,10 +108,11 @@ gradlew -p keel-plugin-ksp publish
 | `keel-classpath-full` | Host 注册表 / `ClasspathRef` / 跨模块代理 |
 | `keel-abi` | C ABI 静态库 + 头文件工件 |
 | `keel-plugin-<id>` | 功能插件，`<id>` 与 `plugin.json` 的 `id` 一致 |
-| `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` | 构建期 Gradle 插件 |
+| `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` | 构建期 Gradle 插件 |
+| `keel-logger-compiler-plugin` | Kotlin 编译器插件（由 `moe.lolosia.keel.logger` 挂载，不单独 apply） |
 | `keel-router-ksp` / `keel-plugin-ksp` | 构建期 KSP 处理器 |
 
-- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.abi`。
+- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.abi`、`moe.lolosia.keel.logger`。
 - `keel-router-ksp` / `keel-plugin-ksp` 是 **KSP 处理器**，不是 Gradle 插件，没有插件 ID。
 
 ## 4. 代码风格
@@ -129,7 +136,10 @@ gradlew -p keel-plugin-ksp publish
 7. 不要把平台相关的 C interop 代码放 commonMain：`@CName`、`StableRef`、`CPointer` 一律进 `nativeMain` / 具体目标源集。
 8. **控制器专属 DTO 作为该 `object` 的内部类**；跨控制器共用才提成独立文件（或进 `dto/` 包）。
 9. **时间字段统一 `kotlin.time.Instant`**，不要用 `LocalDateTime`；只有日志展示本地时间。
-10. 日志走 API 的 `PluginLogger`，不要在库里 `println`；Host 侧统一一个 `Log` 门面。
+10. 日志统一走 `keel-api` 的 `Log`（`Log.info(...)` 等），不要在库里 `println`；
+    `moe.lolosia.keel.logger` 会在编译期把调用改写成带 `LogSite` 的形式（类名 / 文件 / 行号 / 包 / 类 / 函数 / 类型）。
+    - `ctx.logger`（`PluginLogger`）仍然可用，但新代码优先用 `Log`，才能拿到调用点。
+    - Host 侧 `HostLogSink` 与插件侧 `NativePluginLogger` 都是 `LogSink` 实现。
     - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
 
 ## 5. 插件 API 与跨运行时边界
@@ -293,6 +303,8 @@ keel-classpath-full/src/commonMain/…/classpath/full/
 keel-classpath-full/src/nativeMain/…/classpath/full/DefaultClasspathRegistry.kt
 keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   Plugin / PluginContext / PluginMetadata / PluginRegistry / KeelServer / PluginLogger / Scheduler / TaskHandle
+  Log.kt                              统一日志门面（of / 六个级别 / install(LogSink)）
+  log/                                LogSite / LogSiteKind / LogLevel / LogSink / LogSiteCodec / StdoutLogSink
   annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
   auth/Authorizer.kt
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
@@ -306,7 +318,8 @@ keel-api/src/nativeMain/…/api/worker/NativePluginLogger.kt  插件日志 → H
 keel-api/src/nativeMain/…/api/worker/PluginContextImpl.kt   最小上下文（metadata / logger / 空 classpath）
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
-keel-host/src/commonMain/…/host/Log.kt                Host 日志门面
+keel-host/src/commonMain/…/host/HostLogSink.kt        Host 日志出口（本地时间戳 + 调用点模块列）
+keel-host/src/commonMain/…/host/Banner.kt             启动横幅
 keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 实现）
 keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
 keel-host/src/nativeMain/…/host/plugin/
@@ -321,8 +334,11 @@ keel-abi/src/nativeCpp/
   keel_queue.c / keel_event.c / keel_plugin.c
 keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（当前占位）
 keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口
-keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin
-  src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi）
+keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin
+  src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
+keel-logger-compiler-plugin/src/main/…/logger/
+  KeelLoggerRegistrar / KeelLoggerCliProcessor / KeelLoggerIrExtension / LogSiteTransformer / LogSiteResolver / SourcePathIndex
+  META-INF/services/                    CompilerPluginRegistrar + CommandLineProcessor
 keel-plugin-hello/                     示例插件（单项目形态）
 doc/                                   设计与计划
 ```

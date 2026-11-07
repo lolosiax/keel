@@ -21,6 +21,8 @@ rootProject.name = "keel"
 // 单独构建某个部分时：gradlew -p <目录> <任务>
 includeBuild("keel-classpath-gradle-plugin")
 includeBuild("keel-abi-gradle-plugin")
+includeBuild("keel-logger-gradle-plugin")
+includeBuild("keel-logger-compiler-plugin")
 includeBuild("keel-plugin-gradle-plugin")
 includeBuild("keel-publish-gradle-plugin")
 includeBuild("keel-router-ksp")

@@ -20,6 +20,8 @@ dependencies {
     implementation("moe.lolosia.keel.toolchain:keel-abi-gradle-plugin:${libs.versions.keel.get()}")
     // 插件工程自动 apply KSP，并接入 Worker 入口生成器
     implementation("com.google.devtools.ksp:symbol-processing-gradle-plugin:${libs.versions.ksp.get()}")
+    // 插件工程自动带日志调用改写
+    implementation("moe.lolosia.keel.toolchain:keel-logger-gradle-plugin:${libs.versions.keel.get()}")
 }
 
 gradlePlugin {
