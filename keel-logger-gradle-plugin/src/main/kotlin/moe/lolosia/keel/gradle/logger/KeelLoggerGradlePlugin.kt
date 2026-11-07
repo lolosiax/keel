@@ -42,6 +42,7 @@ class KeelLoggerGradlePlugin : KotlinCompilerPluginSupportPlugin {
 
             buildList {
                 add(SubpluginOption("enabled", "true"))
+                add(SubpluginOption("exceptionTrace", (extension?.exceptionTrace?.get() ?: true).toString()))
                 add(SubpluginOption("workspaceRoot", workspaceRoot))
                 roots.forEach { add(SubpluginOption("sourceRoot", it)) }
             }

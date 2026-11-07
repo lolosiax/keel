@@ -18,6 +18,7 @@ internal class KeelLoggerRegistrar : CompilerPluginRegistrar() {
         val config = KeelLoggerConfig(
             workspaceRoot = configuration.get(KeelLoggerKeys.WORKSPACE_ROOT),
             sourceRoots = configuration.get(KeelLoggerKeys.SOURCE_ROOTS).orEmpty(),
+            traceExceptions = configuration.get(KeelLoggerKeys.EXCEPTION_TRACE, true),
         )
         IrGenerationExtension.registerExtension(KeelLoggerIrExtension(config))
     }

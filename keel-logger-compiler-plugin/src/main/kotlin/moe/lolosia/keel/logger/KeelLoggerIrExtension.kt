@@ -8,8 +8,14 @@ import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 internal class KeelLoggerIrExtension(private val config: KeelLoggerConfig) : IrGenerationExtension {
 
     override fun generate(moduleFragment: IrModuleFragment, pluginContext: IrPluginContext) {
-        val symbols = LoggerSymbols.resolve(pluginContext) ?: return
         val pathIndex = SourcePathIndex(config.workspaceRoot, config.sourceRoots)
-        moduleFragment.transform(LogSiteTransformer(pluginContext, symbols, pathIndex), null)
+        LoggerSymbols.resolve(pluginContext)?.let { symbols ->
+            moduleFragment.transform(LogSiteTransformer(pluginContext, symbols, pathIndex), null)
+        }
+        if (config.traceExceptions) {
+            ExceptionSymbols.resolve(pluginContext)?.let { symbols ->
+                moduleFragment.transform(ExceptionSiteTransformer(pluginContext, symbols), null)
+            }
+        }
     }
 }

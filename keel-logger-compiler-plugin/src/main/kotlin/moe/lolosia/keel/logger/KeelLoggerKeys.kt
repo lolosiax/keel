@@ -10,4 +10,6 @@ internal object KeelLoggerKeys {
     val WORKSPACE_ROOT = CompilerConfigurationKey<String>("keel-logger workspaceRoot")
 
     val SOURCE_ROOTS = CompilerConfigurationKey<List<String>>("keel-logger sourceRoots")
+
+    val EXCEPTION_TRACE = CompilerConfigurationKey<Boolean>("keel-logger exceptionTrace")
 }

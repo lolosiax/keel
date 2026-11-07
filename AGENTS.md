@@ -149,6 +149,11 @@ gradlew -p keel-plugin-ksp publish
       `:行号` faint。重定向或 `NO_COLOR` 自动关闭，`FORCE_COLOR` / `CLICOLOR=0` 可覆盖。
     - `plugin.json` 的 `color`（`#RRGGBB` / `#RGB`）会让该插件模块名改用 truecolor；
       未配置时用哈希色盘。
+    - 异常诊断：同一编译器插件还给异常构造与 `throw` 插桩，写入 `ThrowTrace` 侧表
+      （容量 64、60 秒 TTL），日志渲染时在每层异常头后输出
+      `Created at / Throwed at / Printed at`，诊断行与栈帧之间空一行；
+      跨运行时通过 `KeelErrorEntry.createdAt / throwSites` 传递。可用
+      `keelLogger { exceptionTrace = false }` 关闭。
     - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
 
 ## 5. 插件 API 与跨运行时边界

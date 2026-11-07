@@ -37,6 +37,18 @@ class LogSite(
         return "${shorten(name, budget)}:$lineText"
     }
 
+    /**
+     * 诊断行用的完整位置：`包.类.函数(File.kt:行)`。
+     *
+     * 文件只保留 basename，避免把构建机上的绝对路径带进日志。
+     */
+    fun traceLocation(): String {
+        val owner = displayName.ifBlank { file }
+        val name = if (functionName != null) "$owner.$functionName" else owner
+        val source = file.substringAfterLast('/').substringAfterLast('\\')
+        return "$name($source:$line)"
+    }
+
     fun trace(message: String, tag: String? = null) = Log.emit(LogLevel.TRACE, this, tag, message, null)
 
     fun debug(message: String, tag: String? = null) = Log.emit(LogLevel.DEBUG, this, tag, message, null)

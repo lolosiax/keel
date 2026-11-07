@@ -20,6 +20,10 @@ data class KeelErrorEntry(
     val type: String,
     val message: String = "",
     val frames: List<KeelErrorFrame> = emptyList(),
+    /** 构造点 `类.函数:行`；未插桩或记录过期时为 null。 */
+    val createdAt: String? = null,
+    /** 抛出点（可能多次重抛）。 */
+    val throwSites: List<String> = emptyList(),
 )
 
 /** 跨运行时传递的错误信封：外层在前，`Caused by:` 依次向后。 */

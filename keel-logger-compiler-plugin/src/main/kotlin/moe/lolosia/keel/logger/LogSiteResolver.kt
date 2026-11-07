@@ -19,12 +19,6 @@ internal object LogSiteResolver {
         val functionScope = scopes.firstOrNull { it.irElement is IrFunction }?.irElement as? IrFunction
 
         val className = classScope?.let { fullClassName(it, packageName) }
-        val functionName = scopes.asSequence()
-            .mapNotNull { it.irElement as? IrFunction }
-            .firstOrNull { !isLambda(it) }
-            ?.name
-            ?.takeIf { !it.isSpecial }
-            ?.asString()
 
         return LogSiteInfo(
             displayName = className ?: fileFacadeName(packageName, rawFile),
@@ -32,10 +26,32 @@ internal object LogSiteResolver {
             line = line,
             packageName = packageName,
             className = className,
-            functionName = functionName,
+            functionName = declarationName(scopes),
             kind = kindOf(classScope, functionScope, scopes),
         )
     }
+
+    /** 异常诊断用的单行来源：`包.类.函数(File.kt:行)`；属性初始化器 / init 块没有函数名。 */
+    fun throwSite(file: IrFile, scopes: List<ScopeWithIr>, line: Int): String {
+        val packageName = file.packageFqName.asString().ifEmpty { null }
+        val classScope = scopes.firstOrNull { it.irElement is IrClass }?.irElement as? IrClass
+        val name = classScope?.let { fullClassName(it, packageName) }
+            ?: fileFacadeName(packageName, file.fileEntry.name)
+        val function = declarationName(scopes)
+        val location = "(${sourceFileName(file.fileEntry.name)}:$line)"
+        return if (function != null) "$name.$function$location" else "$name$location"
+    }
+
+    private fun sourceFileName(raw: String): String =
+        raw.substringAfterLast('/').substringAfterLast('\\')
+
+    private fun declarationName(scopes: List<ScopeWithIr>): String? =
+        scopes.asSequence()
+            .mapNotNull { it.irElement as? IrFunction }
+            .firstOrNull { !isLambda(it) }
+            ?.name
+            ?.takeIf { !it.isSpecial }
+            ?.asString()
 
     private fun kindOf(classScope: IrClass?, functionScope: IrFunction?, scopes: List<ScopeWithIr>): LoggerKind {
         if (functionScope == null) {

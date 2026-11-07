@@ -20,6 +20,12 @@ internal class KeelLoggerCliProcessor : CommandLineProcessor {
             required = false,
             allowMultipleOccurrences = true,
         ),
+        CliOption(
+            KeelLoggerOption.EXCEPTION_TRACE,
+            "<true|false>",
+            "是否给异常构造 / throw 插桩",
+            required = false,
+        ),
     )
 
     override fun processOption(option: AbstractCliOption, value: String, configuration: CompilerConfiguration) {
@@ -27,6 +33,8 @@ internal class KeelLoggerCliProcessor : CommandLineProcessor {
             KeelLoggerOption.ENABLED -> configuration.put(KeelLoggerKeys.ENABLED, value.toBooleanStrictOrNull() ?: true)
             KeelLoggerOption.WORKSPACE_ROOT -> configuration.put(KeelLoggerKeys.WORKSPACE_ROOT, value)
             KeelLoggerOption.SOURCE_ROOT -> configuration.appendList(KeelLoggerKeys.SOURCE_ROOTS, value)
+            KeelLoggerOption.EXCEPTION_TRACE ->
+                configuration.put(KeelLoggerKeys.EXCEPTION_TRACE, value.toBooleanStrictOrNull() ?: true)
         }
     }
 }

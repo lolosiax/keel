@@ -1,6 +1,7 @@
 package moe.lolosia.keel.api.error
 
 import moe.lolosia.keel.api.log.StackTraceFormat
+import moe.lolosia.keel.api.log.ThrowTrace
 import moe.lolosia.keel.api.log.platformLocate
 
 /** 每层错误最多携带的帧数。 */
@@ -20,14 +21,25 @@ private const val MAX_PLAUSIBLE_OFFSET = 0x1000000L
  */
 fun Throwable.toKeelError(plugin: String = ""): KeelErrorPayload {
     val chain = mutableListOf<KeelErrorEntry>()
+    val objects = StackTraceFormat.chain(this)
     var type = ""
     var message = ""
     var frames = mutableListOf<KeelErrorFrame>()
     var truncated = false
+    var segment = -1
 
     fun flush() {
         if (type.isEmpty()) return
-        chain += KeelErrorEntry(type, message, frames)
+        segment++
+        // 文本里的异常段与 cause 链按顺序一一对应；越界时当作没有诊断记录
+        val trace = objects.getOrNull(segment)?.let(ThrowTrace::of)
+        chain += KeelErrorEntry(
+            type = type,
+            message = message,
+            frames = frames,
+            createdAt = trace?.createdSite,
+            throwSites = trace?.throwSites.orEmpty(),
+        )
         type = ""
         message = ""
         frames = mutableListOf()
@@ -60,6 +72,8 @@ fun Throwable.toKeelError(plugin: String = ""): KeelErrorPayload {
         message = if (body.contains(": ")) body.substringAfter(": ") else ""
     }
     flush()
+    // 元数据已经变成字符串，异常对象不必再被侧表吊着
+    objects.forEach(ThrowTrace::release)
     return KeelErrorPayload(plugin, chain, truncated)
 }
 

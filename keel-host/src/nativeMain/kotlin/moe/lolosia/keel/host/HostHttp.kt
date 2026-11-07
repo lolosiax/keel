@@ -49,6 +49,9 @@ internal object HostHttp {
 
     private const val BODY_LIMIT = 200
 
+    /** 插件可能比 Host 新：多出来的错误信封字段直接忽略，不要解不出来。 */
+    private val JsonLenient = Json { ignoreUnknownKeys = true }
+
     private fun snippet(bytes: ByteArray): String {
         val text = bytes.decodeToString()
         return if (text.length <= BODY_LIMIT) text else
@@ -162,7 +165,7 @@ internal object HostHttp {
     /** 把插件的错误信封重建成 [KeelRemoteException]；载荷缺失时给出状态码说明。 */
     private fun remoteError(pluginId: ULong, reply: HostEvent, callSite: Throwable): KeelRemoteException {
         val payload = reply.payload?.let {
-            runCatching { Json.decodeFromString<KeelErrorPayload>(it.decodeToString()) }.getOrNull()
+            runCatching { JsonLenient.decodeFromString<KeelErrorPayload>(it.decodeToString()) }.getOrNull()
         }
         return KeelRemoteException(
             plugin = PluginNames.of(pluginId),
@@ -222,7 +225,7 @@ internal object HostHttp {
         if (reply != null && reply.status != KEEL_OK.toInt()) {
             val error = remoteError(match.pluginId, reply, callSite)
             // 自己记录并返回 JSON，不再把异常抛给 Ktor（避免它再打一遍 Unhandled）
-            Log.error("$method $path 处理失败\n$error", tag = "HTTP OUT")
+            Log.error("$method $path 处理失败", tag = "HTTP OUT", cause = error)
             call.respondText(
                 text = errorBody(error.chain.firstOrNull()?.message ?: "插件执行失败"),
                 contentType = ContentType.Application.Json,

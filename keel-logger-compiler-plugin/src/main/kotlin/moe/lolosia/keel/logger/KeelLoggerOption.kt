@@ -10,4 +10,6 @@ internal object KeelLoggerOption {
     const val WORKSPACE_ROOT = "workspaceRoot"
 
     const val SOURCE_ROOT = "sourceRoot"
+
+    const val EXCEPTION_TRACE = "exceptionTrace"
 }

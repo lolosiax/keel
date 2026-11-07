@@ -30,6 +30,7 @@ object HostLogSink : LogSink {
             message = message,
             cause = cause,
             color = useColor,
+            printedAt = site?.traceLocation(),
         )
         println(console)
         appendLogFile(
@@ -42,6 +43,7 @@ object HostLogSink : LogSink {
                     message = message,
                     cause = cause,
                     color = false,
+                    printedAt = site?.traceLocation(),
                 )
             } else {
                 console

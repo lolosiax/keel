@@ -13,6 +13,12 @@ object StdoutLogSink : LogSink {
     override fun log(level: LogLevel, site: LogSite?, tag: String?, message: String, cause: Throwable?) {
         val module = tag ?: "Host"
         val source = site?.display(Log.displayNameWidth) ?: "-"
-        println(LogLineFormatter.format(null, level, module, source, message, cause, color = false))
+        println(
+            LogLineFormatter.format(
+                null, level, module, source, message, cause,
+                color = false,
+                printedAt = site?.traceLocation(),
+            )
+        )
     }
 }
