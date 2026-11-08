@@ -116,7 +116,7 @@
   <g filter="url(#shadow)">
     <rect x="300" y="660" width="600" height="64" rx="32" fill="#12203A" stroke="#34D399"/>
     <circle cx="330" cy="692" r="4" fill="#34D399"/>
-    <text x="612" y="697" text-anchor="middle" class="finalText">Host records plugin_id · component is ready to serve</text>
+    <text x="612" y="697" text-anchor="middle" class="finalText">Host registers plugin_id · starts by requires topology · component is ready</text>
   </g>
 
   <text x="600" y="756" text-anchor="middle" class="body">A failed component becomes one failure record and does not interrupt the host or other components</text>

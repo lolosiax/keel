@@ -116,7 +116,7 @@
   <g filter="url(#shadow)">
     <rect x="300" y="660" width="600" height="64" rx="32" fill="#12203A" stroke="#34D399"/>
     <circle cx="330" cy="692" r="4" fill="#34D399"/>
-    <text x="612" y="697" text-anchor="middle" class="finalText">宿主记录 plugin_id · 组件进入可服务状态</text>
+    <text x="612" y="697" text-anchor="middle" class="finalText">宿主登记 plugin_id · 按 requires 拓扑启动 · 进入可服务状态</text>
   </g>
 
   <text x="600" y="756" text-anchor="middle" class="body">单个组件失败只记录一条失败原因，不中断宿主与其他组件</text>

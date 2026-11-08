@@ -81,11 +81,11 @@
     <rect x="720" y="292" width="190" height="92" rx="12" fill="#111C33" stroke="#253653"/>
     <text x="740" y="320" class="h3">Route table</text>
     <text x="740" y="344" class="body">method + path · routeId</text>
-    <text x="740" y="361" class="body">component owner</text>
+    <text x="740" y="361" class="body">owner · @Permission</text>
 
     <rect x="930" y="292" width="190" height="92" rx="12" fill="#111C33" stroke="#253653"/>
     <text x="950" y="320" class="h3">Ktor CIO</text>
-    <text x="950" y="344" class="body">single port · middleware</text>
+    <text x="950" y="344" class="body">single port · auth</text>
     <text x="950" y="361" class="body">access log</text>
 
     <rect x="90" y="408" width="1020" height="50" rx="12" fill="#152341" stroke="#3B4F73"/>
