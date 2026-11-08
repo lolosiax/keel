@@ -43,6 +43,7 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 **宿主与生命周期**
 
 - 扫描插件目录，校验清单，解出动态库，注册资源，加载并启动插件
+- 按 `requires` 拓扑启动、反序停止；停用会破坏依赖方时直接拒绝
 - 单个插件失败隔离为一条加载记录，不中断其它插件
 - 控制台支持查看、启用、停用、安装与卸载插件
 - 优雅停机先停止 HTTP，再逐个投递 `SHUTDOWN`，最后清空收件箱
@@ -55,6 +56,7 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 - 宿主以 `COMMAND` 发起请求，插件以相同 `correlation` 回 `COMPLETE`
 - 载荷由发送方分配并附带归还函数，接收方复制后归还
 - 句柄是引用计数表中的槽位，引用归零时向拥有者投递 `DISPOSE`
+- 插件可向宿主投递通知或发起带 correlation 的请求（权限目录、配置、存储、缓存失效）
 
 **Web 服务**
 
@@ -62,7 +64,14 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 - 插件在启用时注册路由描述表，宿主以 method 与 path 匹配
 - 支持精确段与 `{name}` 路径参数
 - 请求以 `HttpRequest` 快照跨边界传递，响应以 `HttpRouteResponse` 返回
+- 注解控制器（`@Controller`、`@GET` 等）在构建期生成路由表；宿主在分发前校验路由权限
+- 认证与授权来自 `authn` / `authz` 插件 SPI，带短 TTL 缓存与 fail-closed 的 401 / 403 / 503
 - HTTP 入站与出站日志复用统一日志格式，包含客户端地址、状态码、耗时与截断后的请求体与响应体
+
+**配置与存储**
+
+- 主线 `application.yaml` 与每插件 `config/plugins/<id>.yaml` 通过 `Config` 读写，写回保留注释与空行
+- 每个插件有独立的存储命名空间（`read` / `write` / `delete`），由宿主代理
 
 **资源层**
 
@@ -360,7 +369,7 @@ kotlin {
 | `resources` | 否 | 资源在包内的前缀，默认 `resources/` |
 | `name` | 否 | 展示名，用于日志模块列 |
 | `color` | 否 | 日志模块列的 truecolor，支持 `#RRGGBB` 与 `#RGB` |
-| `requires` | 否 | 依赖的插件 id，当前只读取，尚未参与加载顺序 |
+| `requires` | 否 | 依赖的能力名或插件 id；参与拓扑启动顺序，启用前校验 |
 | `authors` | 否 | 作者列表 |
 | `sha256` | 否 | 动态库或包的校验值，当前只读取不校验 |
 
@@ -485,9 +494,9 @@ context.routes.register(
 | `status` | HTTP 状态码 |
 | `headers` | 契约字段：响应头，当前线格式尚未携带 |
 | `body` | `ResponseBody.Empty`、`Text`、`Bytes` 或 `Stream` |
-| `envelope` | 契约字段：是否套用 JSON 信封，当前尚未接入 |
+| `envelope` | 对 `HttpResponse` 不生效：响应体原样写出；生成的控制器负责给普通业务对象包信封 |
 
-注解式控制器由 `keel-router-ksp` 生成，注解包括 `@Controller`、`@GET`、`@POST`、`@PUT`、`@DELETE`、`@PATCH`、`@Path`、`@Query`、`@Header`、`@Body` 与 `@Permission`。当前处理器尚未生成路由表，业务插件应使用手工注册。`RouteDescriptor.permissions` 已进入契约，权限判定尚未接入路由分发。
+注解式控制器由 `keel-router-ksp` 生成，注解包括 `@Controller`、`@GET`、`@POST`、`@PUT`、`@DELETE`、`@PATCH`、`@Path`、`@Query`、`@Header`、`@Body` 与 `@Permission`。处理器会生成路由表、参数绑定、JSON 信封与权限节点；手工 `ctx.routes.register` 仍然可用。Host 分发前会校验路由声明的 `RouteDescriptor.permissions`。
 
 ### 7. 使用调度器
 
@@ -680,24 +689,25 @@ keel/
 
 ## 当前状态
 
-Keel 处于 `0.1.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志与打包链路已经可以运行，以下能力仍在实现中。
+Keel 处于 `0.1.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志、配置、认证、存储与打包链路已经可以运行，下表逐项记录状态。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | 插件扫描、校验、加载与启停 | 可用 | `.keel` 目录、动态库缓存与失败隔离 |
 | C ABI 事件泵与请求应答 | 可用 | 队列、`correlation`、健康检查、日志、HTTP 与控制台 |
 | 跨运行时句柄与回调 | 契约已定义 | 宿主句柄表与 `CallbackRegistry` 尚未接入 |
-| 插件依赖排序 | 契约字段已定义 | `plugin.json.requires` 尚未参与加载顺序 |
+| 插件依赖排序 | 可用 | `requires` 参与拓扑启动、反序停用，并在启用前校验依赖 |
 | 单端口 HTTP 与手工路由 | 可用 | `ctx.routes.register`、路径参数与 JSON 线格式 |
 | 调度器 | 可用 | 延时、周期与取消，绑定 Worker 线程 |
 | 日志调用点与异常诊断 | 可用 | IR 改写、配色、创建点与抛出点 |
 | `.keel` 打包与控制台插件管理 | 可用 | `keelPackage`、`plugins` 子命令与 `--inspect` |
 | 资源层 | 部分可用 | 宿主侧注册表可用，插件侧资源读取未接入 |
-| 跨模块服务调用 | 契约已定义 | `ModuleDirectory` 与生成的客户端未接入运行时 |
-| 配置读写 | 契约已定义 | `Config` 尚未接入运行时 |
-| 注解路由生成 | 规划中 | `@Controller` 与 `@GET` 已定义，`keel-router-ksp` 尚未生成 |
-| 权限判定 | 契约已定义 | `@Permission`、`Authorizer` 与路由 `permissions` 尚未接入分发 |
-| JSON 信封与响应头 | 契约已定义 | `HttpResponse.envelope` 与 `headers` 尚未进入线格式 |
+| 跨模块服务调用 | 可用 | `@ModuleService` codegen + Host 转发，CBOR 载荷 |
+| 配置读写 | 可用 | Host YAML（写入保留注释）+ `ctx.config` / `ctx.server.config` |
+| 插件存储 | 可用 | 每插件命名空间下的 `read` / `write` / `delete` |
+| 注解路由生成 | 可用 | `@Controller` / `@GET` 等生成 `KeelPluginRoutes` |
+| 权限判定 | 可用 | Host 认证 / 授权中间件 + `authn` / `authz` SPI，401 / 403 / 503 |
+| JSON 信封与响应头 | 部分可用 | 生成的控制器会包 JSON 信封；`HttpResponse.headers` 尚未进入线格式 |
 | 流式响应 | 契约已定义 | `ResponseBody.Stream` 尚未接入 HTTP 分发 |
 | 单文件内嵌插件 | 入口已就位 | `keel-launcher` 目前转发到宿主入口 |
 | 发布产物打包 | 未实现 | `moe.lolosia.keel.publish` 只注册仓库，按目标归档与发布未实现 |
