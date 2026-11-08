@@ -54,7 +54,7 @@
 
 ### 1.3 落差（做基础栈之前必须补的）
 
-按阻塞程度排序（第 1 / 2 / 3 / 4 / 5 / 6 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
+按阻塞程度排序（第 1 / 2 / 3 / 4 / 5 / 6 / 7 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
 
 1. **`keel-router-ksp` 是空处理器** —— 插件写不了注解路由，基础栈的 HTTP 面不存在。
 2. **`ModuleDirectory` / `ServiceCaller` / `@ModuleService` codegen 未实现** —— biz → rbac、第三方 → biz/rbac 的跨插件调用不存在。
@@ -977,7 +977,13 @@ Host 启动
   授权实现时 fail-closed 503；请求期把 `AuthzSnapshot` 并进 `UserSnapshot` 注入 `Context`。
   冒烟（hello 内置桩）：无 token → 401、`guest` → 403、`hello` / `owner` → 200、
   去掉 `provides` 后受保护路由 → 503；
-- 其余 3 项待做（宿主与能力包生命周期、`PluginStorage`）。
+- 第 7 / 8 项（宿主与能力包生命周期）已完成：`requires` 先按能力包 `provides` 解释（必须已 open），
+  否则按插件 id（必须已启用）；启动按插件依赖拓扑排序（成环时拒绝），停用按启用反序，
+  仍被依赖的插件拒绝 disable / uninstall；能力包之间的 `requires` 在 open 前校验，
+  依赖不满足的包不会被选中，关闭时先停插件再关能力包。
+  冒烟：`demo.requires=["hello"]` 时 hello 先启动、demo 后启动；退出时 demo 先注销；
+  只装 demo 时报「缺少依赖 hello（插件未启用）」；
+- 其余 1 项待做（`PluginStorage`）。
 
 ### M2 —— rbac 与 biz 落地
 

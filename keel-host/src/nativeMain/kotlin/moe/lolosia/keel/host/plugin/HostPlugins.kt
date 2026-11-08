@@ -42,6 +42,9 @@ internal object HostPlugins {
     private var nextId: ULong = 1uL
     private var failedStarts = 0
 
+    /** 实际启用顺序；停用时按它反序，保证依赖方先停。 */
+    private val started = mutableListOf<Entry>()
+
     val pluginsDirectory: String get() = directory
 
     /** 启动阶段记录下的失败次数，供 Loader 汇总打印。 */
@@ -71,13 +74,14 @@ internal object HostPlugins {
         val result = requireLoader().loadAll(directory) { keelPath ->
             HostCapabilities.install(keelPath)
         }
+        HostCapabilities.validateDependencies()
         HostCapabilities.activateDatabase(DatabaseSettings.fromEnvironment())
         result.loaded.forEach { loaded ->
             logPackage(loaded)
-            val entry = Entry(loaded, nextId++)
-            entries += entry
-            start(entry)
+            entries += Entry(loaded, nextId++)
         }
+        // 按 requires 拓扑启动：被依赖的插件先进入 onEnable
+        orderByRequires(entries).forEach { start(it) }
         return result
     }
 
@@ -137,6 +141,7 @@ internal object HostPlugins {
      */
     fun uninstall(id: String): Boolean {
         val entry = find(id) ?: return false
+        if (refuseIfRequired(id)) return false
         stop(entry)
         entries.remove(entry)
         classpath?.unregister(id)
@@ -162,29 +167,73 @@ internal object HostPlugins {
     fun disable(id: String): Boolean {
         val entry = find(id) ?: return false
         if (!entry.enabled) return false
+        if (refuseIfRequired(id)) return false
         stop(entry)
         Log.info("disabled $id", tag = "Loader")
         return true
     }
 
-    /** 进程退出前逐个停用；最后关闭能力包。 */
+    /** 进程退出前按启用反序停用；最后关闭能力包。 */
     fun shutdownAll() {
-        val running = entries.filter { it.enabled }
+        val running = started.asReversed().toList()
         running.forEach { stop(it) }
         if (running.isNotEmpty()) Log.info("stopped ${running.size} plugin(s)", tag = "Server")
         HostCapabilities.closeAll()
     }
 
+    /**
+     * 阻止停用一个仍被启用插件依赖的插件。
+     *
+     * 返回 true 表示已拒绝；调用方据此返回 false（控制台会提示详见日志）。
+     */
+    private fun refuseIfRequired(id: String): Boolean {
+        val dependents = started.filter { it.id != id && id in it.loaded.manifest.requires }
+        if (dependents.isEmpty()) return false
+        Log.warn(
+            "拒绝停用 $id：仍被 ${dependents.joinToString { it.id }} 依赖",
+            tag = "Loader",
+        )
+        return true
+    }
+
+    /**
+     * 按 `requires` 拓扑排序；只把「需要另一个已加载插件」的条目当作依赖边，
+     * 能力名（如 `database`）不参与排序。成环时保留原顺序，让 [start] 报缺失依赖。
+     */
+    private fun orderByRequires(all: List<Entry>): List<Entry> {
+        val byId = all.associateBy { it.id }
+        val placed = mutableSetOf<String>()
+        val ordered = mutableListOf<Entry>()
+        val remaining = all.toMutableList()
+
+        while (remaining.isNotEmpty()) {
+            val ready = remaining.filter { entry ->
+                entry.loaded.manifest.requires.none { it in byId && it !in placed && it != entry.id }
+            }
+            if (ready.isEmpty()) {
+                Log.warn("插件依赖成环：${remaining.joinToString { it.id }}", tag = "Loader")
+                ordered += remaining
+                break
+            }
+            ready.forEach {
+                placed += it.id
+                ordered += it
+            }
+            remaining.removeAll(ready)
+        }
+        return ordered
+    }
+
     private fun start(entry: Entry): Boolean {
         val manifest = entry.loaded.manifest
-        val missing = manifest.requires.filter { it in capabilityNames && !HostCapabilities.isAvailable(it) }
+        val missing = missingRequires(manifest)
         if (missing.isNotEmpty()) {
             failedStarts++
-            Log.warn(
-                "start failed: ${manifest.id}: 缺少能力 ${missing.joinToString()}，" +
-                    "请安装对应的能力包并配置 database",
-                tag = "Loader",
-            )
+            val detail = missing.joinToString { name ->
+                if (name in HostCapabilities.installedProvides()) "$name（能力未就绪）"
+                else "$name（插件未启用）"
+            }
+            Log.warn("start failed: ${manifest.id}: 缺少依赖 $detail", tag = "Loader")
             return false
         }
         // 同一 SPI 只允许一个提供者：第二个声明直接拒绝启用
@@ -200,6 +249,7 @@ internal object HostPlugins {
             PluginNames.register(entry.pluginId, entry.displayName)
             val runtime = startPlugin(entry.loaded, entry.pluginId)
             entry.runtime = runtime
+            started += entry
             // onEnable 正常返回后才对外提供 SPI，避免半启动的插件接到认证请求
             HostAuth.claim(entry.pluginId, manifest.provides)
             Log.info("started ${manifest.id} (plugin_id=${runtime.pluginId})")
@@ -220,6 +270,7 @@ internal object HostPlugins {
     private fun stop(entry: Entry) {
         entry.runtime?.shutdown()
         entry.runtime = null
+        started.remove(entry)
         HostRoutes.remove(entry.pluginId)
         HostPermissionCatalog.remove(entry.pluginId)
         HostServices.remove(entry.pluginId)
@@ -255,6 +306,16 @@ internal object HostPlugins {
 
     private fun requireLoader(): PluginLoader = loader ?: error("HostPlugins 尚未初始化")
 
-    /** 由能力包提供、需要在 `requires` 里校验的能力名。 */
-    private val capabilityNames = setOf("database")
+    /**
+     * `requires` 里未满足的依赖。
+     *
+     * 名字先按能力包提供的 `provides` 解释（必须已 open），否则当作插件 id（必须已启用）。
+     */
+    private fun missingRequires(manifest: KeelPackageManifest): List<String> {
+        val capabilities = HostCapabilities.installedProvides()
+        return manifest.requires.filter { name ->
+            if (name in capabilities) !HostCapabilities.isAvailable(name)
+            else find(name)?.enabled != true
+        }
+    }
 }

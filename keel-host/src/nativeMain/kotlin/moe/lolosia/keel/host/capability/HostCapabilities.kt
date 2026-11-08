@@ -16,6 +16,9 @@ internal object HostCapabilities {
     private val active = mutableSetOf<String>()
     private var database: DatabaseCapability? = null
 
+    /** 依赖不满足、不能激活的能力包 id。 */
+    private val unsatisfied = mutableSetOf<String>()
+
     fun init(cacheRoot: String) {
         loader = CapabilityLoader(cacheRoot)
     }
@@ -34,6 +37,32 @@ internal object HostCapabilities {
     /** `requires` 里声明的能力是否已经 `open`。 */
     fun isAvailable(name: String): Boolean = name in active
 
+    /** 已安装能力包声明的全部能力名（不要求已经 open）。 */
+    fun installedProvides(): Set<String> =
+        installed.flatMapTo(mutableSetOf()) { it.manifest.provides }
+
+    /**
+     * 校验能力包之间的 `requires`：提供者必须已安装。
+     *
+     * 依赖不满足的包不会被 [activateDatabase] 选中；返回这些包的 id。
+     */
+    fun validateDependencies(): Set<String> {
+        val provided = installedProvides()
+        unsatisfied.clear()
+        installed.forEach { capability ->
+            val missing = capability.manifest.requires.filter {
+                it == capability.manifest.id || it !in provided
+            }
+            if (missing.isEmpty()) return@forEach
+            unsatisfied += capability.manifest.id
+            Log.warn(
+                "capability ${capability.manifest.id} 缺少依赖能力 ${missing.joinToString()}",
+                tag = "Loader",
+            )
+        }
+        return unsatisfied.toSet()
+    }
+
     /**
      * 按 `database.url` 的 scheme 选中能力包并 `open`。
      *
@@ -47,7 +76,9 @@ internal object HostCapabilities {
         }
         if (database != null) return
 
-        val candidates = installed.filter { "database" in it.manifest.provides }
+        val candidates = installed.filter {
+            "database" in it.manifest.provides && it.manifest.id !in unsatisfied
+        }
         val selected = select(candidates, settings) ?: return
         try {
             val opened = DatabaseCapability.open(selected, settings)
