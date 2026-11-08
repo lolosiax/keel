@@ -4,13 +4,13 @@
 
 # Keel
 
-**Kotlin/Native 模块化 Web 框架**
+**A modular web framework for Kotlin/Native**
 
-提供组件化插接能力：组件可独立构建、动态装卸与在线热更新，宿主统一管理生命周期、路由与跨运行时边界。
+Componentized plug-in is the core capability: components are built independently, dynamically loaded or unloaded, and hot-updated at runtime. The host manages lifecycle, routing, and runtime boundaries.
 
-中文 · [English](README.en.md)
+[中文](README.md) · English
 
-[快速开始](#快速开始) · [架构](#架构) · [编写插件](#编写插件) · [构建任务](#构建任务) · [延伸阅读](#延伸阅读)
+[Quick Start](#quick-start) · [Architecture](#architecture) · [Writing a Plugin](#writing-a-plugin) · [Build Tasks](#build-tasks) · [Further Reading](#further-reading)
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.4.20-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Kotlin/Native](https://img.shields.io/badge/Kotlin%2FNative-3%20targets-7F52FF)](https://kotlinlang.org/docs/native-overview.html)
@@ -21,188 +21,188 @@
 
 </div>
 
-- **目标平台**：`mingwX64`、`linuxArm64`、`linuxX64`，不提供 JVM 目标
-- **交付形态**：宿主可执行文件与若干 `.keel` 插件包；单文件发行版将宿主、插件与资源装配为一个可执行文件
-- **运行时模型**：宿主与每个插件各有一个 Kotlin/Native 运行时，通过 C ABI 的事件队列与不透明句柄通信
-- **构建方式**：每个顶层目录都是独立的 Gradle 构建，由根构建以 composite build 聚合
+- **Targets**: `mingwX64`, `linuxArm64`, and `linuxX64`. No JVM target.
+- **Delivery**: one host executable plus a set of `.keel` plugin packages. The launcher variant assembles the host, plugins, and resources into a single executable.
+- **Runtime model**: the host and every plugin each own a Kotlin/Native runtime. They communicate through C ABI event queues and opaque handles.
+- **Build model**: every top-level directory is an independent Gradle build. The root build aggregates them through a composite build.
 
-> 代码风格与硬性约定见 [AGENTS.md](AGENTS.md) · 分阶段目标见 [doc/roadmap.md](doc/roadmap.md) · 第三方组件许可见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+> Code style and hard constraints are documented in [AGENTS.md](AGENTS.md). Phase goals are in [doc/roadmap.md](doc/roadmap.md). Third-party licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-## 设计目标
+## Design Goals
 
-Keel 的核心能力是组件化插接：组件以独立部署单元交付，可以在运行时添加、删除与热更新。Kotlin/Native 没有 JVM 的类加载器，动态库无法安全卸载，Kotlin 对象与协程不能跨动态库传递；Keel 以这些事实为前提设计插件体系：
+Keel is built around a componentized plug-in model. Components ship as independent deployment units and can be added, removed, and hot-updated at runtime. Kotlin/Native has no JVM class loader, dynamic libraries cannot be unloaded safely, and Kotlin objects or coroutines cannot cross library boundaries. Keel treats these facts as design premises:
 
-1. **容器与业务分离**：宿主负责端口、路由、生命周期、上下文、调度与日志，插件只实现业务能力。
-2. **插件独立交付**：每个插件产出 `.keel` 包，包含清单、按目标划分的动态库与资源，可单独安装、启停与升级。
-3. **边界显式化**：跨运行时只允许定宽整数、指针、C 结构体与纯 C 函数指针，所有异步能力退化为事件投递与回调通知。
-4. **失败可定位**：单个插件加载、启动或请求失败不扩散到宿主与其它插件，错误链跨运行时保留创建点与抛出点。
-5. **代码生成前移**：路由表与 Worker 入口在构建期生成，运行期不依赖反射。
+1. **Separate container from business logic**: the host owns ports, routing, lifecycle, context, scheduling, and logging. Plugins implement business capabilities only.
+2. **Deliver plugins independently**: each plugin produces a `.keel` package with a manifest, per-target native libraries, and resources. It can be installed, enabled, disabled, and upgraded on its own.
+3. **Make boundaries explicit**: only fixed-width integers, pointers, C structs, and plain C function pointers cross a runtime boundary. Asynchronous capabilities degrade into event delivery and callback notification.
+4. **Keep failures attributable**: a failed load, start, or request is isolated to one plugin. Error chains preserve creation and throw sites across runtimes.
+5. **Generate code at build time**: route tables and worker entries are produced during the build. The runtime does not depend on reflection.
 
-## 特性
+## Features
 
-**宿主与生命周期**
+**Host and lifecycle**
 
-- 扫描插件目录，校验清单，解出动态库，注册资源，加载并启动插件
-- 单个插件失败隔离为一条加载记录，不中断其它插件
-- 控制台支持查看、启用、停用、安装与卸载插件
-- 优雅停机先停止 HTTP，再逐个投递 `SHUTDOWN`，最后清空收件箱
-- 看门狗进程与崩溃处理器在异常退出时保存现场与报告
+- Scans a plugin directory, validates manifests, extracts native libraries, registers resources, and starts plugins
+- Isolates a failed plugin as one load record without interrupting the host or other plugins
+- Provides console commands to list, inspect, enable, disable, install, and remove plugins
+- Stops HTTP first, then sends `SHUTDOWN` to each plugin, and finally drains the inbox during graceful shutdown
+- Spawns a watchdog process and installs a crash handler to preserve evidence and write a report
 
-**跨运行时通信**
+**Cross-runtime communication**
 
-- 每个插件拥有独立事件泵线程与有界收件箱
-- 事件携带 `kind`、`source`、`target`、`correlation`、`subject`、`status` 与载荷
-- 宿主以 `COMMAND` 发起请求，插件以相同 `correlation` 回 `COMPLETE`
-- 载荷由发送方分配并附带归还函数，接收方复制后归还
-- 句柄是引用计数表中的槽位，引用归零时向拥有者投递 `DISPOSE`
+- Each plugin owns a dedicated event pump thread and a bounded inbox
+- Events carry `kind`, `source`, `target`, `correlation`, `subject`, `status`, and payload
+- The host sends a `COMMAND` request; the plugin replies with `COMPLETE` and the same `correlation`
+- The sender allocates the payload and attaches a release function; the receiver copies the payload and calls release
+- Handles are slots in a reference-count table. When the count reaches zero, a `DISPOSE` event is delivered to the owner
 
-**Web 服务**
+**Web service**
 
-- 宿主独占 Ktor CIO 引擎与端口，插件不创建服务器
-- 插件在启用时注册路由描述表，宿主以 method 与 path 匹配
-- 支持精确段与 `{name}` 路径参数
-- 请求以 `HttpRequest` 快照跨边界传递，响应以 `HttpRouteResponse` 返回
-- HTTP 入站与出站日志复用统一日志格式，包含客户端地址、状态码、耗时与截断后的请求体与响应体
+- The host owns the Ktor CIO engine and the port. Plugins never create a server.
+- Plugins register route descriptors when enabled. The host matches method and path.
+- Exact segments and `{name}` path parameters are supported
+- Requests cross the boundary as an `HttpRequest` snapshot. Responses return as `HttpRouteResponse`
+- Inbound and outbound HTTP logs share the unified log format with client address, status, latency, and truncated request and response bodies
 
-**资源层**
+**Resource layer**
 
-- `.keel` 资源不解包，按 zip 中央目录随机读取
-- 资源层提供自身优先、缺失回落宿主的组合视图
-- 跨插件访问只暴露带代次的不透明引用
-- 卸载后旧引用读取立即失败
+- Resources inside `.keel` are not extracted. They are read randomly through the zip central directory.
+- The resource layer provides a composite view that prefers the plugin package and falls back to the host
+- Cross-plugin access exposes only opaque references with a generation number
+- Reads through stale references fail immediately after unload
 
-**日志与诊断**
+**Logging and diagnostics**
 
-- `Log` 统一日志门面，提供六个级别与结构化调用点
-- 编译器插件在 IR 阶段注入类名、文件、行号、包与函数
-- 插件日志编码为 `LOG` 事件回投宿主，由宿主统一渲染
-- 异常创建点与抛出点记录在侧表，输出 `Created at`、`Throwed at` 与 `Printed at`
-- `--inspect` 读取插件包清单与资源条目，并验证卸载后读取失效
+- `Log` is the unified logging facade with six levels and structured call sites
+- The compiler plugin injects class name, file, line, package, and function during IR transformation
+- Plugin logs are encoded as `LOG` events and rendered by the host
+- Exception creation and throw sites are recorded in a side table and printed as `Created at`, `Throwed at`, and `Printed at`
+- `--inspect` reads a plugin manifest and resource entries and verifies that reads fail after unload
 
-**构建工具链**
+**Build toolchain**
 
-- `moe.lolosia.keel.classpath`：合并资源并嵌入可执行文件
-- `moe.lolosia.keel.plugin`：打包 `.keel`，自动挂载 ABI、日志与 KSP
-- `moe.lolosia.keel.abi`：解出 C ABI 静态库并注入链接参数
-- `moe.lolosia.keel.logger`：把日志编译器插件挂到 Kotlin/Native 编译
-- `moe.lolosia.keel.publish`：注册自建 Maven 发布仓库
-- `keel-plugin-ksp`：从 `@KeelPluginMain` 生成 Worker 入口
+- `moe.lolosia.keel.classpath` merges resources and embeds them into an executable
+- `moe.lolosia.keel.plugin` packages `.keel` files and applies the ABI, logger, and KSP plugins
+- `moe.lolosia.keel.abi` extracts the C ABI static library and injects linker options
+- `moe.lolosia.keel.logger` attaches the log compiler plugin to Kotlin/Native compilation
+- `moe.lolosia.keel.publish` registers a private Maven repository
+- `keel-plugin-ksp` generates the worker entry from `@KeelPluginMain`
 
-## 架构
+## Architecture
 
-### 总览
+### Overview
 
 <p align="center">
-  <img src="doc/diagrams/architecture.zh.svg" alt="Keel 运行时架构" width="100%" />
+  <img src="doc/diagrams/architecture.en.svg" alt="Keel runtime architecture" width="100%" />
 </p>
 
-### 组件职责
+### Component responsibilities
 
-| 组件 | 职责 |
+| Component | Responsibility |
 | --- | --- |
-| `keel-api` | 插件契约：生命周期、上下文、路由、调度、日志、事件与消息 |
-| `keel-host` | 宿主：插件加载、生命周期推进、事件泵、Ktor 引擎、路由表、控制台与停机 |
-| `keel-launcher` | 单文件发行版入口：静态链接宿主，插件装配仍在实现 |
-| `keel-abi` | C ABI 头文件与每目标静态库：队列、事件、bootstrap、控制台与崩溃处理 |
-| `keel-classpath` | 只读资源层：zip、目录、前缀视图与流式读取 |
-| `keel-classpath-full` | 宿主注册表、带代次的资源引用与跨模块代理 |
-| `keel-plugin-*` | 业务插件，顶层平铺，每个插件一个独立 Gradle 构建 |
-| `keel-*-gradle-plugin` | 构建期 Gradle 插件：资源嵌入、`.keel` 打包、ABI 注入、日志挂载与发布 |
-| `keel-router-ksp` | 路由表代码生成器 |
-| `keel-plugin-ksp` | 插件 Worker 入口代码生成器 |
+| `keel-api` | Plugin contract: lifecycle, context, routing, scheduling, logging, events, and messaging |
+| `keel-host` | Host: plugin loading, lifecycle, event pump, Ktor engine, route table, console, and shutdown |
+| `keel-launcher` | Single-file distribution entry: statically links the host. Plugin assembly is still in progress. |
+| `keel-abi` | C ABI headers and per-target static libraries: queues, events, bootstrap, console, and crash handling |
+| `keel-classpath` | Read-only resource layer: zip, directory, prefix view, and streaming reads |
+| `keel-classpath-full` | Host registry, generation-aware resource references, and cross-module proxies |
+| `keel-plugin-*` | Business plugins. Each plugin is a top-level independent Gradle build. |
+| `keel-*-gradle-plugin` | Build-time Gradle plugins: embedding, packaging, ABI injection, logger attachment, and publishing |
+| `keel-router-ksp` | Route table code generator |
+| `keel-plugin-ksp` | Plugin worker entry code generator |
 
-### 运行模型
+### Runtime model
 
-宿主与每个插件都是独立的 Kotlin/Native 运行时。宿主通过 `dlopen` 或 `LoadLibrary` 打开插件动态库，只解析 `keel_plugin_bootstrap` 与清单声明的 Worker 入口地址，不直接调用插件导出的 Kotlin 函数。`keel_plugin_bootstrap` 由 C 实现，负责创建 Worker 线程、收件箱与事件泵。Worker 线程收到 `START` 后才第一次进入插件 Kotlin 运行时，构造 `@KeelPluginMain` 标注的实例并推进生命周期。宿主线程与插件线程因此不会同时进入对方的运行时。
+The host and every plugin are separate Kotlin/Native runtimes. The host opens a plugin library with `dlopen` or `LoadLibrary` and resolves only `keel_plugin_bootstrap` and the worker entry declared in the manifest. It never calls a Kotlin function exported by the plugin directly. `keel_plugin_bootstrap` is implemented in C. It creates the worker thread, inbox, and event pump. The worker thread enters the plugin runtime for the first time when it receives `START`, constructs the class annotated with `@KeelPluginMain`, and advances the lifecycle. Host threads and plugin threads therefore never enter each other's runtime.
 
-每个插件的事件泵线程是该插件唯一的 Kotlin 执行入口。宿主投递事件到插件收件箱，泵线程取出事件并分发；插件返回结果时，把 `COMPLETE` 投回宿主收件箱。宿主主线程周期性消费宿主收件箱，按 `correlation` 完成挂起的请求。队列为定长环形缓冲，插件收件箱与宿主收件箱各 256 条，满时拒绝入队，不做无限堆积。
+The event pump thread is the only Kotlin execution entry for its plugin. The host posts events to the plugin inbox. The pump thread dequeues and dispatches them. When the plugin produces a result, it posts `COMPLETE` back to the host inbox. The host main thread drains the host inbox periodically and completes suspended requests by `correlation`. Both inboxes are fixed-size ring buffers with 256 slots. A full queue rejects the event instead of growing without bound.
 
-### 生命周期
+### Lifecycle
 
-| 阶段 | 执行者 | 行为 |
+| Phase | Executor | Behavior |
 | --- | --- | --- |
-| 扫描 | 宿主 | 按文件名排序列出插件目录中的 `.keel` |
-| 校验 | 宿主 | 检查 `id`、`abiVersion`、`entry`、当前目标的库条目与重复 id |
-| 解包 | 宿主 | 把动态库写入缓存目录，按 `id/version` 分层 |
-| 注册资源 | 宿主 | 把包内 `resources/` 注册进 classpath 注册表 |
-| 加载 | 宿主 | `dlopen` 或 `LoadLibrary`，解析 bootstrap 与入口 |
-| 启动 | C 与插件 Worker | bootstrap 创建线程与队列，投递 `START`，执行 `onLoad` 与 `onEnable` |
-| 服务 | 插件 Worker | 处理 HTTP、控制台、定时任务与健康检查事件 |
-| 停用 | 插件 Worker 与宿主 | 插件执行 `onDisable` 并清空调度器，宿主清理该插件的路由 |
-| 停机 | 宿主 | 停止 HTTP，逐个投递 `SHUTDOWN`，清空收件箱，进程退出 |
+| Scan | Host | Lists `.keel` files in the plugin directory in filename order |
+| Validate | Host | Checks `id`, `abiVersion`, `entry`, the current target library entry, and duplicate ids |
+| Extract | Host | Writes the native library to the cache directory under `id/version` |
+| Register resources | Host | Registers the package `resources/` in the classpath registry |
+| Load | Host | Calls `dlopen` or `LoadLibrary` and resolves bootstrap and entry symbols |
+| Start | C and plugin worker | Bootstrap creates the thread and queue, posts `START`, and runs `onLoad` then `onEnable` |
+| Serve | Plugin worker | Handles HTTP, console, scheduled tasks, and health-check events |
+| Disable | Plugin worker and host | Plugin runs `onDisable` and clears its scheduler. Host removes the plugin routes. |
+| Shutdown | Host | Stops HTTP, posts `SHUTDOWN` to each plugin, drains the inbox, and exits |
 
-### 跨运行时边界
+### Cross-runtime boundary
 
-跨边界的唯一载体是 C ABI。头文件 [`keel_abi.h`](keel-abi/src/nativeCpp/keel_abi.h) 是结构体布局与符号导出的唯一来源。Kotlin 侧通过 cinterop 生成绑定，C 侧实现队列、事件释放、bootstrap 与平台线程原语。每个二进制各自链接一份静态库，队列与句柄表因此天然按二进制隔离。
+The only carrier across a boundary is the C ABI. [`keel_abi.h`](keel-abi/src/nativeCpp/keel_abi.h) is the single source of truth for struct layouts and exported symbols. The Kotlin side uses cinterop bindings. The C side implements queues, event release, bootstrap, and platform thread primitives. Every binary links its own copy of the static library, so queues and handle tables are isolated per binary.
 
-| 不变量 | 约束 |
+| Invariant | Constraint |
 | --- | --- |
-| 单线程单运行时 | 一个线程只能进入一个 Kotlin/Native 运行时 |
-| 宿主不直接调用插件 | 宿主只解析插件入口地址，由 bootstrap 在事件泵线程上调用 |
-| 对象不跨边界 | Kotlin 对象留在拥有者运行时，另一边持有句柄与本地代理 |
-| 协程不跨边界 | `suspend` 只在本地使用，完成结果通过事件回投 |
-| 回调使用标识 | 注册数字回调 id，调用时投递事件，由拥有者查表执行 |
-| 载荷所有权明确 | 发送方分配并挂载归还函数，接收方复制后归还 |
-| 热路径使用二进制编码 | 目标格式为 CBOR 或 Protobuf，HTTP 边界当前使用 JSON |
-| 卸载不回收地址空间 | 卸载只释放引用与停止事件泵，动态库在进程重启时回收 |
-| 缺失即拒绝 | 权限、资源或服务不可用时返回失败，不降级为放行 |
+| One runtime per thread | A thread may enter only one Kotlin/Native runtime |
+| Host never calls plugins directly | The host resolves the entry address. Bootstrap calls it on the event pump thread. |
+| Objects stay local | Kotlin objects remain in the owning runtime. The other side holds a handle and a local proxy. |
+| Coroutines stay local | `suspend` is used only inside a runtime. Completion returns as an event. |
+| Callbacks use identifiers | A numeric callback id is registered. Invocation posts an event and the owner dispatches it. |
+| Payload ownership is explicit | The sender allocates the payload and attaches a release function. The receiver copies and releases it. |
+| Hot paths use binary encoding | CBOR or Protobuf is the target format. The HTTP boundary currently uses JSON. |
+| Unload does not reclaim address space | Unload stops the event pump and drops references. The process restart reclaims the library. |
+| Missing capability means denial | Missing permissions, resources, or services return a failure instead of falling open. |
 
-### 请求处理流程
-
-<p align="center">
-  <img src="doc/diagrams/request-flow.zh.svg" alt="HTTP 请求处理流程" width="100%" />
-</p>
-
-Ktor 的 handler 运行在宿主协程中。它不直接调用插件，而是通过 `HostPump.request` 把请求放入通道并挂起；泵线程负责投递与回投；挂起由 `CompletableDeferred` 完成。`ApplicationCall`、`Continuation` 与 Ktor 上下文始终留在宿主运行时。
-
-### 插件加载流程
+### Request flow
 
 <p align="center">
-  <img src="doc/diagrams/plugin-load.zh.svg" alt="组件加载与启动流程" width="100%" />
+  <img src="doc/diagrams/request-flow.en.svg" alt="HTTP request flow" width="100%" />
 </p>
 
-### 资源与卸载语义
+The Ktor handler runs in a host coroutine. It does not call the plugin directly. It submits the request through `HostPump.request` and suspends. The pump thread posts the event and returns the reply. A `CompletableDeferred` completes the suspension. `ApplicationCall`, `Continuation`, and all Ktor context remain inside the host runtime.
 
-`.keel` 是 zip 包，包含根 `plugin.json`、按目标划分的动态库与 `resources/` 目录。资源不解包，宿主与插件按中央目录随机读取。宿主为每个插件维护带代次的 `ClasspathRef`，插件卸载时代次失效，旧引用读取会抛出 `ClasspathNotFoundException`。跨插件访问只能获得不透明引用，真实包路径保留在宿主。
+### Plugin load flow
 
-Kotlin/Native 运行时无法安全卸载。`dlclose` 之后 TLS 与 GC 可能延迟崩溃，因此卸载只停止事件泵、注销路由与资源引用，动态库继续留在进程地址空间，最终由进程重启回收。
+<p align="center">
+  <img src="doc/diagrams/plugin-load.en.svg" alt="Component load and startup flow" width="100%" />
+</p>
 
-### 日志与诊断
+### Resource and unload semantics
 
-`Log` 是统一日志门面。`moe.lolosia.keel.logger` 在 IR 阶段把 `Log.info(...)` 改写为携带调用点的形式，来源包含类名、文件、行号、包与函数。插件日志编码为 `LOG` 事件投回宿主，由宿主按同一行格式渲染。终端支持 ANSI 时按级别、模块名与来源类名着色；模块名默认使用清单中的插件名，`plugin.json.color` 可以指定插件模块列的 truecolor。
+A `.keel` file is a zip package with a root `plugin.json`, per-target native libraries, and a `resources/` directory. Resources are never extracted. Both host and plugin read entries randomly through the central directory. The host maintains a `ClasspathRef` with a generation number for each plugin. When a plugin is unloaded, the generation becomes invalid and reads through old references throw `ClasspathNotFoundException`. Cross-plugin access returns only opaque references. The real package path never leaves the host.
 
-同一个编译器插件还为异常构造与 `throw` 插桩，记录创建点与抛出点。日志渲染时在异常头后输出 `Created at`、`Throwed at` 与 `Printed at`，跨运行时通过 `KeelErrorEntry` 传递创建时间与抛出点，宿主不再追加载体栈。
+Kotlin/Native runtimes cannot be unloaded safely. After `dlclose`, TLS and GC state can crash later. Unload therefore stops the event pump, removes routes, and releases resource references. The native library remains mapped until the process exits.
 
-## 快速开始
+### Logging and diagnostics
 
-### 环境要求
+`Log` is the unified logging facade. `moe.lolosia.keel.logger` rewrites `Log.info(...)` during IR transformation so the call carries its source site: class name, file, line, package, and function. Plugin logs are encoded as `LOG` events and rendered by the host with the same line format. When the terminal supports ANSI, level, module name, and source class name are colored. The module column uses the manifest `name` by default, and `plugin.json.color` can assign a truecolor to a plugin.
 
-- JDK 21，用于运行 Gradle 与 KSP 处理器；产物本身不依赖 JVM
-- 首次构建会下载 Kotlin/Native 工具链到 `~/.konan`
-- 在 Windows 上构建 `linuxArm64` 或 `linuxX64` 需要 WSL2 与对应的 `objcopy`
-- 使用 `.keel` 打包与控制台插件管理不需要额外服务
+The same compiler plugin instruments exception construction and `throw`, recording creation and throw sites. The log renderer prints `Created at`, `Throwed at`, and `Printed at` after each exception header. Creation time and throw sites cross the runtime through `KeelErrorEntry`, and the host does not append carrier-only stack frames.
 
-### 构建宿主与示例插件
+## Quick Start
+
+### Requirements
+
+- JDK 21 to run Gradle and KSP processors. The produced binaries do not require a JVM.
+- The first build downloads the Kotlin/Native toolchain into `~/.konan`.
+- Building `linuxArm64` or `linuxX64` on Windows requires WSL2 and the matching `objcopy`.
+- `.keel` packaging and console plugin management need no additional services.
+
+### Build the host and the example plugin
 
 ```powershell
 gradlew :keel-host:linkDebugExecutableMingwX64
 gradlew :keel-plugin-hello:keelPackage
 ```
 
-产物位置：
+Artifact locations:
 
 ```text
 keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe
 keel-plugin-hello/build/keel/keel-plugin-hello-0.1.0-SNAPSHOT.keel
 ```
 
-构建全部独立构建：
+Build every independent build:
 
 ```powershell
 gradlew buildAll
 ```
 
-### 启动宿主
+### Start the host
 
 ```powershell
 .\keel-host\build\bin\mingwX64\debugExecutable\keel-host.exe `
@@ -211,9 +211,9 @@ gradlew buildAll
     --serve
 ```
 
-`--plugins` 指向包含 `.keel` 的目录，缓存目录默认为该目录下的 `.cache`。宿主会打印启动横幅、插件加载结果、健康检查结果与 HTTP 监听地址。停止时在控制台输入 `stop`，或按 `Ctrl+C` 触发优雅停机。
+`--plugins` points to a directory containing `.keel` files. The cache directory defaults to `.cache` inside that directory. The host prints the startup banner, plugin load results, health-check results, and the HTTP listen address. Type `stop` in the console or press `Ctrl+C` to trigger a graceful shutdown.
 
-### 冒烟验证
+### Smoke test
 
 ```powershell
 curl.exe -s http://127.0.0.1:7180/healthz
@@ -222,7 +222,7 @@ curl.exe -s http://127.0.0.1:7180/hello
 curl.exe -s -X POST -H "Content-Type: application/json" --data '{"name":"keel","count":1}' http://127.0.0.1:7180/echo
 ```
 
-预期结果：
+Expected output:
 
 ```text
 ok
@@ -231,9 +231,9 @@ hello from keel plugin
 {"name":"keel","count":1}
 ```
 
-`/healthz` 由宿主直接响应，不经过插件。`/ping` 走完整的事件泵往返：宿主投递 `PING`，插件回 `COMPLETE`，宿主再返回 HTTP 响应。
+`/healthz` is answered by the host and does not touch a plugin. `/ping` performs a full event pump round trip: the host posts `PING`, the plugin replies with `COMPLETE`, and the host returns the HTTP response.
 
-### 控制台命令
+### Console commands
 
 ```text
 help
@@ -245,9 +245,9 @@ plugins remove hello
 stop
 ```
 
-`help`、`stop` 与 `plugins` 是宿主内置命令。其它输入按插件启用顺序交给插件的 `onCommand`，插件返回 `false` 时继续询问下一个插件。
+`help`, `stop`, and `plugins` are host commands. Other input is offered to plugins in enable order. A plugin returns `false` to let the next plugin handle the command.
 
-### 一次性验证
+### One-shot validation
 
 ```powershell
 .\keel-host\build\bin\mingwX64\debugExecutable\keel-host.exe `
@@ -255,22 +255,22 @@ stop
     --once
 ```
 
-`--once` 在插件启动与健康检查后退出，适合自动化流水线。
+`--once` exits after plugin startup and health checks. It is suitable for automation.
 
-### 检查插件包
+### Inspect a plugin package
 
 ```powershell
 .\keel-host\build\bin\mingwX64\debugExecutable\keel-host.exe `
     --inspect .\keel-plugin-hello\build\keel\keel-plugin-hello-0.1.0-SNAPSHOT.keel
 ```
 
-`--inspect` 读取清单与资源条目，并验证卸载后资源读取立即失效。
+`--inspect` reads the manifest and resource entries and verifies that reads fail after unload.
 
-## 编写插件
+## Writing a Plugin
 
-### 1. 创建独立构建
+### 1. Create an independent build
 
-在顶层新建 `keel-plugin-<id>/` 目录，并为它准备独立的 `settings.gradle.kts`、`build.gradle.kts`、源码与资源。插件构建必须声明依赖的构建期插件：
+Create a top-level `keel-plugin-<id>/` directory with its own `settings.gradle.kts`, `build.gradle.kts`, sources, and resources. The plugin build must declare the build-time plugins it uses:
 
 ```kotlin
 pluginManagement {
@@ -296,9 +296,9 @@ dependencyResolutionManagement {
 rootProject.name = "keel-plugin-hello"
 ```
 
-在仓库内开发时，还需要把新目录加入根 [`settings.gradle.kts`](settings.gradle.kts) 的 `includeBuild` 列表，根构建才能替换 Maven 坐标并聚合任务。
+When developing inside this repository, also add the new directory to the `includeBuild` list in the root [`settings.gradle.kts`](settings.gradle.kts) so the root build can substitute Maven coordinates and aggregate tasks.
 
-### 2. 配置构建脚本
+### 2. Configure the build script
 
 ```kotlin
 plugins {
@@ -326,11 +326,11 @@ kotlin {
 }
 ```
 
-`moe.lolosia.keel.plugin` 自动应用 ABI 静态库注入、日志编译器插件与 KSP，并注册 `keelPackage` 任务。插件工程只需要保留生命周期实现与 `plugin.json`。
+`moe.lolosia.keel.plugin` applies ABI injection, the logger compiler plugin, and KSP, and registers the `keelPackage` task. The plugin project only needs lifecycle code and `plugin.json`.
 
-### 3. 编写插件清单
+### 3. Write the plugin manifest
 
-清单放在 `src/commonMain/resources/plugin.json`，打包时复制到 `.keel` 根部：
+Place the manifest at `src/commonMain/resources/plugin.json`. Packaging copies it to the root of the `.keel` package:
 
 ```json
 {
@@ -346,25 +346,25 @@ kotlin {
   "resources": "resources/",
   "requires": [],
   "authors": ["lolosia"],
-  "description": "最小示例插件"
+  "description": "Minimal example plugin"
 }
 ```
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Description |
 | --- | --- | --- |
-| `id` | 是 | 全局唯一标识，建议使用小写点分或短横线命名 |
-| `version` | 是 | 插件版本，参与缓存目录分层 |
-| `abiVersion` | 是 | 与宿主 ABI 兼容的主版本，当前为 `1` |
-| `entry` | 是 | Worker 入口符号名，由 KSP 生成 |
-| `lib` | 是 | 目标名到包内动态库路径的映射 |
-| `resources` | 否 | 资源在包内的前缀，默认 `resources/` |
-| `name` | 否 | 展示名，用于日志模块列 |
-| `color` | 否 | 日志模块列的 truecolor，支持 `#RRGGBB` 与 `#RGB` |
-| `requires` | 否 | 依赖的插件 id，当前只读取，尚未参与加载顺序 |
-| `authors` | 否 | 作者列表 |
-| `sha256` | 否 | 动态库或包的校验值，当前只读取不校验 |
+| `id` | Yes | Globally unique identifier. Lowercase dot-separated or hyphenated names are recommended. |
+| `version` | Yes | Plugin version. Used in the cache directory layout. |
+| `abiVersion` | Yes | Compatible host ABI major version. Currently `1`. |
+| `entry` | Yes | Worker entry symbol generated by KSP. |
+| `lib` | Yes | Target name to package-relative native library path. |
+| `resources` | No | Resource prefix inside the package. Defaults to `resources/`. |
+| `name` | No | Display name used in the log module column. |
+| `color` | No | Truecolor for the plugin module column. Accepts `#RRGGBB` and `#RGB`. |
+| `requires` | No | Required plugin ids. Read but not used for load ordering yet. |
+| `authors` | No | Author list. |
+| `sha256` | No | Checksum of the native library or package. Currently read but not verified. |
 
-### 4. 实现生命周期
+### 4. Implement the lifecycle
 
 ```kotlin
 package moe.lolosia.keel.plugins.hello
@@ -423,15 +423,15 @@ class HelloPlugin : Plugin {
 }
 ```
 
-`@KeelPluginMain` 标注的类必须实现 `Plugin` 并提供无参构造器。KSP 会生成固定的 C 入口 `keel_plugin_worker_main`，由 bootstrap 在事件泵线程上调用，开发者不需要手写入口胶水代码。
+A class annotated with `@KeelPluginMain` must implement `Plugin` and provide a no-argument constructor. KSP generates the fixed C entry `keel_plugin_worker_main`, which bootstrap calls on the event pump thread. No entry glue code is written by hand.
 
-### 5. 打包与安装
+### 5. Package and install
 
 ```powershell
 gradlew :keel-plugin-hello:keelPackage
 ```
 
-产物结构：
+Package layout:
 
 ```text
 keel-plugin-hello-0.1.0-SNAPSHOT.keel
@@ -440,17 +440,17 @@ keel-plugin-hello-0.1.0-SNAPSHOT.keel
   resources/hello.txt
 ```
 
-把 `.keel` 放入 `--plugins` 指定的目录，或在控制台执行：
+Place the `.keel` file in the directory passed to `--plugins`, or run:
 
 ```text
-plugins install <keel 路径>
+plugins install <keel path>
 ```
 
-宿主会复制包、分配 `plugin_id` 并启动插件。`plugin_id` 只在当前进程内有效，持久化标识一律使用清单中的 `id`。
+The host copies the package, assigns a `plugin_id`, and starts the plugin. A `plugin_id` is valid only inside the current process. Persistent identity always uses the manifest `id`.
 
-### 6. 注册路由
+### 6. Register routes
 
-当前路由由插件在 `onLoad` 中手工注册：
+Routes are currently registered manually in `onLoad`:
 
 ```kotlin
 context.routes.register(
@@ -466,30 +466,30 @@ context.routes.register(
 }
 ```
 
-路由匹配支持精确段与 `{name}` 段。请求进入插件时携带 `HttpRequest` 快照，字段如下：
+Route matching supports exact segments and `{name}` segments. Requests enter the plugin as an `HttpRequest` snapshot:
 
-| 字段 | 说明 |
+| Field | Description |
 | --- | --- |
-| `method` | HTTP 方法 |
-| `path` | 请求路径 |
-| `query` | 查询参数，值为列表 |
-| `headers` | 请求头 |
-| `body` | 原始请求体字节 |
-| `remoteAddress` | 客户端地址，当前未由宿主填充 |
-| `traceId` | 追踪标识，当前未由宿主填充 |
+| `method` | HTTP method |
+| `path` | Request path |
+| `query` | Query parameters as lists |
+| `headers` | Request headers |
+| `body` | Raw request body bytes |
+| `remoteAddress` | Client address. Not currently populated by the host. |
+| `traceId` | Trace identifier. Not currently populated by the host. |
 
-响应使用 `HttpResponse`：
+Responses use `HttpResponse`:
 
-| 字段 | 说明 |
+| Field | Description |
 | --- | --- |
-| `status` | HTTP 状态码 |
-| `headers` | 契约字段：响应头，当前线格式尚未携带 |
-| `body` | `ResponseBody.Empty`、`Text`、`Bytes` 或 `Stream` |
-| `envelope` | 契约字段：是否套用 JSON 信封，当前尚未接入 |
+| `status` | HTTP status code |
+| `headers` | Contract field for response headers. The current wire format does not carry them. |
+| `body` | `ResponseBody.Empty`, `Text`, `Bytes`, or `Stream` |
+| `envelope` | Contract field for JSON envelope handling. Not connected yet. |
 
-注解式控制器由 `keel-router-ksp` 生成，注解包括 `@Controller`、`@GET`、`@POST`、`@PUT`、`@DELETE`、`@PATCH`、`@Path`、`@Query`、`@Header`、`@Body` 与 `@Permission`。当前处理器尚未生成路由表，业务插件应使用手工注册。`RouteDescriptor.permissions` 已进入契约，权限判定尚未接入路由分发。
+Annotation controllers are generated by `keel-router-ksp`. The annotations are `@Controller`, `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@Path`, `@Query`, `@Header`, `@Body`, and `@Permission`. The processor does not generate route tables yet, so business plugins should register routes manually. `RouteDescriptor.permissions` is part of the contract, and permission checks are not connected to dispatch yet.
 
-### 7. 使用调度器
+### 7. Use the scheduler
 
 ```kotlin
 val handle = context.scheduler.schedule(delayMillis = 100, periodMillis = 1_000) {
@@ -498,20 +498,20 @@ val handle = context.scheduler.schedule(delayMillis = 100, periodMillis = 1_000)
 handle.cancel()
 ```
 
-调度器绑定插件 Worker 线程。延时与周期任务只在该线程执行，取消不会提前唤醒事件泵，最多空跑一次。长耗时任务应拆成多次短任务，避免占住事件泵。
+The scheduler is bound to the plugin worker thread. Delayed and periodic tasks run only on that thread. Cancellation does not wake the event pump early, so at most one extra tick may occur. Long-running work should be split into short tasks so the event pump remains responsive.
 
-### 8. 读取资源
+### 8. Read resources
 
-`keel-classpath` 可以直接读取目录或 zip：
+`keel-classpath` can read a directory or a zip directly:
 
 ```kotlin
 val classpath = classpathFromDirectory("src/commonMain/resources")
 val text = classpath.read("hello.txt")?.decodeToString()
 ```
 
-插件上下文中的 `ctx.classpath` 已声明为同一个只读接口。插件自身资源读取与跨插件远程读取仍在接入。宿主侧注册表、`ClasspathRef` 与代次失效已经可用，可直接用于宿主资源与开发期验证。
+`ctx.classpath` is declared with the same read-only interface. Plugin-side reads of its own resources and cross-plugin remote reads are still being connected. The host registry, `ClasspathRef`, and generation invalidation are available for host resources and development-time validation.
 
-### 9. 输出日志
+### 9. Write logs
 
 ```kotlin
 Log.info("plugin started")
@@ -519,21 +519,21 @@ Log.warn("configuration is missing")
 Log.error("request failed", cause = exception)
 ```
 
-`Log` 会经过编译器插件改写，日志行包含类名与行号。`context.logger` 保留为兼容入口，不带调用点信息。插件模块列默认使用 `plugin.json.name`，缺失时使用 `id`。
+`Log` calls are rewritten by the compiler plugin, so each line contains a class name and line number. `context.logger` remains as a compatibility entry and carries no call site. The plugin module column uses `plugin.json.name` and falls back to `id`.
 
-## 构建期工具链
+## Build Toolchain
 
-| 工具 | 类型 | 作用 |
+| Tool | Type | Purpose |
 | --- | --- | --- |
-| `moe.lolosia.keel.classpath` | Gradle 插件 | 把各源集资源合并为 `classpath.zip`，经 `windres` 或 `objcopy` 嵌入可执行文件 |
-| `moe.lolosia.keel.plugin` | Gradle 插件 | 生成 `.keel` 包，自动应用 ABI、日志与 KSP |
-| `moe.lolosia.keel.abi` | Gradle 插件 | 解出 `libkeel_abi.a` 与头文件，挂接链接参数与导出列表 |
-| `moe.lolosia.keel.logger` | Gradle 插件 | 把日志编译器插件挂到 Kotlin/Native 编译 |
-| `moe.lolosia.keel.publish` | Gradle 插件 | 注册自建 Maven 发布仓库 |
-| `keel-plugin-ksp` | KSP 处理器 | 从 `@KeelPluginMain` 生成 `keel_plugin_worker_main` |
-| `keel-router-ksp` | KSP 处理器 | 从控制器注解生成路由表 |
+| `moe.lolosia.keel.classpath` | Gradle plugin | Merges source-set resources into `classpath.zip` and embeds it through `windres` or `objcopy` |
+| `moe.lolosia.keel.plugin` | Gradle plugin | Produces `.keel` packages and applies ABI, logger, and KSP |
+| `moe.lolosia.keel.abi` | Gradle plugin | Extracts `libkeel_abi.a` and headers and injects linker options and export lists |
+| `moe.lolosia.keel.logger` | Gradle plugin | Attaches the log compiler plugin to Kotlin/Native compilation |
+| `moe.lolosia.keel.publish` | Gradle plugin | Registers a private Maven repository |
+| `keel-plugin-ksp` | KSP processor | Generates `keel_plugin_worker_main` from `@KeelPluginMain` |
+| `keel-router-ksp` | KSP processor | Generates route tables from controller annotations |
 
-### 资源嵌入
+### Resource embedding
 
 ```kotlin
 keelClasspath {
@@ -545,9 +545,9 @@ keelClasspath {
 }
 ```
 
-普通的可执行文件、动态库与共享库使用这条链路。插件不使用 `classpath.zip`，资源作为 `.keel` 包的一部分交付。
+Executables, dynamic libraries, and shared libraries use this path. Plugins do not use `classpath.zip`. Their resources ship inside the `.keel` package.
 
-### 插件打包
+### Plugin packaging
 
 ```kotlin
 keelPlugin {
@@ -557,9 +557,9 @@ keelPlugin {
 }
 ```
 
-`buildType` 决定打包 `DEBUG` 还是 `RELEASE` 动态库。`target` 为空时按宿主平台选择 `mingwX64`、`linuxArm64` 或 `linuxX64`。
+`buildType` selects the `DEBUG` or `RELEASE` native library. When `target` is empty, the plugin chooses `mingwX64`, `linuxArm64`, or `linuxX64` from the host platform.
 
-### ABI 注入
+### ABI injection
 
 ```kotlin
 keelAbi {
@@ -567,9 +567,9 @@ keelAbi {
 }
 ```
 
-默认导出 `keel_plugin_bootstrap`、`keel_plugin_shutdown` 与 `keel_plugin_worker_main`。只有使用自定义 Worker 入口名时才需要追加导出符号。Windows 上 Kotlin 的 `@CName` 符号不会自动进入 PE 导出表，打包过程依赖 ABI 插件生成的 `.def` 文件。
+The default exports are `keel_plugin_bootstrap`, `keel_plugin_shutdown`, and `keel_plugin_worker_main`. Additional exports are needed only for a custom worker entry name. On Windows, Kotlin `@CName` symbols do not enter the PE export table automatically, so packaging relies on the `.def` file generated by the ABI plugin.
 
-### 日志改写
+### Log transformation
 
 ```kotlin
 keelLogger {
@@ -578,41 +578,41 @@ keelLogger {
 }
 ```
 
-`exceptionTrace` 控制是否为异常构造与 `throw` 插桩。关闭后日志不再输出创建点与抛出点。
+`exceptionTrace` controls instrumentation of exception construction and `throw`. When disabled, logs no longer print creation and throw sites.
 
-## 命令行
+## Command Line
 
-| 参数 | 说明 |
+| Option | Description |
 | --- | --- |
-| `--plugins <目录>` | 扫描目录中的 `.keel` 并启动插件 |
-| `--once` | 启动与健康检查后退出 |
-| `--serve` | 常驻运行，直到控制台 `stop` 或中断信号 |
-| `--serve-ms=<毫秒>` | 运行固定时长后优雅停机 |
-| `--http=<端口>` | 启动 Ktor CIO 监听端口 |
-| `--inspect <路径>` | 检查单个 `.keel` 的清单与资源 |
-| `--watchdog` | 内部看门狗进程入口，通常由宿主自动拉起 |
+| `--plugins <dir>` | Scan the directory for `.keel` packages and start plugins |
+| `--once` | Exit after startup and health checks |
+| `--serve` | Stay resident until console `stop` or an interrupt signal |
+| `--serve-ms=<n>` | Run for a fixed duration and then shut down gracefully |
+| `--http=<port>` | Start Ktor CIO on the port |
+| `--inspect <path>` | Inspect the manifest and resources of one `.keel` package |
+| `--watchdog` | Internal watchdog entry. The host normally spawns it automatically. |
 
-`--plugins` 的第二个位置参数是缓存目录。缺省值为 `<插件目录>/.cache`，动态库按 `<id>/<version>/` 存放。
+The second positional argument after `--plugins` is the cache directory. It defaults to `<plugin dir>/.cache`. Native libraries are stored under `<id>/<version>/`.
 
-## 构建任务
+## Build Tasks
 
-| 任务 | 说明 |
+| Task | Description |
 | --- | --- |
-| `gradlew buildAll` | 构建所有独立 Gradle 构建 |
-| `gradlew :keel-host:linkDebugExecutableMingwX64` | 构建 Windows 调试宿主 |
-| `gradlew :keel-host:linkReleaseExecutableLinuxArm64` | 构建 arm64 发布宿主 |
-| `gradlew :keel-host:linkReleaseExecutableLinuxX64` | 构建 x64 发布宿主 |
-| `gradlew :keel-launcher:linkReleaseExecutableMingwX64` | 构建 Windows 单文件发行版入口 |
-| `gradlew :keel-plugin-hello:keelPackage` | 打包示例插件 |
-| `gradlew :keel-abi:keelAbiPackage` | 打包 ABI 头文件与静态库 |
-| `gradlew :keel-api:build` | 构建插件契约 |
-| `gradlew :keel-plugin-hello:build` | 验证消费方能够编译 |
+| `gradlew buildAll` | Build every independent Gradle build |
+| `gradlew :keel-host:linkDebugExecutableMingwX64` | Build the Windows debug host |
+| `gradlew :keel-host:linkReleaseExecutableLinuxArm64` | Build the arm64 release host |
+| `gradlew :keel-host:linkReleaseExecutableLinuxX64` | Build the x64 release host |
+| `gradlew :keel-launcher:linkReleaseExecutableMingwX64` | Build the Windows single-file launcher entry |
+| `gradlew :keel-plugin-hello:keelPackage` | Package the example plugin |
+| `gradlew :keel-abi:keelAbiPackage` | Package ABI headers and static libraries |
+| `gradlew :keel-api:build` | Build the plugin contract |
+| `gradlew :keel-plugin-hello:build` | Verify that a consumer compiles |
 
-单独构建某个目录时，跨目录依赖通过 Maven 坐标获取。本地验证可以用 `--include-build=../keel-api` 之类的参数提供被依赖工程，根 composite 构建会自动完成替换。
+When building one directory on its own, cross-directory dependencies come from Maven coordinates. Local verification can pass `--include-build=../keel-api` and similar options to provide dependent builds. The root composite build performs the substitution automatically.
 
-### 发布
+### Publishing
 
-发布地址与凭据只写入本机 `local.properties`：
+Publish addresses and credentials are stored only in the local `local.properties`:
 
 ```properties
 keel.repo=http://<maven-host>/repository/keel
@@ -620,24 +620,24 @@ keel.username=<user>
 keel.password=<password>
 ```
 
-发布顺序如下：
+Publish order:
 
 ```text
-构建期插件与 KSP 处理器
+build plugins and KSP processors
   → keel-abi
   → keel-classpath
   → keel-api
   → keel-classpath-full
   → keel-host
-  → 业务插件
+  → business plugins
   → keel-launcher
 ```
 
-构建期工具各自在自己的 `build.gradle.kts` 中配置发布仓库。功能插件应用 `moe.lolosia.keel.publish`，不要在业务构建中手写 `publishing {}`。修改 `keel-api` 后必须确认所有消费方重新编译。
+Each build-time tool configures its own publishing repository in its `build.gradle.kts`. Business plugins apply `moe.lolosia.keel.publish` instead of writing `publishing {}` by hand. After changing `keel-api`, every consumer must be recompiled.
 
-## 部署形态
+## Deployment
 
-运行期只需要宿主可执行文件与插件目录：
+The runtime needs only the host executable and a plugin directory:
 
 ```text
 /opt/keel/
@@ -647,77 +647,77 @@ keel.password=<password>
   work/
 ```
 
-以 `--http=<端口> --plugins <目录> --serve` 常驻。宿主不依赖 JVM，也不要求目标机安装 Kotlin 运行时。停止时发送中断信号或在控制台输入 `stop`，宿主会先停止 HTTP，再逐个停用插件。
+Run with `--http=<port> --plugins <dir> --serve` for a resident service. The host does not require a JVM or a Kotlin runtime on the target machine. To stop it, send an interrupt signal or type `stop` in the console. The host stops HTTP first and then disables each plugin.
 
-systemd 单元可以直接以宿主可执行文件作为 `ExecStart`，工作目录指向部署目录；容器部署时挂载宿主、插件目录与端口即可。启动失败、插件加载失败与请求错误都会写入日志文件，日志按日切分在工作目录的 `work/log` 下。
+A systemd unit can use the host executable as `ExecStart` with the deployment directory as its working directory. Container deployments mount the host, the plugin directory, and the exposed port. Startup failures, plugin load failures, and request errors are written to daily log files under `work/log` in the working directory.
 
-## 目录结构
+## Repository Layout
 
 ```text
 keel/
-├── build.gradle.kts                 根构建，仅聚合 includeBuild
-├── settings.gradle.kts              composite build 列表
-├── gradle/libs.versions.toml        唯一版本来源
-├── keel-abi/                        C ABI 头文件、事件队列、bootstrap 与静态库
-├── keel-abi-gradle-plugin/          ABI 静态库注入
-├── keel-api/                        插件契约与插件侧运行时
-├── keel-classpath/                  只读资源层
-├── keel-classpath-full/             宿主注册表与跨模块资源引用
-├── keel-classpath-gradle-plugin/    资源合并与可执行文件嵌入
-├── keel-host/                       宿主
-├── keel-launcher/                   单文件发行版入口
-├── keel-logger-compiler-plugin/     日志调用点 IR 改写
-├── keel-logger-gradle-plugin/       挂载日志编译器插件
-├── keel-plugin-gradle-plugin/       .keel 打包
-├── keel-plugin-hello/               示例插件
-├── keel-plugin-ksp/                 Worker 入口生成
-├── keel-publish-gradle-plugin/      发布仓库注册
-├── keel-router-ksp/                 路由表生成
-└── doc/                             设计与计划
+├── build.gradle.kts                 root build, aggregation only
+├── settings.gradle.kts              composite build list
+├── gradle/libs.versions.toml        single version source
+├── keel-abi/                        C ABI headers, event queues, bootstrap, static libraries
+├── keel-abi-gradle-plugin/          ABI static library injection
+├── keel-api/                        plugin contract and plugin-side runtime
+├── keel-classpath/                  read-only resource layer
+├── keel-classpath-full/             host registry and cross-module resource references
+├── keel-classpath-gradle-plugin/    resource merge and executable embedding
+├── keel-host/                       host
+├── keel-launcher/                   single-file distribution entry
+├── keel-logger-compiler-plugin/     log call-site IR transformation
+├── keel-logger-gradle-plugin/       logger compiler plugin attachment
+├── keel-plugin-gradle-plugin/       .keel packaging
+├── keel-plugin-hello/               example plugin
+├── keel-plugin-ksp/                 worker entry generation
+├── keel-publish-gradle-plugin/      publishing repository registration
+├── keel-router-ksp/                 route table generation
+└── doc/                             design documents and plans
 ```
 
-顶层目录都是独立 Gradle 构建。每个目录都可以单独 clone 出来构建，跨目录依赖从 Maven 获取。依赖方向为 `keel-api ← keel-host ← keel-launcher` 与 `keel-api ← keel-plugin-*`，构建期工具独立于运行时。任何目录都不得读取兄弟目录中的源文件，跨目录只能通过 Maven 坐标或构建产物。
+Every top-level directory is an independent Gradle build. Each directory can be cloned and built on its own, with cross-directory dependencies resolved from Maven. The dependency direction is `keel-api ← keel-host ← keel-launcher` and `keel-api ← keel-plugin-*`. Build-time tools are independent of the runtime. No directory may read source files from a sibling directory. Cross-directory use goes through Maven coordinates or build artifacts.
 
-## 当前状态
+## Current Status
 
-Keel 处于 `0.1.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志与打包链路已经可以运行，以下能力仍在实现中。
+Keel is at `0.1.0-SNAPSHOT`. The host, C ABI, plugin loading, HTTP routing, logging, and packaging pipeline are runnable. The following capabilities are still in progress.
 
-| 能力 | 状态 | 说明 |
+| Capability | Status | Notes |
 | --- | --- | --- |
-| 插件扫描、校验、加载与启停 | 可用 | `.keel` 目录、动态库缓存与失败隔离 |
-| C ABI 事件泵与请求应答 | 可用 | 队列、`correlation`、健康检查、日志、HTTP 与控制台 |
-| 跨运行时句柄与回调 | 契约已定义 | 宿主句柄表与 `CallbackRegistry` 尚未接入 |
-| 插件依赖排序 | 契约字段已定义 | `plugin.json.requires` 尚未参与加载顺序 |
-| 单端口 HTTP 与手工路由 | 可用 | `ctx.routes.register`、路径参数与 JSON 线格式 |
-| 调度器 | 可用 | 延时、周期与取消，绑定 Worker 线程 |
-| 日志调用点与异常诊断 | 可用 | IR 改写、配色、创建点与抛出点 |
-| `.keel` 打包与控制台插件管理 | 可用 | `keelPackage`、`plugins` 子命令与 `--inspect` |
-| 资源层 | 部分可用 | 宿主侧注册表可用，插件侧资源读取未接入 |
-| 跨模块服务调用 | 契约已定义 | `ModuleDirectory` 与生成的客户端未接入运行时 |
-| 配置读写 | 契约已定义 | `Config` 尚未接入运行时 |
-| 注解路由生成 | 规划中 | `@Controller` 与 `@GET` 已定义，`keel-router-ksp` 尚未生成 |
-| 权限判定 | 契约已定义 | `@Permission`、`Authorizer` 与路由 `permissions` 尚未接入分发 |
-| JSON 信封与响应头 | 契约已定义 | `HttpResponse.envelope` 与 `headers` 尚未进入线格式 |
-| 流式响应 | 契约已定义 | `ResponseBody.Stream` 尚未接入 HTTP 分发 |
-| 单文件内嵌插件 | 入口已就位 | `keel-launcher` 目前转发到宿主入口 |
-| 发布产物打包 | 未实现 | `moe.lolosia.keel.publish` 只注册仓库，按目标归档与发布未实现 |
-| 自动化测试 | 未接入 | 以编译、`--inspect` 与启动冒烟验证 |
+| Plugin scan, validation, loading, enable and disable | Available | `.keel` directory, library cache, and failure isolation |
+| C ABI event pump and request replies | Available | Queues, `correlation`, health checks, logs, HTTP, and console |
+| Cross-runtime handles and callbacks | Contract defined | Host handle table and `CallbackRegistry` are not connected |
+| Plugin dependency ordering | Contract field defined | `plugin.json.requires` does not affect load order yet |
+| Single-port HTTP and manual routes | Available | `ctx.routes.register`, path parameters, and JSON wire format |
+| Scheduler | Available | Delay, period, and cancellation on the worker thread |
+| Log call sites and exception diagnostics | Available | IR transformation, colors, creation and throw sites |
+| `.keel` packaging and console plugin management | Available | `keelPackage`, `plugins` commands, and `--inspect` |
+| Resource layer | Partially available | Host registry is available. Plugin-side resource reads are not connected. |
+| Cross-module service calls | Contract defined | `ModuleDirectory` and generated clients are not connected to the runtime |
+| Configuration read and write | Contract defined | `Config` is not connected to the runtime |
+| Annotation route generation | Planned | `@Controller` and `@GET` are defined. `keel-router-ksp` does not generate yet. |
+| Permission checks | Contract defined | `@Permission`, `Authorizer`, and route `permissions` are not connected to dispatch |
+| JSON envelope and response headers | Contract defined | `HttpResponse.envelope` and `headers` are not part of the wire format yet |
+| Streaming responses | Contract defined | `ResponseBody.Stream` is not connected to HTTP dispatch |
+| Single-file plugin embedding | Entry available | `keel-launcher` currently forwards to the host entry |
+| Publish artifact packaging | Not implemented | `moe.lolosia.keel.publish` registers the repository only. Per-target archiving and publishing are not implemented. |
+| Automated tests | Not connected | Validation uses compilation, `--inspect`, and startup smoke tests |
 
-## 延伸阅读
+## Further Reading
 
-| 文档 | 内容 |
+| Document | Content |
 | --- | --- |
-| [AGENTS.md](AGENTS.md) | 代码风格、构建边界与硬性约定 |
-| [doc/roadmap.md](doc/roadmap.md) | DEMO、P0、P1、P2 的目标与验收标准 |
-| [doc/abi-design.md](doc/abi-design.md) | C ABI、Worker、句柄、事件泵与内存规则 |
-| [doc/web-design.md](doc/web-design.md) | 单端口路由、请求上下文、中间件与流式响应 |
-| [doc/classpath-design.md](doc/classpath-design.md) | 资源命名空间、`.keel` 包与卸载语义 |
-| [doc/config-design.md](doc/config-design.md) | 配置分层、注释保留与插件配置隔离 |
-| [doc/authz-design.md](doc/authz-design.md) | 权限契约与 RBAC 插件边界 |
-| [doc/codegen-design.md](doc/codegen-design.md) | 零样板模块互访与代码生成 |
-| [doc/capability-design.md](doc/capability-design.md) | 能力插件与稳定 C ABI |
-| [doc/前序讨论.md](doc/前序讨论.md) | 可行性讨论、硬约束与风险清单 |
+| [AGENTS.md](AGENTS.md) | Code style, build boundaries, and hard constraints |
+| [doc/roadmap.md](doc/roadmap.md) | DEMO, P0, P1, and P2 goals and acceptance criteria |
+| [doc/abi-design.md](doc/abi-design.md) | C ABI, workers, handles, event pump, and memory rules |
+| [doc/web-design.md](doc/web-design.md) | Single-port routing, request context, middleware, and streaming |
+| [doc/classpath-design.md](doc/classpath-design.md) | Resource namespaces, `.keel` packages, and unload semantics |
+| [doc/config-design.md](doc/config-design.md) | Configuration layering, comment preservation, and plugin isolation |
+| [doc/authz-design.md](doc/authz-design.md) | Permission contract and RBAC plugin boundary |
+| [doc/codegen-design.md](doc/codegen-design.md) | Zero-boilerplate module access and code generation |
+| [doc/capability-design.md](doc/capability-design.md) | Capability plugins and stable C ABI |
+| [doc/前序讨论.md](doc/前序讨论.md) | Feasibility discussion, hard constraints, and risks |
 
-## 许可证
+## License
 
-Keel 使用 [MIT License](LICENSE)。第三方组件的名称、版本、许可与用途见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+Keel is released under the [MIT License](LICENSE). Third-party component names, versions, licenses, and usage are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
