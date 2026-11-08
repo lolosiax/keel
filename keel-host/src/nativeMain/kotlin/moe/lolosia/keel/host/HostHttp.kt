@@ -25,6 +25,7 @@ import moe.lolosia.keel.api.error.toKeelError
 import moe.lolosia.keel.api.web.HttpRequest
 import moe.lolosia.keel.api.web.HttpRouteRequest
 import moe.lolosia.keel.api.web.HttpRouteResponse
+import moe.lolosia.keel.host.auth.*
 import moe.lolosia.keel.host.plugin.HostEvent
 import moe.lolosia.keel.host.plugin.HostPump
 import moe.lolosia.keel.host.plugin.PluginNames
@@ -180,8 +181,26 @@ internal object HostHttp {
         )
     }
 
-    /** 与前端约定的错误体：`{ "data": null, "code": 500, "msg": "..." }`。 */
-    private fun errorBody(message: String): String = """{"data":null,"code":500,"msg":${jsonString(message)}}"""
+    /** 与前端约定的错误体：`{ "data": null, "code": <status>, "msg": "..." }`。 */
+    private fun errorBody(code: Int, message: String): String =
+        """{"data":null,"code":$code,"msg":${jsonString(message)}}"""
+
+    /** 认证 / 授权失败：直接回 JSON 信封，不再进插件。 */
+    private suspend fun ApplicationCall.respondFailure(status: HttpStatusCode, message: String) {
+        val body = errorBody(status.value, message)
+        attributes.put(ResponseSnippetKey, snippet(body.encodeToByteArray()))
+        respondText(body, ContentType.Application.Json, status)
+    }
+
+    /** 取 `Authorization: Bearer <token>`；头名大小写不敏感。 */
+    private fun bearerToken(headers: Map<String, String>): String? =
+        headers.entries
+            .firstOrNull { it.key.equals("Authorization", ignoreCase = true) }
+            ?.value
+            ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
+            ?.substring(7)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
 
     private fun jsonString(text: String): String = buildString {
         append('"')
@@ -217,8 +236,80 @@ internal object HostHttp {
             headers = call.request.headers.entries().associate { it.key to it.value.joinToString(",") },
             body = body,
         )
+
+        // 带 @Permission 但没装授权实现：fail closed，不能因为「看起来是公开路由」就放行
+        if (match.permissions.isNotEmpty() && !HostAuth.hasAuthorizer()) {
+            Log.warn(
+                "$method $path 需要权限 ${match.permissions.joinToString()}，但未安装授权实现",
+                tag = "Auth",
+            )
+            call.respondFailure(HttpStatusCode.ServiceUnavailable, "服务未安装授权实现")
+            return
+        }
+
+        val token = bearerToken(request.headers)
+        val authenticated = if (token == null) {
+            null
+        } else {
+            try {
+                HostAuth.authenticate(token)
+            } catch (e: AuthUnavailableException) {
+                Log.warn("$method $path 认证失败：${e.message}", tag = "Auth")
+                call.respondFailure(HttpStatusCode.ServiceUnavailable, e.message ?: "认证服务不可用")
+                return
+            }
+        }
+
+        // 把授权规则并进请求快照，插件的 ctx.hasPermission 才能本地判定
+        val user = if (authenticated == null) {
+            null
+        } else {
+            try {
+                HostAuth.enrich(authenticated)
+            } catch (e: AuthUnavailableException) {
+                // 只有需要权限判定的路由必须拒绝；其余路由按未富化快照执行
+                if (match.permissions.isNotEmpty()) {
+                    Log.warn("$method $path 授权快照不可用：${e.message}", tag = "Auth")
+                    call.respondFailure(HttpStatusCode.ServiceUnavailable, e.message ?: "授权服务不可用")
+                    return
+                }
+                Log.warn("$method $path 授权快照不可用，按空规则继续：${e.message}", tag = "Auth")
+                authenticated
+            }
+        }
+
+        // 白名单只免「没登录就 401」，不免权限
+        val needsLogin = path.startsWith("/api/") && !HostAuth.isWhitelisted(path)
+        if (needsLogin && user == null) {
+            call.respondFailure(HttpStatusCode.Unauthorized, "身份认证失败，请重新登录")
+            return
+        }
+
+        if (match.permissions.isNotEmpty()) {
+            val userId = user?.id ?: run {
+                call.respondFailure(HttpStatusCode.Unauthorized, "身份认证失败，请重新登录")
+                return
+            }
+            val granted = try {
+                HostAuth.authorize(userId, match.permissions)
+            } catch (e: AuthUnavailableException) {
+                Log.warn("$method $path 授权失败：${e.message}", tag = "Auth")
+                call.respondFailure(HttpStatusCode.ServiceUnavailable, e.message ?: "授权服务不可用")
+                return
+            }
+            if (!granted) {
+                call.respondFailure(HttpStatusCode.Forbidden, "没有权限访问该资源")
+                return
+            }
+        }
+
         val payload = Json.encodeToString(
-            HttpRouteRequest(match.routeId, match.pathParameters, request)
+            HttpRouteRequest(
+                routeId = match.routeId,
+                pathParameters = match.pathParameters,
+                request = request,
+                user = user,
+            )
         ).encodeToByteArray()
 
         // 进消息泵之前先留一份调用方栈：出错时要能看到「谁发起的」，
@@ -231,7 +322,7 @@ internal object HostHttp {
             // 自己记录并返回 JSON，不再把异常抛给 Ktor（避免它再打一遍 Unhandled）
             HttpLog.error(remote, "$method $path 处理失败", error, Log.site())
             call.respondText(
-                text = errorBody(error.chain.firstOrNull()?.message ?: "插件执行失败"),
+                text = errorBody(500, error.chain.firstOrNull()?.message ?: "插件执行失败"),
                 contentType = ContentType.Application.Json,
                 status = HttpStatusCode.InternalServerError,
             )

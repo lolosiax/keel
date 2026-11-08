@@ -2,6 +2,7 @@ package moe.lolosia.keel.host.plugin
 
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.log.ModuleColors
+import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.capability.DatabaseSettings
 import moe.lolosia.keel.host.capability.HostCapabilities
 import moe.lolosia.keel.host.classpath.HostClasspath
@@ -184,10 +185,19 @@ internal object HostPlugins {
             )
             return false
         }
+        // 同一 SPI 只允许一个提供者：第二个声明直接拒绝启用
+        val conflict = HostAuth.conflict(entry.pluginId, manifest.provides)
+        if (conflict != null) {
+            failedStarts++
+            Log.warn("start failed: ${manifest.id}: $conflict", tag = "Loader")
+            return false
+        }
         return try {
             PluginNames.register(entry.pluginId, entry.displayName)
             val runtime = startPlugin(entry.loaded, entry.pluginId)
             entry.runtime = runtime
+            // onEnable 正常返回后才对外提供 SPI，避免半启动的插件接到认证请求
+            HostAuth.claim(entry.pluginId, manifest.provides)
             Log.info("started ${manifest.id} (plugin_id=${runtime.pluginId})")
             true
         } catch (e: Exception) {
@@ -196,6 +206,7 @@ internal object HostPlugins {
             HostRoutes.remove(entry.pluginId)
             HostPermissionCatalog.remove(entry.pluginId)
             HostServices.remove(entry.pluginId)
+            HostAuth.release(entry.pluginId)
             Log.warn("start failed: ${manifest.id}: ${e.message}", tag = "Loader")
             false
         }
@@ -207,6 +218,7 @@ internal object HostPlugins {
         HostRoutes.remove(entry.pluginId)
         HostPermissionCatalog.remove(entry.pluginId)
         HostServices.remove(entry.pluginId)
+        HostAuth.release(entry.pluginId)
         HostPump.dropPlugin(entry.pluginId)
     }
 

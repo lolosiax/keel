@@ -4,11 +4,12 @@ import kotlin.concurrent.Volatile
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.web.RouteDescriptor
 
-/** 一条命中的路由。 */
+/** 一条命中的路由；[permissions] 是该路由声明的 `@Permission` 节点。 */
 internal class RouteMatch(
     val pluginId: ULong,
     val routeId: String,
     val pathParameters: Map<String, String>,
+    val permissions: List<String>,
 )
 
 /**
@@ -59,7 +60,12 @@ internal object HostRoutes {
                     return@entryLoop
                 }
             }
-            return RouteMatch(entry.pluginId, entry.descriptor.routeId, params)
+            return RouteMatch(
+                pluginId = entry.pluginId,
+                routeId = entry.descriptor.routeId,
+                pathParameters = params,
+                permissions = entry.descriptor.permissions,
+            )
         }
         return null
     }

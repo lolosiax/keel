@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "abiVersion": 1,
   "entry": "keel_plugin_worker_main",
+  "provides": ["authn", "authz"],
   "lib": {
     "mingwX64": "lib/mingwX64/keel_plugin_hello.dll"
   },

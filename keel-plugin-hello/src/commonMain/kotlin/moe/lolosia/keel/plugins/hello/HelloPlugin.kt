@@ -5,6 +5,7 @@ import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.TaskHandle
 import moe.lolosia.keel.api.annotation.KeelPluginMain
+import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.command.*
 import moe.lolosia.keel.api.web.HttpResponse
 import moe.lolosia.keel.api.web.ResponseBody
@@ -59,6 +60,12 @@ class HelloPlugin : Plugin {
         checkDatabase()
         checkService()
     }
+
+    /** `plugin.json` 声明了 `provides: ["authn"]`，Host 会用它解析 Bearer token。 */
+    override fun authenticator(): Authenticator = HelloAuth
+
+    /** `plugin.json` 声明了 `provides: ["authz"]`，Host 会用它取授权快照。 */
+    override fun authorizer(): Authorizer = HelloAuth
 
     /**
      * 服务自检：用生成的客户端走一次 Host 往返调用（实现见 nativeMain）。

@@ -116,6 +116,21 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_SERVICE_CALL 9u
 
 /*
+ * 认证 SPI：Host 向声明了 `provides: ["authn"]` 的插件询问 token 对应的用户。
+ *
+ * 请求载荷是 CBOR 的 AuthnRequest（token）；应答是 CBOR 的 AuthnReply，
+ * 其中 user 为空表示 token 无效 / 已过期。
+ */
+#define KEEL_SUBJECT_AUTHN 0x800u
+
+/*
+ * 授权 SPI：Host 向声明了 `provides: ["authz"]` 的插件取用户的授权快照。
+ *
+ * 请求载荷是 CBOR 的 AuthzRequest（userId）；应答是 CBOR 的 AuthzSnapshot。
+ */
+#define KEEL_SUBJECT_AUTHZ 0x801u
+
+/*
  * 不透明队列句柄。
  *
  * C 实现侧只看到前向声明，真正的布局在 keel_queue.c 里。

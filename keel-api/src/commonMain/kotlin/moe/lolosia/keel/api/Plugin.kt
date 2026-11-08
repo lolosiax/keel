@@ -1,5 +1,6 @@
 package moe.lolosia.keel.api
 
+import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.command.*
 
 /**
@@ -19,6 +20,20 @@ interface Plugin {
     fun onEnable() {}
 
     fun onDisable() {}
+
+    /**
+     * 认证 SPI 实现；只有 `plugin.json` 声明 `provides: ["authn"]` 的插件才会被 Host 调用。
+     *
+     * Host 在 `onLoad` 之后取一次并缓存，返回 null 表示本插件不提供认证。
+     */
+    fun authenticator(): Authenticator? = null
+
+    /**
+     * 授权 SPI 实现；只有 `plugin.json` 声明 `provides: ["authz"]` 的插件才会被 Host 调用。
+     *
+     * 与 [authenticator] 相同，Host 在 `onLoad` 之后取一次。
+     */
+    fun authorizer(): Authorizer? = null
 
     /**
      * 控制台命令回调，语义照搬 Bukkit `Plugin.onCommand`。

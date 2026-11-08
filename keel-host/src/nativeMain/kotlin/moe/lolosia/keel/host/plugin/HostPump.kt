@@ -20,6 +20,7 @@ import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.web.RouteRegistration
+import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
@@ -389,27 +390,27 @@ internal object HostPump {
             )
 
             HostSubjects.AUTH_INVALIDATE -> {
-                logInvalidate("认证", payload)
+                val request = decodeInvalidate(payload)
+                HostAuth.invalidateAuthentication(request?.token, request?.userId)
                 ByteArray(0)
             }
 
             HostSubjects.AUTHZ_INVALIDATE -> {
-                logInvalidate("授权", payload)
+                val request = decodeInvalidate(payload)
+                HostAuth.invalidateAuthorization(request?.userId)
                 ByteArray(0)
             }
 
             else -> error("Host 没有该 subject 的处理器：$subject")
         }
 
-    private fun logInvalidate(kind: String, payload: ByteArray?) {
-        val request = payload?.takeIf { it.isNotEmpty() }?.let { bytes ->
-            runCatching { ServiceWire.decode(InvalidateRequest.serializer(), bytes) }.getOrNull()
+    /** 失效通知解不出来时按「全部失效」处理，宁可多查一次也不能留下旧权限。 */
+    private fun decodeInvalidate(payload: ByteArray?): InvalidateRequest? =
+        payload?.takeIf { it.isNotEmpty() }?.let { bytes ->
+            runCatching { ServiceWire.decode(InvalidateRequest.serializer(), bytes) }
+                .onFailure { Log.warn("缓存失效通知无法解码：${it.message}", tag = "Host") }
+                .getOrNull()
         }
-        Log.info(
-            "收到 ${kind}缓存失效通知：userId=${request?.userId ?: "*"} token=${request?.token ?: "*"}",
-            tag = "Host",
-        )
-    }
 
     /**
      * 处理与当前同步等待无关的事件：日志、注册、插件间调用、其它请求的回包。

@@ -7,6 +7,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
+import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.error.*
 import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.web.*
@@ -24,6 +25,12 @@ object PluginWorker {
 
     /** 当前插件的运行时上下文；HTTP 请求构造 [Context] 时要用。 */
     internal var pluginContext: PluginContext? = null
+
+    /** 本插件提供的认证实现；`onLoad` 之后取一次，随停用清空。 */
+    internal var authenticator: Authenticator? = null
+
+    /** 本插件提供的授权实现；`onLoad` 之后取一次，随停用清空。 */
+    internal var authorizer: Authorizer? = null
 
     /** 当前插件 id 与 Host 收件箱；进入 Worker 时一次性填好，之后只读。 */
     internal var pluginId: ULong = 0uL
@@ -78,6 +85,9 @@ object PluginWorker {
             // onLoad / onEnable 期间可能已经收到事件（例如服务回包），先登记实例
             plugin = instance
             instance.onLoad(context)
+            // Host 只在 manifest 声明了对应 provides 时才会向本插件发起 SPI 请求
+            authenticator = instance.authenticator()
+            authorizer = instance.authorizer()
             // 手写路由先入表，生成的控制器路由后入表（同 routeId 由生成侧覆盖）
             generated?.let { PluginRoutes.applyGenerated(it) }
             services?.register(PluginServices, context)
@@ -90,6 +100,8 @@ object PluginWorker {
         } catch (e: Throwable) {
             // 启动失败时实例不完整，不能让后续 SHUTDOWN 走到 onDisable
             plugin = null
+            authenticator = null
+            authorizer = null
             Log.error("插件生命周期失败", cause = e)
             KEEL_ERR_FAILED
         }
@@ -99,6 +111,8 @@ object PluginWorker {
         plugin?.onDisable()
         plugin = null
         pluginContext = null
+        authenticator = null
+        authorizer = null
         PluginCapabilities.databaseApi = null
         PluginCapabilities.databaseHandle = null
         PluginRoutes.reset()
@@ -142,6 +156,8 @@ internal fun dispatchEvent(e: KeelEvent) {
             KEEL_SUBJECT_HTTP.toULong() -> handleHttp(e)
             KEEL_SUBJECT_CONSOLE.toULong() -> PluginConsole.handle(e)
             KEEL_SUBJECT_SERVICE_CALL.toULong() -> handleServiceCall(e)
+            KEEL_SUBJECT_AUTHN.toULong() -> handleAuthn(e)
+            KEEL_SUBJECT_AUTHZ.toULong() -> handleAuthz(e)
             else -> warnOnce(kind)
         }
 
@@ -233,6 +249,32 @@ private fun handleServiceCall(event: KeelEvent) {
     }
     replyCompleteWithPayload(event, reply)
 }
+
+/** 处理 Host 的认证请求：交给插件提供的 [Authenticator]，回 `AuthnReply`。 */
+private fun handleAuthn(event: KeelEvent) {
+    val impl = PluginWorker.authenticator
+        ?: error("插件没有提供 Authenticator，但 Host 发来了 AUTHN 请求")
+    val request = ServiceWire.decode(AuthnRequest.serializer(), payloadOf(event))
+    val reply = AuthnReply(runBlocking { impl.authenticate(request.token) })
+    replyCompleteWithPayload(event, ServiceWire.encode(AuthnReply.serializer(), reply))
+}
+
+/** 处理 Host 的授权请求：交给插件提供的 [Authorizer]，回 `AuthzReply`。 */
+private fun handleAuthz(event: KeelEvent) {
+    val impl = PluginWorker.authorizer
+        ?: error("插件没有提供 Authorizer，但 Host 发来了 AUTHZ 请求")
+    val request = ServiceWire.decode(AuthzRequest.serializer(), payloadOf(event))
+    val reply = AuthzReply(runBlocking { impl.snapshot(request.userId) })
+    replyCompleteWithPayload(event, ServiceWire.encode(AuthzReply.serializer(), reply))
+}
+
+/** 读取事件载荷；无载荷时返回空数组，调用方统一按 CBOR 解码。 */
+private fun payloadOf(event: KeelEvent): ByteArray =
+    if (event.payload_size > 0u) {
+        event.payload?.reinterpret<ByteVar>()?.readBytes(event.payload_size.toInt()) ?: ByteArray(0)
+    } else {
+        ByteArray(0)
+    }
 
 /** 向 Host 投一条无待答请求的事件（服务声明等）。 */
 internal fun sendToHost(subject: ULong, payload: ByteArray, correlation: ULong = 0uL) {
