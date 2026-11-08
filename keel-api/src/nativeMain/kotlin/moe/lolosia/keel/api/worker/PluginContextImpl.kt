@@ -19,7 +19,7 @@ internal class PluginContextImpl(
 ) : PluginContext {
 
     override val server: KeelServer get() = error("KeelServer 尚未实现")
-    override val modules: ModuleDirectory get() = error("跨模块调用尚未实现")
+    override val modules: ModuleDirectory get() = PluginServices
     override val callbacks: CallbackRegistry get() = error("回调尚未实现")
     override val config: Config get() = error("配置尚未实现")
     override val classpath: Classpath = EmptyClasspath

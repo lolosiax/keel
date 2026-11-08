@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.error.*
+import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -28,12 +29,16 @@ object PluginWorker {
     internal var pluginId: ULong = 0uL
     internal var hostInbox: CPointer<KeelQueue>? = null
 
+    /** 本插件的收件箱；阻塞式服务调用等应答时要在这里重入事件泵。 */
+    internal var inbox: CPointer<KeelQueue>? = null
+
     /**
      * 构造插件实例并回填 C 侧的事件分发表。
      *
      * @param api  Host 传给 `keel_plugin_bootstrap` 的能力表，由 C 侧填好
      * @param out  分发表，C 侧在 START 之后用它转发所有事件
      * @param generated KSP 生成的路由集合（固定名 `KeelPluginRoutes`），没有控制器时是空实现
+     * @param services KSP 生成的服务注册表（固定名 `KeelPluginServices`），没有提供者时是空实现
      * @param factory 创建插件实例（KSP 生成，指向 `@KeelPluginMain` 的类）
      * @return `KeelStatus`；C 侧据此回投 COMPLETE
      */
@@ -41,6 +46,7 @@ object PluginWorker {
         api: CPointer<KeelPluginApi>?,
         out: CPointer<KeelPluginHandlers>?,
         generated: GeneratedRoutes? = null,
+        services: GeneratedServices? = null,
         factory: () -> Plugin,
     ): UInt {
         if (api == null || out == null) return KEEL_ERR_INVALID
@@ -50,6 +56,7 @@ object PluginWorker {
         PluginWorker.pluginId = pluginId
         val host = api.pointed.host
         PluginWorker.hostInbox = host?.pointed?.host_inbox
+        PluginWorker.inbox = api.pointed.inbox
         PluginCapabilities.databaseApi = host?.pointed?.database
         PluginCapabilities.databaseHandle = host?.pointed?.database_handle
         val logger = NativePluginLogger(api.pointed.host, pluginId)
@@ -66,16 +73,23 @@ object PluginWorker {
 
         return try {
             PluginRoutes.reset()
+            PluginServices.reset()
             val instance = factory()
+            // onLoad / onEnable 期间可能已经收到事件（例如服务回包），先登记实例
+            plugin = instance
             instance.onLoad(context)
             // 手写路由先入表，生成的控制器路由后入表（同 routeId 由生成侧覆盖）
             generated?.let { PluginRoutes.applyGenerated(it) }
+            services?.register(PluginServices, context)
+            // 先声明服务再执行 onEnable：onEnable 里可能已经要调用别的模块
+            PluginServices.publish()
             instance.onEnable()
-            plugin = instance
             PluginRoutes.publish()
             out.pointed.on_event = staticCFunction(::dispatch)
             KEEL_OK
         } catch (e: Throwable) {
+            // 启动失败时实例不完整，不能让后续 SHUTDOWN 走到 onDisable
+            plugin = null
             Log.error("插件生命周期失败", cause = e)
             KEEL_ERR_FAILED
         }
@@ -87,6 +101,8 @@ object PluginWorker {
         pluginContext = null
         PluginCapabilities.databaseApi = null
         PluginCapabilities.databaseHandle = null
+        PluginRoutes.reset()
+        PluginServices.reset()
         WorkerScheduler.reset()
     }
 }
@@ -115,7 +131,7 @@ private fun dispatch(event: CPointer<KeelEvent>?) {
     }
 }
 
-private fun dispatchEvent(e: KeelEvent) {
+internal fun dispatchEvent(e: KeelEvent) {
     val kind = e.kind.toInt()
     when (kind) {
         KEEL_EVENT_SHUTDOWN.toInt() -> PluginWorker.disable()
@@ -125,6 +141,7 @@ private fun dispatchEvent(e: KeelEvent) {
             KEEL_SUBJECT_TIMER.toULong() -> WorkerScheduler.tick()
             KEEL_SUBJECT_HTTP.toULong() -> handleHttp(e)
             KEEL_SUBJECT_CONSOLE.toULong() -> PluginConsole.handle(e)
+            KEEL_SUBJECT_SERVICE_CALL.toULong() -> handleServiceCall(e)
             else -> warnOnce(kind)
         }
 
@@ -203,6 +220,50 @@ private fun handleHttp(event: KeelEvent) {
     replyCompleteWithPayload(event, Json.encodeToString(wire).encodeToByteArray())
 }
 
+/** 处理其它插件经 Host 转来的服务调用：解码信封 → 走本地分发器 → 回包。 */
+private fun handleServiceCall(event: KeelEvent) {
+    val bytes = if (event.payload_size > 0u) {
+        event.payload?.reinterpret<ByteVar>()?.readBytes(event.payload_size.toInt())
+    } else {
+        null
+    }
+    val call = ServiceWire.decodeCall(bytes ?: ByteArray(0))
+    val reply = runBlocking {
+        PluginServices.dispatch(call, event.source.toLong())
+    }
+    replyCompleteWithPayload(event, reply)
+}
+
+/** 向 Host 投一条无待答请求的事件（服务声明等）。 */
+internal fun sendToHost(subject: ULong, payload: ByteArray, correlation: ULong = 0uL) {
+    val inbox = PluginWorker.hostInbox ?: return
+    val buffer = if (payload.isEmpty()) {
+        null
+    } else {
+        val allocated = keel_payload_alloc(payload.size.toUInt()) ?: return
+        payload.usePinned { keel_payload_copy(allocated, it.addressOf(0), payload.size.toUInt()) }
+        allocated
+    }
+
+    memScoped {
+        val out = alloc<KeelEvent>()
+        out.size = sizeOf<KeelEvent>().toUInt()
+        out.kind = KEEL_EVENT_COMMAND.toUShort()
+        out.source = PluginWorker.pluginId
+        out.target = 0uL
+        out.correlation = correlation
+        out.subject = subject
+        out.payload = buffer
+        out.payload_size = payload.size.toUInt()
+        if (buffer != null) {
+            keel_event_set_default_release(out.ptr)
+        }
+        if (keel_queue_push(inbox, out.ptr, 0u) != KEEL_OK && buffer != null) {
+            keel_event_release_default(null, out.ptr)
+        }
+    }
+}
+
 /** 回一条带载荷的 COMPLETE；载荷用本二进制的 CRT 分配。 */
 internal fun replyCompleteWithPayload(
     request: KeelEvent,
@@ -210,8 +271,13 @@ internal fun replyCompleteWithPayload(
     status: Int = KEEL_OK.toInt(),
 ) {
     val inbox = PluginWorker.hostInbox ?: return
-    val buffer = keel_payload_alloc(payload.size.toUInt()) ?: return
-    payload.usePinned { keel_payload_copy(buffer, it.addressOf(0), payload.size.toUInt()) }
+    val buffer = if (payload.isEmpty()) {
+        null
+    } else {
+        val allocated = keel_payload_alloc(payload.size.toUInt()) ?: return
+        payload.usePinned { keel_payload_copy(allocated, it.addressOf(0), payload.size.toUInt()) }
+        allocated
+    }
 
     memScoped {
         val out = alloc<KeelEvent>()
@@ -224,8 +290,10 @@ internal fun replyCompleteWithPayload(
         out.status = status
         out.payload = buffer
         out.payload_size = payload.size.toUInt()
-        keel_event_set_default_release(out.ptr)
-        if (keel_queue_push(inbox, out.ptr, 0u) != KEEL_OK) {
+        if (buffer != null) {
+            keel_event_set_default_release(out.ptr)
+        }
+        if (keel_queue_push(inbox, out.ptr, 0u) != KEEL_OK && buffer != null) {
             keel_event_release_default(null, out.ptr)
         }
     }

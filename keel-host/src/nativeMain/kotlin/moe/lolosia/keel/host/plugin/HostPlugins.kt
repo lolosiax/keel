@@ -7,6 +7,7 @@ import moe.lolosia.keel.host.capability.HostCapabilities
 import moe.lolosia.keel.host.classpath.HostClasspath
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
+import moe.lolosia.keel.host.service.HostServices
 
 /**
  * Host 侧已安装插件的注册表。
@@ -191,6 +192,10 @@ internal object HostPlugins {
             true
         } catch (e: Exception) {
             failedStarts++
+            // 插件在 onEnable 之前已经上报过服务声明，启动失败时一并撤回
+            HostRoutes.remove(entry.pluginId)
+            HostPermissionCatalog.remove(entry.pluginId)
+            HostServices.remove(entry.pluginId)
             Log.warn("start failed: ${manifest.id}: ${e.message}", tag = "Loader")
             false
         }
@@ -201,6 +206,8 @@ internal object HostPlugins {
         entry.runtime = null
         HostRoutes.remove(entry.pluginId)
         HostPermissionCatalog.remove(entry.pluginId)
+        HostServices.remove(entry.pluginId)
+        HostPump.dropPlugin(entry.pluginId)
     }
 
     private fun logPackage(loaded: LoadedPlugin) {

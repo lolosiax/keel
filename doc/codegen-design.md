@@ -16,7 +16,8 @@
 3. 根 `build.gradle.kts` 里写一个 `keelPlugin { pluginId = "queue" }`（`pluginId` 为目标形态；当前手写 `plugin.json`）。
 
 其余**目标形态**由 `moe.lolosia.keel.plugin` Gradle 插件 + `keel-plugin-ksp` 生成
-（当前 `keel-plugin-ksp` 只生成 Worker 入口，其余尚未实现）：
+（当前已生成服务 Key / Client / `PluginContext` 访问器 / 服务端 Dispatcher / 注册表与 Worker 入口；
+`api` / `impl` 子项目划分、回调与 `plugin.json` 生成尚未实现）：
 
 - `api` / `impl` 两个子项目的构建脚本、发布配置；
 - 服务 Key、客户端代理、`ctx.queue` 访问器；
@@ -150,6 +151,9 @@ moe.lolosia.keel.plugin                   → 根插件：keel { } DSL，配置�
 
 KSP 只扫描**当前模块**的源码：`:api` 看到接口，`:impl` 看到实现与 `@KeelPluginMain`。
 消费方 A 不需要对 B 的接口跑 KSP，直接用 B 发布好的客户端。
+
+实现方按父类型读取依赖 klib 上的 `@ModuleService` 注解重建接口模型，所以即使在单项目形态下，
+契约与实现分处不同模块也能生成 Dispatcher 与注册表。
 
 ### 3.3 生成物示例（`api`）
 
@@ -310,8 +314,8 @@ A Worker: CALLBACK_INVOKE { owner=A, id=7, payload } → 查表 → 调用用户
 - `moe.lolosia.keel.settings` / `moe.lolosia.keel.plugin` 最小版：目录约定 + KSP + plugin.json
   （`moe.lolosia.keel.settings` 尚未实现；当前是单项目 + 手写 `plugin.json`）；
 - `keel-plugin-ksp`：单个 `@ModuleService`，值参数 / 返回值，生成 Key / Client / Accessor / Dispatcher / Worker 入口
-  （当前只生成 Worker 入口）；
-- 普通方法用阻塞重入泵；无回调；
+  （已完成 Key / Client / Accessor / Dispatcher / `KeelPluginServices`；CBOR 载荷与 correlation 配对已接入）；
+- 普通方法用阻塞重入泵；`suspend` 方法当前复用阻塞路径，不阻塞 Worker 的调度在 M1-4 接入；无回调；
 - 验收：A、B 各只写 2 个 Kotlin 文件 + 1 个 Gradle 块，调用跑通。
 
 ### P0

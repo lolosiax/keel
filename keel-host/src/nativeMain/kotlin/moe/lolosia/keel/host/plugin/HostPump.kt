@@ -11,9 +11,18 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.error.KeelErrorEntry
+import moe.lolosia.keel.api.error.KeelErrorPayload
+import moe.lolosia.keel.api.service.ServiceCall
+import moe.lolosia.keel.api.service.ServiceRegistration
+import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.web.RouteRegistration
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
+import moe.lolosia.keel.host.service.HostServices
+
+/** 插件间调用的 Host 侧兜底超时；调用方自己的 3s 超时通常先到。 */
+private const val SERVICE_TIMEOUT_MS = 5000L
 
 /** 一次 Host → 插件的在途请求；[reply] 由泵线程完成。 */
 internal class HostRequest(
@@ -26,6 +35,14 @@ internal class HostRequest(
     var correlation: ULong = 0uL
     var deadlineMs: Long = 0L
 }
+
+/** 一条插件 → 插件的在途服务调用；Host 只负责按 id 转发与带回包。 */
+private class ServiceForward(
+    val callerId: ULong,
+    val callerCorrelation: ULong,
+    val providerId: ULong,
+    val deadlineMs: Long,
+)
 
 /**
  * Host 侧事件泵。
@@ -49,6 +66,9 @@ internal object HostPump {
 
     /** correlation → 在途请求；只在泵线程读写。 */
     private val pending = mutableMapOf<ULong, HostRequest>()
+
+    /** Host 分配的 correlation → 插件间在途调用；只在泵线程读写。 */
+    private val forwards = mutableMapOf<ULong, ServiceForward>()
 
     /** 非阻塞地取空当前收件箱。 */
     fun drain() {
@@ -113,6 +133,11 @@ internal object HostPump {
                 request.reply.complete(snapshotOf(event))
                 return false
             }
+            val forward = forwards.remove(e.correlation)
+            if (forward != null) {
+                completeForward(forward, snapshotOf(event))
+                return false
+            }
         }
 
         if (kind == KEEL_EVENT_LOG.toInt()) {
@@ -120,12 +145,23 @@ internal object HostPump {
             return false
         }
 
-        if (kind == KEEL_EVENT_COMMAND.toInt() &&
-            e.target == 0uL &&
-            e.subject == KEEL_SUBJECT_ROUTE_REGISTER.toULong()
-        ) {
-            handleSnapshot(snapshotOf(event))
-            return false
+        if (kind == KEEL_EVENT_COMMAND.toInt() && e.target == 0uL) {
+            when (e.subject) {
+                KEEL_SUBJECT_ROUTE_REGISTER.toULong() -> {
+                    handleSnapshot(snapshotOf(event))
+                    return false
+                }
+
+                KEEL_SUBJECT_SERVICE_REGISTER.toULong() -> {
+                    handleServiceRegister(snapshotOf(event))
+                    return false
+                }
+
+                KEEL_SUBJECT_SERVICE_CALL.toULong() -> {
+                    handleServiceCall(snapshotOf(event))
+                    return false
+                }
+            }
         }
 
         val target = e.target
@@ -171,8 +207,119 @@ internal object HostPump {
         return true
     }
 
+    /** 插件启用的服务声明：只要 id 列表，不需要方法签名。 */
+    private fun handleServiceRegister(event: HostEvent) {
+        val payload = event.payload
+        if (payload == null) {
+            HostServices.register(event.source, emptyList())
+            return
+        }
+        try {
+            val registration = ServiceWire.decodeRegistration(payload)
+            HostServices.register(event.source, registration.services)
+        } catch (err: Throwable) {
+            Log.warn("服务注册失败：${err.message}", tag = "Service")
+        }
+    }
+
     /**
-     * 处理与当前同步等待无关的事件：日志、路由注册、其它请求的 COMPLETE。
+     * 插件 → 插件的服务调用：按 service id 找到提供者，换一个 Host correlation 转发，
+     * 回包到达时再换回调用方的 correlation。
+     */
+    private fun handleServiceCall(event: HostEvent) {
+        val payload = event.payload
+        if (payload == null) {
+            replyServiceError(event.source, event.correlation, "service call without payload")
+            return
+        }
+        val call = try {
+            ServiceWire.decodeCall(payload)
+        } catch (err: Throwable) {
+            Log.warn("服务调用载荷无法解码：${err.message}", tag = "Service")
+            replyServiceError(event.source, event.correlation, "malformed service call")
+            return
+        }
+
+        val provider = HostServices.providerOf(call.service)
+        if (provider == null) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "service unavailable: ${call.service}",
+            )
+            return
+        }
+
+        val correlation = nextCorrelation()
+        val pushed = pushToPlugin(
+            pluginId = provider,
+            kind = KEEL_EVENT_COMMAND.toInt(),
+            subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
+            correlation = correlation,
+            payload = payload,
+            source = event.source,
+        )
+        if (!pushed) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "service provider offline: ${call.service}",
+            )
+            return
+        }
+        forwards[correlation] = ServiceForward(
+            callerId = event.source,
+            callerCorrelation = event.correlation,
+            providerId = provider,
+            deadlineMs = nowMs() + SERVICE_TIMEOUT_MS,
+        )
+    }
+
+    /** 把提供者的回包送回调用方；correlation 换回调用方当初发出去的值。 */
+    private fun completeForward(forward: ServiceForward, reply: HostEvent) {
+        val pushed = pushToPlugin(
+            pluginId = forward.callerId,
+            kind = KEEL_EVENT_COMPLETE.toInt(),
+            subject = reply.subject,
+            correlation = forward.callerCorrelation,
+            status = reply.status,
+            payload = reply.payload,
+            source = forward.providerId,
+        )
+        if (!pushed) {
+            warnOnce("service-reply->${forward.callerId}", "调用方已离线，丢弃服务回包")
+        }
+    }
+
+    /** 以错误信封回一条 COMPLETE，调用方会把它重建成 `KeelRemoteException`。 */
+    private fun replyServiceError(callerId: ULong, correlation: ULong, message: String) {
+        val payload = Json.encodeToString(
+            KeelErrorPayload(
+                plugin = "host",
+                chain = listOf(KeelErrorEntry(type = "ServiceUnavailableException", message = message)),
+            )
+        ).encodeToByteArray()
+        pushToPlugin(
+            pluginId = callerId,
+            kind = KEEL_EVENT_COMPLETE.toInt(),
+            subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
+            correlation = correlation,
+            status = KEEL_ERR_FAILED.toInt(),
+            payload = payload,
+        )
+    }
+
+    /**
+     * 插件停用 / 卸载时清掉与它相关的在途调用。
+     *
+     * 提供者离线时调用方会自己超时；这里只负责不再为它保留转发记录。
+     */
+    fun dropPlugin(pluginId: ULong) {
+        forwards.entries.removeAll { it.value.callerId == pluginId || it.value.providerId == pluginId }
+    }
+
+    /**
+     * 处理与当前同步等待无关的事件：日志、注册、插件间调用、其它请求的回包。
      *
      * 运行期 HTTP 线程提交的请求回包可能和启动 / 控制台请求交错，
      * 同步等待循环必须把它们交给这里；漏掉会丢回包，表现为请求超时。
@@ -185,8 +332,29 @@ internal object HostPump {
             return true
         }
         if (event.kind == KEEL_EVENT_COMPLETE.toInt()) {
-            pending.remove(event.correlation)?.reply?.complete(event)
-            return true
+            val request = pending.remove(event.correlation)
+            if (request != null) {
+                request.reply.complete(event)
+                return true
+            }
+            val forward = forwards.remove(event.correlation)
+            if (forward != null) {
+                completeForward(forward, event)
+                return true
+            }
+        }
+        if (event.kind == KEEL_EVENT_COMMAND.toInt() && event.target == 0uL) {
+            when (event.subject) {
+                KEEL_SUBJECT_SERVICE_REGISTER.toULong() -> {
+                    handleServiceRegister(event)
+                    return true
+                }
+
+                KEEL_SUBJECT_SERVICE_CALL.toULong() -> {
+                    handleServiceCall(event)
+                    return true
+                }
+            }
         }
         return handleSnapshot(event)
     }
@@ -219,10 +387,22 @@ internal object HostPump {
 
     /** 清理超时请求；回包晚于 deadline 时也会被丢弃。 */
     private fun expireRequests() {
-        if (pending.isEmpty()) return
         val now = nowMs()
-        val expired = pending.filterValues { it.deadlineMs <= now }.keys.toList()
-        expired.forEach { correlation -> pending.remove(correlation)?.reply?.complete(null) }
+        if (pending.isNotEmpty()) {
+            val expired = pending.filterValues { it.deadlineMs <= now }.keys.toList()
+            expired.forEach { correlation -> pending.remove(correlation)?.reply?.complete(null) }
+        }
+        if (forwards.isNotEmpty()) {
+            val expired = forwards.filterValues { it.deadlineMs <= now }.keys.toList()
+            expired.forEach { correlation ->
+                val forward = forwards.remove(correlation) ?: return@forEach
+                replyServiceError(
+                    forward.callerId,
+                    forward.callerCorrelation,
+                    "service call timed out",
+                )
+            }
+        }
     }
 
     private fun nowMs(): Long = clock.elapsedNow().inWholeMilliseconds

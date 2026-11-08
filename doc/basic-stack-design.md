@@ -946,7 +946,13 @@ Host 启动
   JSON 信封与 `HttpResponse` / 文本原样返回；`PluginWorker` 在 `onLoad` 之后并入并发布，
   Host 侧由 `HostPermissionCatalog` 聚合节点。冒烟：`hello` 的
   `/api/hello/greeting`、`/api/hello/echo`、`/api/hello/plain` 与手写路由同时可达；
-- 其余 8 项待做（`@ModuleService` codegen、Config、反向请求、`ctx.scope`、Host 认证/授权、生命周期、`PluginStorage`）。
+- 第 2 项（`@ModuleService` codegen + 运行时）已完成：`keel-plugin-ksp` 生成
+  `<Service>Key` / `<Service>Client` / `PluginContext` 访问器 / `<Service>Dispatcher` / `KeelPluginServices`；
+  `PluginServices` 提供本地直调与跨模块调用（CBOR 载荷，`ServiceCaller` 在 Worker 上重入事件泵等待），
+  Host 侧由 `HostServices` 维护 `service id → plugin id` 并转发 `SERVICE_CALL`，停用插件时一并撤销。
+  冒烟：`hello` 声明 `@ModuleService("hello")`，`onEnable` 经 `ServiceCaller` 走一次 Host 往返
+  （生成的分发器执行），日志出现 `服务自检：hello, service-check`，同时 `/api/hello/greeting` 正常；
+- 其余 7 项待做（Config、反向请求、`ctx.scope`、Host 认证/授权、生命周期、`PluginStorage`）。
 
 ### M2 —— rbac 与 biz 落地
 

@@ -27,7 +27,13 @@ private class KeelPluginWorkerProcessor(
 
     private var generated = false
 
+    private val services = KeelServiceGenerator(codeGenerator, logger)
+
     override fun process(resolver: Resolver): List<KSAnnotated> {
+        // 服务代码先在当前模块生成：契约侧 Key / Client，实现侧 Dispatcher / KeelPluginServices
+        val deferredServices = services.process(resolver)
+        if (deferredServices.isNotEmpty()) return deferredServices
+
         if (generated) return emptyList()
 
         val mains = resolver.getSymbolsWithAnnotation(ANNOTATION)
@@ -84,11 +90,13 @@ private class KeelPluginWorkerProcessor(
         | *
         | * `KeelPluginRoutes` 由 `keel-router-ksp` 生成在同一包里；没有控制器的插件
         | * 也会生成空实现，所以这里可以无条件传入。
+        | *
+        | * `KeelPluginServices` 由本处理器生成，没有 `@ModuleServiceProvider` 时是空实现。
         | */
         |@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
         |@CName("keel_plugin_worker_main")
         |fun keelPluginWorkerMain(api: CPointer<KeelPluginApi>?, out: CPointer<KeelPluginHandlers>?): UInt =
-        |    PluginWorker.enter(api, out, KeelPluginRoutes) { $qualified() }
+        |    PluginWorker.enter(api, out, KeelPluginRoutes, KeelPluginServices) { $qualified() }
         |
     """.trimMargin()
 

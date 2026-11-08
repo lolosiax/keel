@@ -53,6 +53,7 @@ internal fun pushToPlugin(
     correlation: ULong,
     status: Int = KEEL_OK.toInt(),
     payload: ByteArray? = null,
+    source: ULong = 0uL,
 ): Boolean {
     val inbox = pluginInbox(pluginId) ?: return false
 
@@ -66,7 +67,7 @@ internal fun pushToPlugin(
         val event = alloc<KeelEvent>()
         event.size = sizeOf<KeelEvent>().toUInt()
         event.kind = kind.toUShort()
-        event.source = 0uL
+        event.source = source
         event.target = pluginId
         event.correlation = correlation
         event.subject = subject

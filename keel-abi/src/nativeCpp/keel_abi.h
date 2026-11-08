@@ -102,6 +102,20 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_CONSOLE 7u
 
 /*
+ * 插件启用时把自己提供的服务 id 表（CBOR，ServiceRegistration）注册给 Host，
+ * Host 据此把 SERVICE_CALL 转发到正确的插件。
+ */
+#define KEEL_SUBJECT_SERVICE_REGISTER 8u
+
+/*
+ * 跨模块服务调用：载荷是 CBOR 编码的 ServiceCall（service / method / args）。
+ *
+ * 调用方投给 Host；Host 按 service id 找到提供者并转发，回包原样带回。
+ * 调用方与提供者都不直接持有对方的 inbox。
+ */
+#define KEEL_SUBJECT_SERVICE_CALL 9u
+
+/*
  * 不透明队列句柄。
  *
  * C 实现侧只看到前向声明，真正的布局在 keel_queue.c 里。

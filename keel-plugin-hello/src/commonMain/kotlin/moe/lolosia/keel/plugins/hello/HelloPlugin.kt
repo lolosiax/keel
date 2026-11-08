@@ -57,6 +57,17 @@ class HelloPlugin : Plugin {
         logLevelSamples()
         scheduleSamples()
         checkDatabase()
+        checkService()
+    }
+
+    /**
+     * 服务自检：用生成的客户端走一次 Host 往返调用（实现见 nativeMain）。
+     *
+     * 生成代码只存在于 native 目标编译里，所以调用点用 expect / actual 隔离，
+     * 避免 commonMain 的元数据编译依赖 KSP 产物。
+     */
+    private fun checkService() {
+        checkHelloService(context)
     }
 
     /** 调度器自检：延时任务 + 周期任务，周期任务第 3 次自行取消。 */
