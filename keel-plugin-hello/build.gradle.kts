@@ -1,5 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    // 示例控制器里的 DTO 用 @Serializable，生成器按类型取序列化器
+    alias(libs.plugins.kotlin.serialization)
     id("moe.lolosia.keel.plugin")
 }
 

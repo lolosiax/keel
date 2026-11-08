@@ -23,25 +23,25 @@ class HelloPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
-        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) { _, _ ->
+        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) {
             HttpResponse(body = ResponseBody.Text("hello from keel plugin"))
         }
         // 带 JSON 入参的回显接口，用于验证请求体透传
-        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { request, _ ->
+        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { ctx ->
             HttpResponse(
                 body = ResponseBody.Text(
-                    text = request.body.decodeToString(),
+                    text = ctx.request.body.decodeToString(),
                     contentType = "application/json; charset=utf-8",
                 ),
             )
         }
         // 崩溃自检：故意制造一次原生内存故障，验证看门狗报告与插件归因
-        context.routes.register(RouteDescriptor("GET", "/crash", "hello#crash")) { _, _ ->
+        context.routes.register(RouteDescriptor("GET", "/crash", "hello#crash")) {
             Log.warn("/crash: 即将触发随机内存故障")
             crashRandomly()
         }
         // 错误传递自检：抛一个带 cause 的异常，验证跨运行时的错误栈与 caused by
-        context.routes.register(RouteDescriptor("GET", "/boom", "hello#boom")) { _, _ ->
+        context.routes.register(RouteDescriptor("GET", "/boom", "hello#boom")) {
             throw IllegalStateException(
                 "【手工触发】/boom 故意抛出的外层异常，用来验证跨模块错误栈传递是否完整",
                 IllegalArgumentException(

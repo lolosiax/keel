@@ -1,6 +1,7 @@
 package moe.lolosia.keel.api.worker
 
 import kotlinx.cinterop.*
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,6 +21,9 @@ object PluginWorker {
     /** 当前插件实例；只在 Worker 线程读写。 */
     internal var plugin: Plugin? = null
 
+    /** 当前插件的运行时上下文；HTTP 请求构造 [Context] 时要用。 */
+    internal var pluginContext: PluginContext? = null
+
     /** 当前插件 id 与 Host 收件箱；进入 Worker 时一次性填好，之后只读。 */
     internal var pluginId: ULong = 0uL
     internal var hostInbox: CPointer<KeelQueue>? = null
@@ -29,12 +33,14 @@ object PluginWorker {
      *
      * @param api  Host 传给 `keel_plugin_bootstrap` 的能力表，由 C 侧填好
      * @param out  分发表，C 侧在 START 之后用它转发所有事件
+     * @param generated KSP 生成的路由集合（固定名 `KeelPluginRoutes`），没有控制器时是空实现
      * @param factory 创建插件实例（KSP 生成，指向 `@KeelPluginMain` 的类）
      * @return `KeelStatus`；C 侧据此回投 COMPLETE
      */
     fun enter(
         api: CPointer<KeelPluginApi>?,
         out: CPointer<KeelPluginHandlers>?,
+        generated: GeneratedRoutes? = null,
         factory: () -> Plugin,
     ): UInt {
         if (api == null || out == null) return KEEL_ERR_INVALID
@@ -56,11 +62,14 @@ object PluginWorker {
             entry = "",
         )
         val context = PluginContextImpl(metadata, logger)
+        PluginWorker.pluginContext = context
 
         return try {
             PluginRoutes.reset()
             val instance = factory()
             instance.onLoad(context)
+            // 手写路由先入表，生成的控制器路由后入表（同 routeId 由生成侧覆盖）
+            generated?.let { PluginRoutes.applyGenerated(it) }
             instance.onEnable()
             plugin = instance
             PluginRoutes.publish()
@@ -75,6 +84,7 @@ object PluginWorker {
     internal fun disable() {
         plugin?.onDisable()
         plugin = null
+        pluginContext = null
         PluginCapabilities.databaseApi = null
         PluginCapabilities.databaseHandle = null
         WorkerScheduler.reset()
@@ -175,7 +185,20 @@ private fun handleHttp(event: KeelEvent) {
         return
     }
 
-    val response = PluginRoutes.dispatch(request.routeId, request.request, request.pathParameters)
+    val response = runBlocking {
+        val plugin = PluginWorker.pluginContext
+            ?: return@runBlocking HttpResponse(
+                status = 503,
+                body = ResponseBody.Text("plugin context is not ready"),
+            )
+        PluginRoutes.dispatch(
+            plugin = plugin,
+            routeId = request.routeId,
+            request = request.request,
+            pathParameters = request.pathParameters,
+            user = request.user,
+        )
+    }
     val wire = PluginRoutes.toWire(response)
     replyCompleteWithPayload(event, Json.encodeToString(wire).encodeToByteArray())
 }

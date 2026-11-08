@@ -115,6 +115,11 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                     configuration.name,
                     "moe.lolosia.keel.toolchain:keel-plugin-ksp:$version",
                 )
+                // 注解路由：生成 KeelPluginRoutes（keel-plugin-ksp 的 Worker 入口会引用它）
+                project.dependencies.add(
+                    configuration.name,
+                    "moe.lolosia.keel.toolchain:keel-router-ksp:$version",
+                )
             }
 
             project.afterEvaluate {

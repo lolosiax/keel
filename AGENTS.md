@@ -94,6 +94,9 @@ gradlew -p keel-plugin-ksp publish
 - 单独构建 `keel-host` / `keel-launcher` / `keel-plugin-*` 时，`keel-api`（以及 `keel-host`）必须已发布到 Maven；否则用根聚合，或加 `--include-build ../keel-api`。
 - Kotlin/Native 首次编译会下载 konan 工具链；Windows 上链接前先确认没有旧的 `keel*.exe` 进程占用输出文件。
 - **KSP 生成约定**（`keel-router-ksp` / `keel-plugin-ksp` 都适用）：
+  - 两个处理器是**成对**的：`keel-router-ksp` 生成与 `@KeelPluginMain` 同包的 `KeelPluginRoutes`
+    （实现 `GeneratedRoutes`），`keel-plugin-ksp` 生成的 Worker 入口把它交给 `PluginWorker`；
+    `moe.lolosia.keel.plugin` 会同时挂上两者，单独配 KSP 时必须两个都加。
   - 汇总多个源文件的输出，`Dependencies` 必须写 `Dependencies(aggregating = true, *sourceFiles)`；
     只写 `aggregating = true` 会漏扫未改动文件，症状是「编译通过但接口全 404」。
   - 会创建文件的处理器不要在首轮 `deferred`：KSP 会重跑同一轮，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`。

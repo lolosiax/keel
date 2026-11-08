@@ -11,7 +11,8 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
-import moe.lolosia.keel.api.web.RouteDescriptor
+import moe.lolosia.keel.api.web.RouteRegistration
+import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 
 /** 一次 Host → 插件的在途请求；[reply] 由泵线程完成。 */
@@ -161,8 +162,9 @@ internal object HostPump {
 
         val payload = event.payload ?: return true
         try {
-            val descriptors = Json.decodeFromString<List<RouteDescriptor>>(payload.decodeToString())
-            HostRoutes.register(event.source, descriptors)
+            val registration = Json.decodeFromString<RouteRegistration>(payload.decodeToString())
+            HostRoutes.register(event.source, registration.routes)
+            HostPermissionCatalog.register(event.source, registration.permissions)
         } catch (err: Throwable) {
             Log.warn("路由注册失败：${err.message}", tag = "Router")
         }

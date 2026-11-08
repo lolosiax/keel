@@ -5,6 +5,7 @@ import moe.lolosia.keel.api.log.ModuleColors
 import moe.lolosia.keel.host.capability.DatabaseSettings
 import moe.lolosia.keel.host.capability.HostCapabilities
 import moe.lolosia.keel.host.classpath.HostClasspath
+import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 
 /**
@@ -199,6 +200,7 @@ internal object HostPlugins {
         entry.runtime?.shutdown()
         entry.runtime = null
         HostRoutes.remove(entry.pluginId)
+        HostPermissionCatalog.remove(entry.pluginId)
     }
 
     private fun logPackage(loaded: LoadedPlugin) {

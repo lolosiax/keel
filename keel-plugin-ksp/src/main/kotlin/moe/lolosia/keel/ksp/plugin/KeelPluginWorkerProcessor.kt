@@ -81,11 +81,14 @@ private class KeelPluginWorkerProcessor(
         | *
         | * 由 `keel_plugin_bootstrap` 的事件泵线程在收到 START 时调用，
         | * 是该线程第一次进入插件 Kotlin 运行时。
+        | *
+        | * `KeelPluginRoutes` 由 `keel-router-ksp` 生成在同一包里；没有控制器的插件
+        | * 也会生成空实现，所以这里可以无条件传入。
         | */
         |@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
         |@CName("keel_plugin_worker_main")
         |fun keelPluginWorkerMain(api: CPointer<KeelPluginApi>?, out: CPointer<KeelPluginHandlers>?): UInt =
-        |    PluginWorker.enter(api, out) { $qualified() }
+        |    PluginWorker.enter(api, out, KeelPluginRoutes) { $qualified() }
         |
     """.trimMargin()
 

@@ -939,6 +939,15 @@ Host 启动
 `b` 注册一条带 `@Permission` 的路由；Host 用桩 `Authenticator` / `Authorizer` 跑通 401 / 403 / 503；
 两个包都从 `.keel` 加载，重启后恢复启用状态；`b` 通过能力包完成一次查库。
 
+**M1 落地状态**：
+
+- 第 1 项（router KSP）已完成：`keel-router-ksp` 生成同包的 `KeelPluginRoutes`，
+  覆盖 `RouteDescriptor` / `PermissionNode`、`Context` 注入、`@Body` / `@Path` / `@Query` / `@Header` 绑定、
+  JSON 信封与 `HttpResponse` / 文本原样返回；`PluginWorker` 在 `onLoad` 之后并入并发布，
+  Host 侧由 `HostPermissionCatalog` 聚合节点。冒烟：`hello` 的
+  `/api/hello/greeting`、`/api/hello/echo`、`/api/hello/plain` 与手写路由同时可达；
+- 其余 8 项待做（`@ModuleService` codegen、Config、反向请求、`ctx.scope`、Host 认证/授权、生命周期、`PluginStorage`）。
+
 ### M2 —— rbac 与 biz 落地
 
 - 表与迁移、`permissions.yaml`、组继承同步；

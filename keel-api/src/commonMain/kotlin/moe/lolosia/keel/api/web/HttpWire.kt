@@ -5,13 +5,15 @@ import kotlinx.serialization.Serializable
 /**
  * Host → 插件的 HTTP 分发载荷。
  *
- * 只传快照与 routeId；`ApplicationCall` / Ktor 类型不跨 ABI。
+ * 只传快照、routeId 与已解析的用户；`ApplicationCall` / Ktor 类型不跨 ABI。
+ * [user] 为 `null` 表示未登录（公开路由）或 Host 尚未接入认证。
  */
 @Serializable
 data class HttpRouteRequest(
     val routeId: String,
     val pathParameters: Map<String, String> = emptyMap(),
     val request: HttpRequest,
+    val user: UserSnapshot? = null,
 )
 
 /**
