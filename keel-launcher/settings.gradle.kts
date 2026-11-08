@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("../keel-classpath-gradle-plugin")
     includeBuild("../keel-logger-gradle-plugin")
     includeBuild("../keel-abi-gradle-plugin")
     repositories {

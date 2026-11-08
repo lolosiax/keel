@@ -52,6 +52,10 @@ val generateBuildInfo = tasks.register("generateBuildInfo") {
 
 keelClasspath {
     target("mingwX64")
+
+    windows {
+        productName = "Keel Modular Web Framework"
+    }
 }
 
 kotlin {

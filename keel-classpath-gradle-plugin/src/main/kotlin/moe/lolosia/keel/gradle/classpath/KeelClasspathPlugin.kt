@@ -50,7 +50,53 @@ class KeelClasspathPlugin : Plugin<Project> {
         val embedDir = project.layout.buildDirectory
             .dir("generated/keel/classpath/${target.name}")
             .get().asFile
+        val executableName = target.binaries
+            .withType(Executable::class.java)
+            .firstOrNull()
+            ?.baseName
+            ?: project.name
 
+        val zipTask = if (extension.embedClasspath) {
+            registerClasspathZip(project, target, suffix, embedDir, extension)
+        } else {
+            null
+        }
+
+        val embed = when {
+            target.name.startsWith("mingw") ->
+                embedAsWindowsResource(
+                    project, suffix, zipTask, embedDir, extension.windows, executableName,
+                )
+
+            target.name.startsWith("linux") && zipTask != null ->
+                embedAsLinuxObject(project, target, suffix, zipTask, embedDir, extension)
+
+            zipTask == null -> return
+
+            else -> {
+                project.logger.warn(
+                    "classpath 嵌入暂不支持目标 ${target.name}：资源不会进入可执行文件"
+                )
+                ClasspathEmbed(zipTask, embedDir.resolve(CLASSPATH_ZIP_NAME), emptyList())
+            }
+        }
+
+        target.binaries.withType(Executable::class.java).configureEach { binary ->
+            binary.linkerOpts.addAll(embed.linkerArgs)
+            binary.linkTaskProvider.configure { linkTask ->
+                linkTask.dependsOn(embed.steps)
+                linkTask.inputs.files(embed.artifact)
+            }
+        }
+    }
+
+    private fun registerClasspathZip(
+        project: Project,
+        target: KotlinNativeTarget,
+        suffix: String,
+        embedDir: File,
+        extension: KeelClasspathExtension,
+    ): TaskProvider<Zip> {
         val zipTask = project.tasks.register("keelClasspathZip$suffix", Zip::class.java) { task ->
             task.group = "keel"
             task.description = "把 ${target.name} 的资源合并成 classpath.zip"
@@ -75,46 +121,53 @@ class KeelClasspathPlugin : Plugin<Project> {
                 }
             }
         }
-
-        val embed = when {
-            target.name.startsWith("mingw") ->
-                embedAsWindowsResource(project, suffix, zipTask, embedDir)
-
-            target.name.startsWith("linux") ->
-                embedAsLinuxObject(project, target, suffix, zipTask, embedDir, extension)
-
-            else -> {
-                project.logger.warn(
-                    "classpath 嵌入暂不支持目标 ${target.name}：资源不会进入可执行文件"
-                )
-                ClasspathEmbed(zipTask, embedDir.resolve(CLASSPATH_ZIP_NAME), emptyList())
-            }
-        }
-
-        target.binaries.withType(Executable::class.java).configureEach { binary ->
-            binary.linkerOpts.addAll(embed.linkerArgs)
-            binary.linkTaskProvider.configure { linkTask ->
-                linkTask.dependsOn(embed.steps)
-                linkTask.inputs.files(embed.artifact)
-            }
-        }
+        return zipTask
     }
 
     private fun embedAsWindowsResource(
         project: Project,
         suffix: String,
-        zipTask: TaskProvider<Zip>,
+        zipTask: TaskProvider<Zip>?,
         embedDir: File,
+        windows: KeelWindowsExtension,
+        executableName: String,
     ): ClasspathEmbed {
+        val version = project.version.toString()
+        val productName = windows.productName.ifBlank { project.name }
+        val fileDescription = windows.fileDescription.ifBlank { productName }
+        // 留空用插件内置的默认图标，保证不配置也有图标
+        val iconSource = windows.icon.takeIf { it.isNotBlank() }?.let { project.file(it) }
+
         val rcTask = project.tasks.register("keelClasspathRc$suffix") { task ->
             task.group = "keel"
-            task.dependsOn(zipTask)
+            zipTask?.let { task.dependsOn(it) }
             val rc = embedDir.resolve(RC_FILE)
+            task.inputs.property("version", version)
+            task.inputs.property("productName", productName)
+            task.inputs.property("fileDescription", fileDescription)
+            task.inputs.property("companyName", windows.companyName)
+            task.inputs.property("copyright", windows.copyright)
+            task.inputs.property("executableName", executableName)
+            task.inputs.property("embedClasspath", zipTask != null)
+            task.inputs.property("defaultIcon", iconSource == null)
+            iconSource?.let { task.inputs.file(it) }
             task.outputs.file(rc)
             task.doLast {
                 embedDir.mkdirs()
+                val icon = embedDir.resolve(ICON_FILE)
+                if (iconSource != null) iconSource.copyTo(icon, overwrite = true) else extractDefaultIcon(icon)
                 rc.writeText(
-                    "IDR_CLASSPATH  CLASSPATH  \"$CLASSPATH_ZIP_NAME\"\n",
+                    buildWindowsResourceScript(
+                        embedClasspath = zipTask != null,
+                        icon = ICON_FILE,
+                        version = version,
+                        productName = productName,
+                        fileDescription = fileDescription,
+                        companyName = windows.companyName,
+                        copyright = windows.copyright,
+                        internalName = executableName,
+                        executableName = "$executableName.exe",
+                    ),
                     Charsets.UTF_8,
                 )
             }
@@ -122,15 +175,18 @@ class KeelClasspathPlugin : Plugin<Project> {
 
         val windresTask = project.tasks.register("keelClasspathWindres$suffix", Exec::class.java) { task ->
             task.group = "keel"
-            task.dependsOn(zipTask, rcTask)
+            task.dependsOn(rcTask)
+            zipTask?.let { task.dependsOn(it) }
             task.workingDir = embedDir
-            task.inputs.file(embedDir.resolve(CLASSPATH_ZIP_NAME))
             task.inputs.file(embedDir.resolve(RC_FILE))
+            zipTask?.let { task.inputs.file(embedDir.resolve(CLASSPATH_ZIP_NAME)) }
             task.outputs.file(embedDir.resolve(CLASSPATH_RES))
 
             val binDir = konanMingwBinDir()
             task.commandLine(
                 File(binDir, "windres").absolutePath,
+                // 版本信息里可能有中文，资源脚本按 UTF-8 写，windres 也要按 UTF-8 读
+                "--codepage=65001",
                 RC_FILE, "-O", "coff", "-o", CLASSPATH_RES,
             )
             task.environment(
@@ -248,6 +304,87 @@ class KeelClasspathPlugin : Plugin<Project> {
         return "/mnt/$drive$rest"
     }
 
+    /**
+     * 生成 windres 用的 `.rc`。
+     *
+     * 版本号取 Gradle 的 `version`（FILEVERSION 只认 4 段数字，`-SNAPSHOT` 这类后缀会被丢掉），
+     * 文件内容按 UTF-8 写，windres 侧用 `--codepage=65001` 读。
+     */
+    private fun buildWindowsResourceScript(
+        embedClasspath: Boolean,
+        icon: String,
+        version: String,
+        productName: String,
+        fileDescription: String,
+        companyName: String,
+        copyright: String,
+        internalName: String,
+        executableName: String,
+    ): String {
+        val quad = winVersionParts(version).joinToString(",")
+        val quote = { value: String -> value.replace("\"", "'") }
+
+        return buildString {
+            appendLine("// 由 Gradle 生成，不要手改：版本号取工程 version，名称来自 keelClasspath { windows { … } }。")
+            appendLine("// 文件本身是 UTF-8，windres 以 --codepage=65001 读取。")
+            if (embedClasspath) {
+                appendLine()
+                appendLine("// 内嵌 classpath.zip（自定义资源类型），名字与 EmbeddedClasspath.mingw.kt 的查找逻辑对应。")
+                appendLine("IDR_CLASSPATH  CLASSPATH  \"$CLASSPATH_ZIP_NAME\"")
+            }
+            appendLine()
+            appendLine("// 应用图标；未配置 keelClasspath { windows { icon = … } } 时用插件内置的默认图标。")
+            appendLine("1 ICON \"$icon\"")
+            appendLine()
+            appendLine("1 VERSIONINFO")
+            appendLine("FILEVERSION $quad")
+            appendLine("PRODUCTVERSION $quad")
+            appendLine("FILEFLAGSMASK 0x3fL")
+            appendLine("FILEFLAGS 0x0L")
+            appendLine("FILEOS 0x40004L")
+            appendLine("FILETYPE 0x1L")
+            appendLine("FILESUBTYPE 0x0L")
+            appendLine("BEGIN")
+            appendLine("  BLOCK \"StringFileInfo\"")
+            appendLine("  BEGIN")
+            appendLine("    BLOCK \"040904b0\"")
+            appendLine("    BEGIN")
+            if (companyName.isNotBlank()) {
+                appendLine("      VALUE \"CompanyName\", \"${quote(companyName)}\"")
+            }
+            appendLine("      VALUE \"FileDescription\", \"${quote(fileDescription)}\"")
+            appendLine("      VALUE \"FileVersion\", \"${quote(version)}\"")
+            appendLine("      VALUE \"InternalName\", \"${quote(internalName)}\"")
+            if (copyright.isNotBlank()) {
+                appendLine("      VALUE \"LegalCopyright\", \"${quote(copyright)}\"")
+            }
+            appendLine("      VALUE \"OriginalFilename\", \"${quote(executableName)}\"")
+            appendLine("      VALUE \"ProductName\", \"${quote(productName)}\"")
+            appendLine("      VALUE \"ProductVersion\", \"${quote(version)}\"")
+            appendLine("    END")
+            appendLine("  END")
+            appendLine("  BLOCK \"VarFileInfo\"")
+            appendLine("  BEGIN")
+            appendLine("    VALUE \"Translation\", 0x409, 1200")
+            appendLine("  END")
+            appendLine("END")
+        }
+    }
+
+    /** `1.0.0-SNAPSHOT` → `[1, 0, 0, 0]`：FILEVERSION 只接受 4 段数字。 */
+    private fun winVersionParts(version: String): List<Int> {
+        val numeric = version.substringBefore('-').substringBefore('+')
+        val parts = numeric.split('.').map { segment -> segment.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
+        return (parts + List(4) { 0 }).take(4)
+    }
+
+    /** 把插件内置的默认图标释放到构建目录，供 windres 读取。 */
+    private fun extractDefaultIcon(target: File) {
+        val stream = KeelClasspathPlugin::class.java.getResourceAsStream(DEFAULT_ICON_RESOURCE)
+            ?: error("插件 jar 内找不到默认图标：$DEFAULT_ICON_RESOURCE")
+        stream.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+    }
+
     private fun konanMingwBinDir(): File {
         val konanDataDir = System.getenv("KONAN_DATA_DIR")
             ?: "${System.getProperty("user.home")}/.konan"
@@ -282,5 +419,7 @@ class KeelClasspathPlugin : Plugin<Project> {
         const val CLASSPATH_RES = "classpath.res"
         const val CLASSPATH_OBJECT = "classpath.o"
         const val RC_FILE = "classpath.rc"
+        const val ICON_FILE = "keel-icon.ico"
+        const val DEFAULT_ICON_RESOURCE = "/moe/lolosia/keel/gradle/classpath/keel-icon.ico"
     }
 }

@@ -1,5 +1,7 @@
 package moe.lolosia.keel.gradle.classpath
 
+import org.gradle.api.Action
+
 /**
  * 普通 Kotlin/Native 产物的 `classpath.zip` 嵌入扩展。
  *
@@ -9,6 +11,13 @@ package moe.lolosia.keel.gradle.classpath
 open class KeelClasspathExtension {
 
     var enabled: Boolean = true
+
+    /**
+     * 是否打包并嵌入 `classpath.zip`。
+     *
+     * 关掉后仍会生成 Windows 版本资源（[windows]），适合没有内嵌资源的发行入口。
+     */
+    var embedClasspath: Boolean = true
 
     /** 参与嵌入的目标；为空则取全部 native 目标。 */
     val targets: MutableList<String> = mutableListOf()
@@ -22,6 +31,13 @@ open class KeelClasspathExtension {
     /** Windows 宿主编译 Linux 目标时借道 WSL。 */
     var wslDistro: String? = null
     var wslUser: String? = null
+
+    /** Windows 可执行文件的 PE 版本信息。 */
+    val windows = KeelWindowsExtension()
+
+    fun windows(action: Action<KeelWindowsExtension>) {
+        action.execute(windows)
+    }
 
     fun target(name: String) {
         targets += name

@@ -27,7 +27,7 @@
 
 | 目录 | rootProject.name | 角色 | 是否发布 |
 | --- | --- | --- | --- |
-| `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入插件 `moe.lolosia.keel.classpath` | 是 |
+| `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入 + Windows 版本资源插件 `moe.lolosia.keel.classpath` | 是 |
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin` | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
@@ -42,7 +42,7 @@
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
 | `keel-launcher/` | `keel-launcher` | 单文件发行版入口，静态链接 Host 并内嵌插件 | 是（可执行文件） |
 | `keel-plugin-hello/` | `keel-plugin-hello` | 示例插件；新插件按 `keel-plugin-<id>/` 平铺在顶层 | 是 |
-| `doc/` | — | 设计与计划 | — |
+| `doc/` | — | 设计与计划；图标源文件在 `doc/logo/`（SVG + 生成脚本，不参与构建） | — |
 
 依赖方向（禁止反向）：
 
@@ -288,6 +288,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
 | [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接**：已完成模块、构建命令、验证结果、下一步与已知坑 |
 | [doc/roadmap.md](doc/roadmap.md) | DEMO / P0 / P1 / P2 的目标、交付物、验收标准与待决问题 |
+| [doc/logo/](doc/logo/) | **图标源文件**：`keel-icon-hollow.svg`（≥40px）、`keel-icon-solid.svg`（<40px）、`generate-icon.py`。构建用的 `keel-icon.ico` 由脚本生成到 `keel-classpath-gradle-plugin/src/main/resources/moe/lolosia/keel/gradle/classpath/`，作为没配 `windows { icon = … }` 时的默认应用图标；不要手工编辑 `.ico`，改 SVG 后重跑脚本 |
 
 ## 10. 当前待确认
 

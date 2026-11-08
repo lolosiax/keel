@@ -199,9 +199,12 @@ pluginId -> PluginClasspathEntry(
 
 已落地 `moe.lolosia.keel.classpath`：
 
-- `keelClasspath { }` 扩展：`targets` / `compressed` / `resources` / `wslDistro` / `wslUser`；
+- `keelClasspath { }` 扩展：`targets` / `embedClasspath` / `compressed` / `resources` / `wslDistro` / `wslUser`；
 - 任务：`keelClasspathZip<Target>` → `keelClasspathRc` → `keelClasspathWindres`（Windows），
   或 `keelClasspathObjcopy`（Linux）；
+- mingw 的 `.rc` 同时生成 `VERSIONINFO`：产品名 / 文件说明 / 公司 / 版权来自
+  `keelClasspath { windows { … } }`，版本号取工程 `version`；任务管理器与资源管理器看到的名称就是这里；
+- `embedClasspath = false` 时不打包 zip，只生成上述 Windows 版本资源（发行入口没有自有资源时用）；
 - 合并顺序沿用 backend：项目自身 > 目标源集 > 中间源集 > `commonMain` > 项目依赖资源；
 - 运行期用 `installEmbeddedClasspath()` 读取；`KEEL_CLASSPATH_DIR` 仍可切磁盘目录；
 - `keel-host` 已用 `host.txt` 验证：`embedded host.txt: hello from host classpath`。

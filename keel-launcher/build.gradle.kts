@@ -1,8 +1,19 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    id("moe.lolosia.keel.classpath")
     id("moe.lolosia.keel.logger")
     // launcher 静态并入 Host，也必须带上 ABI 的 C 静态库
     id("moe.lolosia.keel.abi")
+}
+
+// 发行入口没有自己的内嵌资源，只借用插件的 Windows 版本信息生成。
+keelClasspath {
+    target("mingwX64")
+    embedClasspath = false
+
+    windows {
+        productName = "Keel Modular Web Framework"
+    }
 }
 
 group = "moe.lolosia.keel"
