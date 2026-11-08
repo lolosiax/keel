@@ -6,7 +6,7 @@
 
 **A modular web framework for Kotlin/Native**
 
-The host owns the container. Plugins carry business capabilities. Every runtime boundary is defined by a C ABI.
+Componentized plug-in is the core capability: components are built independently, dynamically loaded or unloaded, and hot-updated at runtime. The host manages lifecycle, routing, and runtime boundaries.
 
 [中文](README.md) · English
 
@@ -30,7 +30,7 @@ The host owns the container. Plugins carry business capabilities. Every runtime 
 
 ## Design Goals
 
-Kotlin/Native has no JVM class loader. Dynamic libraries cannot be unloaded safely, and Kotlin objects or coroutines cannot cross library boundaries. Keel treats these facts as design premises:
+Keel is built around a componentized plug-in model. Components ship as independent deployment units and can be added, removed, and hot-updated at runtime. Kotlin/Native has no JVM class loader, dynamic libraries cannot be unloaded safely, and Kotlin objects or coroutines cannot cross library boundaries. Keel treats these facts as design premises:
 
 1. **Separate container from business logic**: the host owns ports, routing, lifecycle, context, scheduling, and logging. Plugins implement business capabilities only.
 2. **Deliver plugins independently**: each plugin produces a `.keel` package with a manifest, per-target native libraries, and resources. It can be installed, enabled, disabled, and upgraded on its own.
