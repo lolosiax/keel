@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="doc/logo/keel-icon-solid.svg" width="112" alt="Keel" />
+<img src="doc/logo/keel-icon-hollow.svg" width="112" alt="Keel" />
 
 # Keel
 
@@ -92,44 +92,9 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 
 ### 总览
 
-```text
-                          ┌──────────────────────────────────────────────┐
-                          │              keel-launcher                   │
-                          │   单文件发行：宿主、插件清单、原生库与资源   │
-                          └──────────────────────┬───────────────────────┘
-                                                 │ 静态链接，必要时解包回退
-┌────────────────────────────────────────────────▼──────────────────────────────────────────────────┐
-│ keel-host                                                                                         │
-│                                                                                                   │
-│  CLI / 控制台        插件加载器         生命周期          路由表            Ktor CIO              │
-│  ───────────        ──────────         ────────          ──────            ────────               │
-│  参数解析            .keel 扫描         START            method + path     单端口                 │
-│  命令分发            manifest 校验      COMPLETE         routeId           中间件                 │
-│  优雅停机            动态库解包         SHUTDOWN         插件归属          访问日志               │
-│                      资源注册                                                                     │
-│                                                                                                   │
-│  事件泵线程                                                                                       │
-│  Host 收件箱 → 日志汇总 / 事件转发 / 请求应答 / 定时唤醒                                          │
-└──────────┬────────────────────────────────┬────────────────────────────────┬──────────────────────┘
-           │ C ABI                          │ C ABI                          │ C ABI
-           │ 事件队列 + 不透明句柄          │                                │
-┌──────────▼───────────────┐   ┌────────────▼─────────────┐   ┌──────────────▼──────────────┐
-│ keel-plugin-hello        │   │ keel-plugin-<id>         │   │ keel-plugin-...             │
-│ 独立 Kotlin/Native 运行时│   │ 独立 Kotlin/Native 运行时│   │ 独立 Kotlin/Native 运行时   │
-│ Worker 线程              │   │ Worker 线程              │   │ Worker 线程                 │
-│ 收件箱 256 条            │   │ 收件箱 256 条            │   │ 收件箱 256 条               │
-│ 生命周期 / 路由 / 调度器 │   │ 生命周期 / 路由 / 调度器 │   │ 生命周期 / 路由 / 调度器    │
-└──────────────────────────┘   └──────────────────────────┘   └─────────────────────────────┘
-
-构建期工具
-  moe.lolosia.keel.classpath    资源合并与可执行文件嵌入
-  moe.lolosia.keel.plugin       .keel 打包
-  moe.lolosia.keel.abi          C ABI 静态库注入
-  moe.lolosia.keel.logger       日志调用点改写
-  moe.lolosia.keel.publish      发布仓库注册
-  keel-router-ksp               路由表生成
-  keel-plugin-ksp               Worker 入口生成
-```
+<p align="center">
+  <img src="doc/diagrams/architecture.zh.svg" alt="Keel 运行时架构" width="100%" />
+</p>
 
 ### 组件职责
 
@@ -184,61 +149,17 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 
 ### 请求处理流程
 
-```text
-客户端
-  │
-  │ HTTP 请求
-  ▼
-Ktor CIO 单端口
-  │ 1. 匹配 method 与 path
-  │ 2. 提取 HttpRequest 快照
-  ▼
-Host 路由表 ──────────────► 命中 pluginId 与 routeId
-  │
-  │ 3. 投递 COMMAND subject=HTTP correlation=N
-  ▼
-插件 Worker 线程
-  │ 4. 解码 HttpRouteRequest
-  │ 5. 查本地路由表
-  │ 6. 执行 handler
-  ▼
-COMPLETE correlation=N + HttpRouteResponse
-  │
-  ▼
-Host 事件泵 ──────────────► 唤醒挂起的 Ktor 协程
-  │
-  ▼
-客户端 ◄────────────────── HTTP 响应
-```
+<p align="center">
+  <img src="doc/diagrams/request-flow.zh.svg" alt="HTTP 请求处理流程" width="100%" />
+</p>
 
 Ktor 的 handler 运行在宿主协程中。它不直接调用插件，而是通过 `HostPump.request` 把请求放入通道并挂起；泵线程负责投递与回投；挂起由 `CompletableDeferred` 完成。`ApplicationCall`、`Continuation` 与 Ktor 上下文始终留在宿主运行时。
 
 ### 插件加载流程
 
-```text
-plugins/
-  │ 扫描 *.keel
-  ▼
-PluginLoader
-  │ 1. 读取包根 plugin.json
-  │ 2. 校验 id、abiVersion、entry 与当前目标库
-  │ 3. 解出动态库到 <cache>/<id>/<version>/
-  │ 4. 注册 resources/ 到 classpath 注册表
-  │ 5. dlopen 或 LoadLibrary
-  ▼
-keel_plugin_bootstrap
-  │ 创建 Worker 线程与 256 条收件箱
-  ▼
-Worker 线程首次进入插件运行时
-  │ START
-  │ 构造 @KeelPluginMain 实例
-  │ onLoad → onEnable
-  ▼
-COMPLETE
-  │
-  ▼
-宿主记录 plugin_id，插件进入可服务状态
-```
+<p align="center">
+  <img src="doc/diagrams/plugin-load.zh.svg" alt="组件加载与启动流程" width="100%" />
+</p>
 
 ### 资源与卸载语义
 

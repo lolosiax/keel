@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="doc/logo/keel-icon-solid.svg" width="112" alt="Keel" />
+<img src="doc/logo/keel-icon-hollow.svg" width="112" alt="Keel" />
 
 # Keel
 
@@ -92,46 +92,9 @@ Keel is built around a componentized plug-in model. Components ship as independe
 
 ### Overview
 
-```text
-                          ┌──────────────────────────────────────────────┐
-                          │              keel-launcher                   │
-                          │  single file: host, manifests, libraries,    │
-                          │  and resources                               │
-                          └──────────────────────┬───────────────────────┘
-                                                 │ static link, unpack fallback
-┌────────────────────────────────────────────────▼──────────────────────────────────────────────────┐
-│ keel-host                                                                                         │
-│                                                                                                   │
-│  CLI / console       plugin loader      lifecycle        route table      Ktor CIO                │
-│  ────────────        ─────────────      ─────────        ───────────      ────────                │
-│  argument parsing    .keel scan         START            method + path    single port             │
-│  command dispatch    manifest check     COMPLETE         routeId          middleware              │
-│  graceful shutdown   library extract    SHUTDOWN         plugin owner     access log              │
-│                      resource registry                                                            │
-│                                                                                                   │
-│  Event pump thread                                                                                │
-│  host inbox → log aggregation / event forwarding / request replies / timer wakeup                 │
-└──────────┬────────────────────────────────┬────────────────────────────────┬──────────────────────┘
-           │ C ABI                          │ C ABI                          │ C ABI
-           │ event queue + opaque handles   │                                │
-┌──────────▼───────────────┐   ┌────────────▼─────────────┐   ┌──────────────▼──────────────┐
-│ keel-plugin-hello        │   │ keel-plugin-<id>         │   │ keel-plugin-...             │
-│ own Kotlin/Native runtime│   │ own Kotlin/Native runtime│   │ own Kotlin/Native runtime   │
-│ worker thread            │   │ worker thread            │   │ worker thread               │
-│ inbox capacity 256       │   │ inbox capacity 256       │   │ inbox capacity 256          │
-│ lifecycle / routes /     │   │ lifecycle / routes /     │   │ lifecycle / routes /        │
-│ scheduler                │   │ scheduler                │   │ scheduler                   │
-└──────────────────────────┘   └──────────────────────────┘   └─────────────────────────────┘
-
-Build-time tools
-  moe.lolosia.keel.classpath    resource merge and executable embedding
-  moe.lolosia.keel.plugin       .keel packaging
-  moe.lolosia.keel.abi          C ABI static library injection
-  moe.lolosia.keel.logger       log call-site transformation
-  moe.lolosia.keel.publish      repository registration
-  keel-router-ksp               route table generation
-  keel-plugin-ksp               worker entry generation
-```
+<p align="center">
+  <img src="doc/diagrams/architecture.en.svg" alt="Keel runtime architecture" width="100%" />
+</p>
 
 ### Component responsibilities
 
@@ -186,61 +149,17 @@ The only carrier across a boundary is the C ABI. [`keel_abi.h`](keel-abi/src/nat
 
 ### Request flow
 
-```text
-Client
-  │
-  │ HTTP request
-  ▼
-Ktor CIO single port
-  │ 1. Match method and path
-  │ 2. Capture an HttpRequest snapshot
-  ▼
-Host route table ──────────────► pluginId and routeId
-  │
-  │ 3. Post COMMAND subject=HTTP correlation=N
-  ▼
-Plugin worker thread
-  │ 4. Decode HttpRouteRequest
-  │ 5. Look up the local route table
-  │ 6. Run the handler
-  ▼
-COMPLETE correlation=N + HttpRouteResponse
-  │
-  ▼
-Host event pump ──────────────► resumes the suspended Ktor coroutine
-  │
-  ▼
-Client ◄────────────────────── HTTP response
-```
+<p align="center">
+  <img src="doc/diagrams/request-flow.en.svg" alt="HTTP request flow" width="100%" />
+</p>
 
 The Ktor handler runs in a host coroutine. It does not call the plugin directly. It submits the request through `HostPump.request` and suspends. The pump thread posts the event and returns the reply. A `CompletableDeferred` completes the suspension. `ApplicationCall`, `Continuation`, and all Ktor context remain inside the host runtime.
 
 ### Plugin load flow
 
-```text
-plugins/
-  │ scan *.keel
-  ▼
-PluginLoader
-  │ 1. Read the package plugin.json
-  │ 2. Validate id, abiVersion, entry, and the current target library
-  │ 3. Extract the native library to <cache>/<id>/<version>/
-  │ 4. Register resources/ in the classpath registry
-  │ 5. Call dlopen or LoadLibrary
-  ▼
-keel_plugin_bootstrap
-  │ Create the worker thread and a 256-slot inbox
-  ▼
-Worker thread enters the plugin runtime
-  │ START
-  │ Construct the @KeelPluginMain instance
-  │ onLoad → onEnable
-  ▼
-COMPLETE
-  │
-  ▼
-Host records plugin_id. The plugin is ready to serve.
-```
+<p align="center">
+  <img src="doc/diagrams/plugin-load.en.svg" alt="Component load and startup flow" width="100%" />
+</p>
 
 ### Resource and unload semantics
 
