@@ -13,6 +13,9 @@ import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
+import moe.lolosia.keel.api.host.HostSubjects
+import moe.lolosia.keel.api.host.InvalidateRequest
+import moe.lolosia.keel.api.host.PermissionCatalogReply
 import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
@@ -23,6 +26,9 @@ import moe.lolosia.keel.host.service.HostServices
 
 /** 插件间调用的 Host 侧兜底超时；调用方自己的 3s 超时通常先到。 */
 private const val SERVICE_TIMEOUT_MS = 5000L
+
+/** 业务 subject 从 0x1000 开始；协议 subject 仍由各自的处理器消费。 */
+private const val BUSINESS_SUBJECT_MIN = 0x1000uL
 
 /** 一次 Host → 插件的在途请求；[reply] 由泵线程完成。 */
 internal class HostRequest(
@@ -161,6 +167,12 @@ internal object HostPump {
                     handleServiceCall(snapshotOf(event))
                     return false
                 }
+            }
+
+            // 其余业务 subject 是插件 → Host 的请求；协议 subject 落到下面的告警
+            if (e.subject >= BUSINESS_SUBJECT_MIN) {
+                handleHostRequest(snapshotOf(event))
+                return false
             }
         }
 
@@ -319,6 +331,87 @@ internal object HostPump {
     }
 
     /**
+     * 插件 → Host 的业务请求 / 通知。
+     *
+     * correlation 为 0 视为单向通知（发完即弃）；非 0 回一条同 correlation 的 COMPLETE，
+     * 失败时用 `KeelErrorPayload` 让插件侧重建异常。
+     */
+    private fun handleHostRequest(event: HostEvent) {
+        val oneWay = event.correlation == 0uL
+        val result = runCatching { dispatchHostSubject(event.subject, event.payload) }
+        result.exceptionOrNull()?.let { error ->
+            Log.warn(
+                "Host 请求处理失败（subject=${event.subject}）：${error.message}",
+                tag = "Host",
+            )
+        }
+        if (oneWay) return
+
+        if (result.isSuccess) {
+            pushToPlugin(
+                pluginId = event.source,
+                kind = KEEL_EVENT_COMPLETE.toInt(),
+                subject = event.subject,
+                correlation = event.correlation,
+                payload = result.getOrThrow(),
+            )
+            return
+        }
+
+        val error = result.exceptionOrNull() ?: IllegalStateException("unknown host request error")
+        val payload = Json.encodeToString(
+            KeelErrorPayload(
+                plugin = "host",
+                chain = listOf(
+                    KeelErrorEntry(
+                        type = error::class.simpleName ?: "Throwable",
+                        message = error.message.orEmpty(),
+                    )
+                ),
+            )
+        ).encodeToByteArray()
+        pushToPlugin(
+            pluginId = event.source,
+            kind = KEEL_EVENT_COMPLETE.toInt(),
+            subject = event.subject,
+            correlation = event.correlation,
+            status = KEEL_ERR_FAILED.toInt(),
+            payload = payload,
+        )
+    }
+
+    /** 内置 subject 的实现；后续的 Storage 等加在这里。 */
+    private fun dispatchHostSubject(subject: ULong, payload: ByteArray?): ByteArray =
+        when (subject.toLong()) {
+            HostSubjects.PERMISSION_CATALOG -> ServiceWire.encode(
+                PermissionCatalogReply.serializer(),
+                PermissionCatalogReply(HostPermissionCatalog.snapshot()),
+            )
+
+            HostSubjects.AUTH_INVALIDATE -> {
+                logInvalidate("认证", payload)
+                ByteArray(0)
+            }
+
+            HostSubjects.AUTHZ_INVALIDATE -> {
+                logInvalidate("授权", payload)
+                ByteArray(0)
+            }
+
+            else -> error("Host 没有该 subject 的处理器：$subject")
+        }
+
+    private fun logInvalidate(kind: String, payload: ByteArray?) {
+        val request = payload?.takeIf { it.isNotEmpty() }?.let { bytes ->
+            runCatching { ServiceWire.decode(InvalidateRequest.serializer(), bytes) }.getOrNull()
+        }
+        Log.info(
+            "收到 ${kind}缓存失效通知：userId=${request?.userId ?: "*"} token=${request?.token ?: "*"}",
+            tag = "Host",
+        )
+    }
+
+    /**
      * 处理与当前同步等待无关的事件：日志、注册、插件间调用、其它请求的回包。
      *
      * 运行期 HTTP 线程提交的请求回包可能和启动 / 控制台请求交错，
@@ -354,6 +447,12 @@ internal object HostPump {
                     handleServiceCall(event)
                     return true
                 }
+            }
+
+            // 其余业务 subject 是插件 → Host 的请求；协议 subject 交给 handleSnapshot / 告警
+            if (event.subject >= BUSINESS_SUBJECT_MIN) {
+                handleHostRequest(event)
+                return true
             }
         }
         return handleSnapshot(event)

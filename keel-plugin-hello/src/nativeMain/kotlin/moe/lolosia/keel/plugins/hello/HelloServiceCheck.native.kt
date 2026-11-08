@@ -24,4 +24,11 @@ internal actual fun checkHelloService(context: PluginContext) {
         payload = ServiceWire.encode(serializer<GreetArgs>(), GreetArgs("service-check")),
     )
     Log.info("服务自检：${ServiceWire.decode(serializer<String>(), reply)}")
+
+    // 等服务把 /api/hello/greeting 的权限节点发布给 Host 后，再取一次聚合目录
+    context.scheduler.schedule(250) {
+        val nodes = context.host.permissionCatalog()
+        Log.info("权限目录自检：${nodes.size} 个节点 ${nodes.joinToString { it.node }}")
+        context.host.invalidateAuthorization()
+    }
 }

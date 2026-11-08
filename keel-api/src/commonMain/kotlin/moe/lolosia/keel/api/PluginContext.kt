@@ -3,6 +3,7 @@ package moe.lolosia.keel.api
 import kotlinx.coroutines.*
 import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
+import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
@@ -19,6 +20,13 @@ interface PluginContext {
      * 本插件的元信息，来自 `plugin.json`，由宿主读取后注入。
      */
     val metadata: PluginMetadata
+
+    /**
+     * 插件 → Host 的通道：单向通知与带 correlation 的反向请求。
+     *
+     * 反向请求只能在 Worker 线程调用；等待期间会继续分发其它事件。
+     */
+    val host: HostLink
 
     val server: KeelServer
 

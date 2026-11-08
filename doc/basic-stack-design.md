@@ -54,7 +54,7 @@
 
 ### 1.3 落差（做基础栈之前必须补的）
 
-按阻塞程度排序：
+按阻塞程度排序（第 1 / 2 / 5 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
 
 1. **`keel-router-ksp` 是空处理器** —— 插件写不了注解路由，基础栈的 HTTP 面不存在。
 2. **`ModuleDirectory` / `ServiceCaller` / `@ModuleService` codegen 未实现** —— biz → rbac、第三方 → biz/rbac 的跨插件调用不存在。
@@ -952,7 +952,12 @@ Host 启动
   Host 侧由 `HostServices` 维护 `service id → plugin id` 并转发 `SERVICE_CALL`，停用插件时一并撤销。
   冒烟：`hello` 声明 `@ModuleService("hello")`，`onEnable` 经 `ServiceCaller` 走一次 Host 往返
   （生成的分发器执行），日志出现 `服务自检：hello, service-check`，同时 `/api/hello/greeting` 正常；
-- 其余 7 项待做（Config、反向请求、`ctx.scope`、Host 认证/授权、生命周期、`PluginStorage`）。
+- 第 4 项（插件 → Host 事件与反向请求）已完成：`PluginContext.host`（`HostLink`）提供
+  `post`（单向通知）与 `request`（correlation 配对、3s 超时、Worker 重入事件泵）；
+  Host 内置 `PERMISSION_CATALOG`（返回聚合权限节点）与 `AUTH_INVALIDATE` / `AUTHZ_INVALIDATE`
+  （当前只记录，缓存接入在 M1-6）。冒烟：hello 在定时任务里取权限目录得到 `hello.greeting`，
+  并成功投递一次授权缓存失效通知；
+- 其余 6 项待做（Config、`ctx.scope`、Host 认证/授权、生命周期、`PluginStorage`）。
 
 ### M2 —— rbac 与 biz 落地
 

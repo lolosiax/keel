@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
+import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
@@ -19,6 +20,7 @@ internal class PluginContextImpl(
 ) : PluginContext {
 
     override val server: KeelServer get() = error("KeelServer 尚未实现")
+    override val host: HostLink get() = HostLinkImpl
     override val modules: ModuleDirectory get() = PluginServices
     override val callbacks: CallbackRegistry get() = error("回调尚未实现")
     override val config: Config get() = error("配置尚未实现")
