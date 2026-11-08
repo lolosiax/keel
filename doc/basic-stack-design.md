@@ -54,7 +54,7 @@
 
 ### 1.3 落差（做基础栈之前必须补的）
 
-按阻塞程度排序（第 1 / 2 / 4 / 6 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
+按阻塞程度排序（第 1 / 2 / 3 / 4 / 6 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
 
 1. **`keel-router-ksp` 是空处理器** —— 插件写不了注解路由，基础栈的 HTTP 面不存在。
 2. **`ModuleDirectory` / `ServiceCaller` / `@ModuleService` codegen 未实现** —— biz → rbac、第三方 → biz/rbac 的跨插件调用不存在。
@@ -952,6 +952,14 @@ Host 启动
   Host 侧由 `HostServices` 维护 `service id → plugin id` 并转发 `SERVICE_CALL`，停用插件时一并撤销。
   冒烟：`hello` 声明 `@ModuleService("hello")`，`onEnable` 经 `ServiceCaller` 走一次 Host 往返
   （生成的分发器执行），日志出现 `服务自检：hello, service-check`，同时 `/api/hello/greeting` 正常；
+- 第 3 项（`Config` 运行时）已完成：Host 用 KAML 把 YAML 解析成 `JsonElement`；写入在原始文本上
+  按路径替换标量 / 插入缺失键，保留注释与空行（对象 / 序列整体替换时块内注释会丢失，
+  流式集合、多行标量、锚点 / 别名在写入时直接报错）。文件布局是
+  `<工作目录>/application.yaml` 与 `<工作目录>/config/plugins/<plugin-id>.yaml`；
+  插件经 `HostSubjects.CONFIG_READ` / `CONFIG_WRITE` 访问，`ctx.config` 本地缓存快照、
+  `ctx.server.config` 读主线，写入由 Host 合并后原子落盘并留 `.bak`。
+  冒烟：hello 启动期读到自己的配置、`GET /api/hello/config` 读到主线 `server.name`，
+  `POST` 改写后行尾注释与空行不变、缺失的 `repeat` 键被插入；
 - 第 4 项（插件 → Host 事件与反向请求）已完成：`PluginContext.host`（`HostLink`）提供
   `post`（单向通知）与 `request`（correlation 配对、3s 超时、Worker 重入事件泵）；
   Host 内置 `PERMISSION_CATALOG`（返回聚合权限节点）与 `AUTH_INVALIDATE` / `AUTHZ_INVALIDATE`
@@ -965,7 +973,7 @@ Host 启动
   授权实现时 fail-closed 503；请求期把 `AuthzSnapshot` 并进 `UserSnapshot` 注入 `Context`。
   冒烟（hello 内置桩）：无 token → 401、`guest` → 403、`hello` / `owner` → 200、
   去掉 `provides` 后受保护路由 → 503；
-- 其余 5 项待做（Config、`ctx.scope`、宿主与能力包生命周期、`PluginStorage`）。
+- 其余 4 项待做（`ctx.scope`、宿主与能力包生命周期、`PluginStorage`）。
 
 ### M2 —— rbac 与 biz 落地
 

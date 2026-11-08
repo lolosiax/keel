@@ -5,12 +5,14 @@ import kotlinx.cinterop.pointed
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.host.HostSubjects
@@ -21,6 +23,7 @@ import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.web.RouteRegistration
 import moe.lolosia.keel.host.auth.HostAuth
+import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
@@ -339,7 +342,7 @@ internal object HostPump {
      */
     private fun handleHostRequest(event: HostEvent) {
         val oneWay = event.correlation == 0uL
-        val result = runCatching { dispatchHostSubject(event.subject, event.payload) }
+        val result = runCatching { dispatchHostSubject(event.source, event.subject, event.payload) }
         result.exceptionOrNull()?.let { error ->
             Log.warn(
                 "Host 请求处理失败（subject=${event.subject}）：${error.message}",
@@ -382,12 +385,22 @@ internal object HostPump {
     }
 
     /** 内置 subject 的实现；后续的 Storage 等加在这里。 */
-    private fun dispatchHostSubject(subject: ULong, payload: ByteArray?): ByteArray =
+    private fun dispatchHostSubject(source: ULong, subject: ULong, payload: ByteArray?): ByteArray =
         when (subject.toLong()) {
             HostSubjects.PERMISSION_CATALOG -> ServiceWire.encode(
                 PermissionCatalogReply.serializer(),
                 PermissionCatalogReply(HostPermissionCatalog.snapshot()),
             )
+
+            HostSubjects.CONFIG_READ -> {
+                val request = decodePayload(ConfigReadRequest.serializer(), payload, "配置读取")
+                ServiceWire.encode(ConfigReadReply.serializer(), HostConfigs.read(source, request))
+            }
+
+            HostSubjects.CONFIG_WRITE -> {
+                val request = decodePayload(ConfigWriteRequest.serializer(), payload, "配置写入")
+                ServiceWire.encode(ConfigDocReply.serializer(), HostConfigs.write(source, request))
+            }
 
             HostSubjects.AUTH_INVALIDATE -> {
                 val request = decodeInvalidate(payload)
@@ -403,6 +416,16 @@ internal object HostPump {
 
             else -> error("Host 没有该 subject 的处理器：$subject")
         }
+
+    /** 解码业务请求载荷；缺失或格式错误时抛带上下文的异常，由错误信封回给插件。 */
+    private fun <T> decodePayload(serializer: KSerializer<T>, payload: ByteArray?, what: String): T {
+        val bytes = payload ?: throw IllegalArgumentException("$what 缺少载荷")
+        return try {
+            ServiceWire.decode(serializer, bytes)
+        } catch (e: Throwable) {
+            throw IllegalArgumentException("$what 载荷无法解码：${e.message}", e)
+        }
+    }
 
     /** 失效通知解不出来时按「全部失效」处理，宁可多查一次也不能留下旧权限。 */
     private fun decodeInvalidate(payload: ByteArray?): InvalidateRequest? =

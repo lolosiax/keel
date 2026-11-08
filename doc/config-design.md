@@ -131,12 +131,14 @@ ctx.server.config.save()                              // 触发 Host 落盘
 
 ### 4.1 跨运行时
 
-- 插件 `onLoad` 时，Host 把该插件的 YAML 子树转成 **CBOR** 发给插件；插件用
-  `Cbor.decodeFromByteArray(serializer<T>(), bytes)` 本地解码，**不在插件里引入 KAML**。
-- 插件自己的配置：读取走本地快照，零往返；写入发 `CONFIG_WRITE { scope=plugin, path, cbor }`。
+- 插件第一次 `read` 时向 Host 请求整棵文档（`CONFIG_READ { scope, path="" }`），在本地缓存快照；
+  之后读取零往返。**不在插件里引入 KAML**。
+- 事件信封是 CBOR，但树本身以 **JSON 文本**传输：`JsonElement` 的序列化器只接受 JSON 编码器，
+  不能直接塞进 CBOR。插件侧拿到文本后用 `Json.parseToJsonElement` 还原再解码。
+- 插件自己的配置：读取走本地快照；写入发 `CONFIG_WRITE { scope=plugin, path, value(JSON) }`。
 - 主线配置：读取发 `CONFIG_READ { scope=main, path }`，写入发
-  `CONFIG_WRITE { scope=main, path, cbor }`，都由 Host 在配置线程上处理。
-- `save` / `reload` 同样是事件；`reload` 后 Host 推一份新快照（仅插件自己的配置）。
+  `CONFIG_WRITE { scope=main, path, value(JSON) }`，都由 Host 在事件泵线程上处理。
+- `save` 是空操作（Host 每次写入都已原子落盘）；`reload` 重新发一次 `CONFIG_READ`。
 - 注释和原始文本**永远不出 Host**。
 
 ---
@@ -220,8 +222,12 @@ Host 写入成功后发布 `ConfigChanged(pluginId, path)` 事件：
 
 - Host 侧 `YamlDocument`：KAML 读 + 标量替换 + 缺失键插入；
 - `application.yaml` + 每插件 `config/plugins/<id>.yaml`；
-- `Config` API + 插件快照（CBOR）+ 写入事件；
+- `Config` API + 插件快照（事件承载）+ 写入事件；
 - 验收：改一个已有键、加一个新键，注释与空行不变。
+
+**DEMO 落地状态**：已完成。工作目录取 Host 启动参数里的缓存目录；KAML 只在 Host 侧引入。
+写入为原子替换并保留 `.bak`；插件首次读取时拉取整棵文档做本地快照。
+流式集合、多行标量、锚点 / 别名在写入时抛明确错误。
 
 ### P0
 

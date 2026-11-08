@@ -110,6 +110,8 @@ kotlin {
             // Host 独占 HTTP 引擎；插件不依赖 Ktor
             implementation(libs.ktor.server.core)
             implementation(libs.ktor.server.cio)
+            // YAML 只在 Host 侧解析；写回用原文本编辑，插件不依赖 KAML
+            implementation(libs.kaml)
         }
     }
 }

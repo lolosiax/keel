@@ -7,6 +7,7 @@ import moe.lolosia.keel.api.TaskHandle
 import moe.lolosia.keel.api.annotation.KeelPluginMain
 import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.command.*
+import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.web.HttpResponse
 import moe.lolosia.keel.api.web.ResponseBody
 import moe.lolosia.keel.api.web.RouteDescriptor
@@ -57,8 +58,15 @@ class HelloPlugin : Plugin {
         Log.info("enabled")
         logLevelSamples()
         scheduleSamples()
+        checkConfig()
         checkDatabase()
         checkService()
+    }
+
+    /** 配置自检：启动期（Host 还在等 START 的 COMPLETE）就要能读到自己的配置。 */
+    private fun checkConfig() {
+        val config = context.config.read<HelloConfig>()
+        Log.info("配置自检：greeting=${config.greeting} repeat=${config.repeat}")
     }
 
     /** `plugin.json` 声明了 `provides: ["authn"]`，Host 会用它解析 Bearer token。 */

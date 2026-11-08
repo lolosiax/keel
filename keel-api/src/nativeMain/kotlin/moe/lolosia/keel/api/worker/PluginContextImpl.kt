@@ -12,18 +12,22 @@ import moe.lolosia.keel.classpath.*
 /**
  * 插件上下文的最小实现。
  *
- * 当前只提供元信息、日志、调度器与空 classpath；其余能力在对应运行时接入前访问会直接报错。
+ * 当前提供元信息、日志、调度器、配置与空 classpath；其余能力在对应运行时接入前访问会直接报错。
  */
 internal class PluginContextImpl(
     override val metadata: PluginMetadata,
     override val logger: PluginLogger,
 ) : PluginContext {
 
-    override val server: KeelServer get() = error("KeelServer 尚未实现")
+    override val server: KeelServer by lazy {
+        PluginServer(PluginConfig(host, ConfigScope.MAIN))
+    }
     override val host: HostLink get() = HostLinkImpl
     override val modules: ModuleDirectory get() = PluginServices
     override val callbacks: CallbackRegistry get() = error("回调尚未实现")
-    override val config: Config get() = error("配置尚未实现")
+    override val config: Config by lazy {
+        PluginConfig(host, ConfigScope.PLUGIN)
+    }
     override val classpath: Classpath = EmptyClasspath
     override val routes: Routes get() = PluginRoutes
     override val scheduler: Scheduler get() = WorkerScheduler

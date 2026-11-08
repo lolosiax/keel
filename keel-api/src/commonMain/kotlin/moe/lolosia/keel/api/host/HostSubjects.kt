@@ -16,4 +16,10 @@ object HostSubjects {
 
     /** 通知：授权缓存失效，载荷是 CBOR 的 [InvalidateRequest]。 */
     const val AUTHZ_INVALIDATE: Long = 0x1003L
+
+    /** 请求：读取配置；载荷 / 应答见 `ConfigReadRequest` / `ConfigReadReply`。 */
+    const val CONFIG_READ: Long = 0x1004L
+
+    /** 请求：写入配置（合并后落盘）；载荷 / 应答见 `ConfigWriteRequest` / `ConfigDocReply`。 */
+    const val CONFIG_WRITE: Long = 0x1005L
 }

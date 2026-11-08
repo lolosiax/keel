@@ -6,6 +6,7 @@ import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.capability.DatabaseSettings
 import moe.lolosia.keel.host.capability.HostCapabilities
 import moe.lolosia.keel.host.classpath.HostClasspath
+import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
@@ -51,6 +52,7 @@ internal object HostPlugins {
         directory = pluginsDir
         loader = PluginLoader(host, cacheDir)
         HostCapabilities.init(cacheDir)
+        HostConfigs.init(cacheDir)
     }
 
     fun list(): List<Entry> = entries.toList()
@@ -192,6 +194,8 @@ internal object HostPlugins {
             Log.warn("start failed: ${manifest.id}: $conflict", tag = "Loader")
             return false
         }
+        // 配置文件名取自 manifest id；必须在 onLoad 之前登记
+        HostConfigs.register(entry.pluginId, manifest.id)
         return try {
             PluginNames.register(entry.pluginId, entry.displayName)
             val runtime = startPlugin(entry.loaded, entry.pluginId)
@@ -207,6 +211,7 @@ internal object HostPlugins {
             HostPermissionCatalog.remove(entry.pluginId)
             HostServices.remove(entry.pluginId)
             HostAuth.release(entry.pluginId)
+            HostConfigs.release(entry.pluginId)
             Log.warn("start failed: ${manifest.id}: ${e.message}", tag = "Loader")
             false
         }
@@ -219,6 +224,7 @@ internal object HostPlugins {
         HostPermissionCatalog.remove(entry.pluginId)
         HostServices.remove(entry.pluginId)
         HostAuth.release(entry.pluginId)
+        HostConfigs.release(entry.pluginId)
         HostPump.dropPlugin(entry.pluginId)
     }
 

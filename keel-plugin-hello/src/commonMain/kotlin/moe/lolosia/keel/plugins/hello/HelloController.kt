@@ -1,6 +1,7 @@
 package moe.lolosia.keel.plugins.hello
 
 import kotlinx.serialization.Serializable
+import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -38,4 +39,21 @@ object HelloController {
     /** `GET /api/hello/plain`：字符串返回值按 `text/plain` 原样输出，不包信封。 */
     @GET("/plain")
     fun plain(): String = "plain ok"
+
+    /** `GET /api/hello/config`：读插件私有配置，验证本地快照与启动期读取。 */
+    @GET("/config")
+    fun config(ctx: Context): Greeting {
+        val config = ctx.config.read<HelloConfig>()
+        // 主线配置经 ctx.server.config 向 Host 取，不缓存写副本
+        val serverName = ctx.server.config.read<String>("server.name")
+        return Greeting(config.greeting, ctx.userId, "repeat=${config.repeat} server=$serverName")
+    }
+
+    /** `POST /api/hello/config`：写入插件私有配置，Host 合并后保留 YAML 注释。 */
+    @POST("/config")
+    fun writeConfig(ctx: Context, @Body body: Echo): Greeting {
+        ctx.config.write(HelloConfig(greeting = body.text, repeat = body.text.length))
+        val saved = ctx.config.read<HelloConfig>()
+        return Greeting(saved.greeting, ctx.userId, "repeat=${saved.repeat}")
+    }
 }
