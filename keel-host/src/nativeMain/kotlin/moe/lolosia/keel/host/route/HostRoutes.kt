@@ -1,5 +1,6 @@
 package moe.lolosia.keel.host.route
 
+import kotlin.concurrent.Volatile
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.web.RouteDescriptor
 
@@ -13,26 +14,38 @@ internal class RouteMatch(
 /**
  * Host 侧路由表。
  *
- * 注册发生在启动阶段（泵线程），HTTP 开始服务后表不再变化，因此读侧无需加锁。
- * 若以后支持热注册 / 注销，必须改成不可变快照或加同步。
+ * 写入只发生在泵线程（启动注册、控制台启停 / 卸载），读取发生在 Ktor 线程，
+ * 因此表本身是不可变快照：每次变更新建一份列表再原子替换，读者只取一次引用。
+ * 单项 [Entry] 与其 [RouteDescriptor] 都不可变，快照内不需要额外同步。
  */
 internal object HostRoutes {
 
     private class Entry(val pluginId: ULong, val descriptor: RouteDescriptor)
 
-    private val entries = mutableListOf<Entry>()
+    @Volatile
+    private var entries: List<Entry> = emptyList()
 
     fun register(pluginId: ULong, descriptors: List<RouteDescriptor>) {
-        entries.removeAll { it.pluginId == pluginId }
-        entries += descriptors.map { Entry(pluginId, it) }
+        entries = entries.filterNot { it.pluginId == pluginId } +
+            descriptors.map { Entry(pluginId, it) }
         Log.info("registered ${descriptors.size} route(s) for plugin $pluginId", tag = "Router")
+    }
+
+    /** 插件停用 / 卸载时清掉它的全部路由。 */
+    fun remove(pluginId: ULong) {
+        val snapshot = entries
+        val next = snapshot.filterNot { it.pluginId == pluginId }
+        if (next.size == snapshot.size) return
+        entries = next
+        Log.info("unregistered ${snapshot.size - next.size} route(s) for plugin $pluginId", tag = "Router")
     }
 
     /** 线性匹配：精确段 > `{name}` 段；DEMO 规模足够。 */
     fun match(method: String, path: String): RouteMatch? {
+        val snapshot = entries
         val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
 
-        entries.forEach entryLoop@ { entry ->
+        snapshot.forEach entryLoop@ { entry ->
             if (!entry.descriptor.method.equals(method, ignoreCase = true)) return@entryLoop
 
             val pattern = entry.descriptor.path.trim('/').split('/').filter { it.isNotEmpty() }

@@ -328,6 +328,7 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
   auth/Authorizer.kt
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
+  command/     Command / CommandSender / ConsoleCommandRequest / ConsoleCommandResult
   config/      Config / package.kt
   event/       Event / EventBus / EventHandler / EventPriority / EventType / Subscription
   messaging/   Message / Messenger
@@ -341,10 +342,12 @@ keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声
 keel-host/src/commonMain/…/host/HostLogSink.kt        Host 日志出口（本地时间戳 + 调用点模块列）
 keel-host/src/commonMain/…/host/Banner.kt             启动横幅
 keel-host/src/commonMain/…/host/AnsiSupport.kt        ANSI 检测（expect）+ mingw/linux actual
+keel-host/src/commonMain/…/host/ConsoleOut.kt         日志行前后的控制台钩子（expect），native 侧接 ConsolePrompt
 keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 实现）
 keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
+keel-host/src/nativeMain/…/host/console/              HostConsole / ConsolePrompt / ConsoleCommand / HelpCommand / StopCommand / PluginsCommand
 keel-host/src/nativeMain/…/host/plugin/
-  PluginLoader / LoadedPlugin / PluginRuntime / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
+  PluginLoader / LoadedPlugin / PluginRuntime / HostPlugins / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
   LogEvent / HostPump / PluginNames（日志解码与 Host 收件箱消费）
   NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / package.native.kt
 keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs / package actual
@@ -352,7 +355,7 @@ keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
 keel-abi/src/nativeCpp/
   keel_abi.h                          唯一 ABI 布局来源（不透明句柄 + KEEL_CINTEROP 占位分支）
   keel_platform.h                     线程 / 同步原语（不导出、不进 Kotlin）
-  keel_queue.c / keel_event.c / keel_plugin.c
+  keel_queue.c / keel_event.c / keel_plugin.c / keel_console.c
 keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（当前占位）
 keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin

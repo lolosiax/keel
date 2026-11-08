@@ -169,6 +169,26 @@ internal object HostPump {
         return true
     }
 
+    /**
+     * 处理与当前同步等待无关的事件：日志、路由注册、其它请求的 COMPLETE。
+     *
+     * 运行期 HTTP 线程提交的请求回包可能和启动 / 控制台请求交错，
+     * 同步等待循环必须把它们交给这里；漏掉会丢回包，表现为请求超时。
+     *
+     * @return true 表示事件已被消费
+     */
+    fun handleAsync(event: HostEvent): Boolean {
+        if (event.kind == KEEL_EVENT_LOG.toInt()) {
+            handleLogEvent(event)
+            return true
+        }
+        if (event.kind == KEEL_EVENT_COMPLETE.toInt()) {
+            pending.remove(event.correlation)?.reply?.complete(event)
+            return true
+        }
+        return handleSnapshot(event)
+    }
+
     private fun dispatchIncoming() {
         while (true) {
             val request = incoming.tryReceive().getOrNull() ?: break
@@ -206,33 +226,49 @@ internal object HostPump {
     private fun nowMs(): Long = clock.elapsedNow().inWholeMilliseconds
 
     /**
-     * Host 向插件发起一次同步请求：投 COMMAND，等同 correlation 的 COMPLETE。
+     * Host 向插件发起一次同步请求，返回完整回包。
      *
-     * 只在启动阶段（单线程、还没进入 serve 循环）使用；运行期请用 [request]。
+     * 只在启动阶段或控制台（都在主线程 / 泵线程上）使用；运行期请用 [request]。
      *
-     * @return true 表示插件回了 `KEEL_OK`
+     * @return null 表示超时、目标不在线或队列拒收
      */
-    fun requestPlugin(pluginId: ULong, subject: ULong, timeoutMs: UInt = 2000u): Boolean {
+    fun requestPluginEvent(
+        pluginId: ULong,
+        subject: ULong,
+        payload: ByteArray? = null,
+        timeoutMs: UInt = 2000u,
+    ): HostEvent? {
         val correlation = nextCorrelation()
-        if (!pushToPlugin(pluginId, KEEL_EVENT_COMMAND.toInt(), subject, correlation)) {
-            return false
+        if (!pushToPlugin(
+                pluginId = pluginId,
+                kind = KEEL_EVENT_COMMAND.toInt(),
+                subject = subject,
+                correlation = correlation,
+                payload = payload,
+            )
+        ) {
+            return null
         }
 
         val mark = TimeSource.Monotonic.markNow()
         val timeout = timeoutMs.toLong().milliseconds
         while (true) {
             val remaining = timeout - mark.elapsedNow()
-            if (remaining <= 0.milliseconds) return false
+            if (remaining <= 0.milliseconds) return null
 
-            val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: return false
-            when {
-                event.kind == KEEL_EVENT_LOG.toInt() -> handleLogEvent(event)
-                event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation ->
-                    return event.status == KEEL_OK.toInt()
-
-                handleSnapshot(event) -> Unit
-                else -> warnOnce("kind=${event.kind}->${event.target}", "请求期间收到无关事件")
-            }
+            val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: return null
+            // 先认自己的回包，再交给通用处理（否则会被 handleAsync 当成其它请求的回包吞掉）
+            if (event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation) return event
+            if (handleAsync(event)) continue
+            warnOnce("kind=${event.kind}->${event.target}", "请求期间收到无关事件")
         }
     }
+
+    /**
+     * 只关心成功与否的同步请求；内部复用 [requestPluginEvent]。
+     *
+     * @return true 表示插件回了 `KEEL_OK`
+     */
+    fun requestPlugin(pluginId: ULong, subject: ULong, timeoutMs: UInt = 2000u): Boolean =
+        requestPluginEvent(pluginId, subject, null, timeoutMs)?.status == KEEL_OK.toInt()
 }

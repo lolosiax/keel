@@ -9,6 +9,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.util.AttributeKey
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -152,6 +153,8 @@ internal object HostHttp {
             }
         }
         server.start(wait = false)
+        // 等连接器真正绑定：Ktor 的「Responding at」在绑定后输出，启动完成日志要排在它之后
+        runBlocking { server.engine.resolvedConnectors() }
         engine = server
         Log.info("http listening on 0.0.0.0:$port", tag = "Http")
     }

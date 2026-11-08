@@ -32,7 +32,9 @@ object HostLogSink : LogSink {
             color = useColor,
             printedAt = site?.traceLocation(),
         )
+        consoleOutBegin()
         println(console)
+        consoleOutEnd()
         appendLogFile(
             if (useColor) {
                 LogLineFormatter.format(
@@ -74,7 +76,9 @@ object HostLogSink : LogSink {
             sourceAnsi = if (useColor) sourceAnsi else null,
             printedAt = site?.traceLocation(),
         )
+        consoleOutBegin()
         println(console)
+        consoleOutEnd()
         appendLogFile(
             if (useColor) {
                 LogLineFormatter.format(

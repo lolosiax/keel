@@ -106,17 +106,14 @@ private fun awaitComplete(manifest: KeelPackageManifest, correlation: ULong, tim
         if (remaining <= 0.milliseconds) break
 
         val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: break
-        if (event.kind == KEEL_EVENT_LOG.toInt()) {
-            handleLogEvent(event)
-            continue
+        // 先认本次启动的回包，再交给通用处理（日志 / 路由 / 其它请求的回包）
+        if (event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation) {
+            if (event.status != KEEL_OK.toInt()) {
+                throw IllegalStateException("${manifest.id} 启动失败：status=${event.status}")
+            }
+            return
         }
-        if (HostPump.handleSnapshot(event)) continue
-        if (event.kind != KEEL_EVENT_COMPLETE.toInt()) continue
-        if (event.correlation != correlation) continue
-        if (event.status != KEEL_OK.toInt()) {
-            throw IllegalStateException("${manifest.id} 启动失败：status=${event.status}")
-        }
-        return
+        if (HostPump.handleAsync(event)) continue
     }
     throw IllegalStateException("${manifest.id} 启动超时（${timeoutMs}ms 内没有 COMPLETE）")
 }

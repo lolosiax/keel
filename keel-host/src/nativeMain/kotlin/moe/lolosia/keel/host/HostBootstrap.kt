@@ -1,5 +1,6 @@
 package moe.lolosia.keel.host
 
+import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.KEEL_ABI_VERSION
 import moe.lolosia.keel.abi.c.keel_install_shutdown_hook
 import moe.lolosia.keel.api.Log
@@ -12,6 +13,30 @@ import moe.lolosia.keel.host.plugin.currentTargetName
  * 对应 Paper 的 bootstrap 行；插件数量与单个插件的状态仍由 Loader 输出。
  */
 internal object HostBootstrap {
+
+    /** 对象在打印横幅时初始化；运行期就绪后用它计算启动耗时。 */
+    private val startedAt = TimeSource.Monotonic.markNow()
+
+    private var startupLogged = false
+
+    /**
+     * 打印一次启动完成。
+     *
+     * 由 `HostRuntime` 在插件启动、HTTP 连接绑定与控制台就绪之后调用。
+     */
+    fun logStartupComplete() {
+        if (startupLogged) return
+        startupLogged = true
+        Log.info("Keel 在 ${elapsedText()} 内完成启动", tag = "Server")
+    }
+
+    /** 不足一秒按毫秒取整，否则保留两位小数秒。 */
+    private fun elapsedText(): String {
+        val millis = startedAt.elapsedNow().inWholeMilliseconds
+        if (millis < 1000) return "${millis}ms"
+        val fraction = (millis % 1000) / 10
+        return "${millis / 1000}.${if (fraction < 10) "0$fraction" else "$fraction"}s"
+    }
 
     /**
      * 尽早安装退出钩子：插件扫描/启动阶段按下 Ctrl+C 也只会置位，

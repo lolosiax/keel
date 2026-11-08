@@ -93,6 +93,14 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_WAKE 6u
 
 /*
+ * 控制台命令：Host 把终端输入的一行拆成 label + args（JSON，ConsoleCommandRequest）
+ * 投给插件；插件用 Plugin.onCommand 决定是否接管，回 ConsoleCommandResult。
+ *
+ * 与 HTTP 一样是请求 / 应答：插件必须回 COMPLETE，handled = false 表示交给下一个插件。
+ */
+#define KEEL_SUBJECT_CONSOLE 7u
+
+/*
  * 不透明队列句柄。
  *
  * C 实现侧只看到前向声明，真正的布局在 keel_queue.c 里。
@@ -291,6 +299,26 @@ void keel_install_shutdown_hook(void);
 
 /* @return 1 表示已收到中断请求 */
 int keel_shutdown_requested(void);
+
+/*
+ * 控制台输入：C 线程读 stdin，整行写进环形缓冲；Kotlin 主循环用 poll 非阻塞取行。
+ *
+ * 读线程只做 C 侧操作（fgets / ReadConsoleW），不进入 Kotlin 运行时，
+ * 因此不需要把 stdin 交给协程线程池，也不会和事件泵争用线程。
+ *
+ * @return 1 表示 stdin 是交互式终端（Host 据此打印 `> ` 提示符）；
+ *         0 表示管道 / 重定向，仍然会启动读线程，但不该往 stdout 混提示符
+ */
+int keel_console_start(void);
+
+/*
+ * 取一行（已去掉行尾 CR / LF）。
+ *
+ * @param buf      输出缓冲，UTF-8，自动补 '\0'
+ * @param capacity 缓冲容量；超长行按容量截断
+ * @return 复制到的字节数；0 表示当前没有输入（或读线程已结束）
+ */
+int keel_console_poll(char *buf, uint32_t capacity);
 
 /*
  * 按日切割的文本日志。

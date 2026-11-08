@@ -109,6 +109,7 @@ private fun dispatchEvent(e: KeelEvent) {
             KEEL_SUBJECT_PING.toULong() -> replyComplete(e, KEEL_OK.toInt())
             KEEL_SUBJECT_TIMER.toULong() -> WorkerScheduler.tick()
             KEEL_SUBJECT_HTTP.toULong() -> handleHttp(e)
+            KEEL_SUBJECT_CONSOLE.toULong() -> PluginConsole.handle(e)
             else -> warnOnce(kind)
         }
 
@@ -175,7 +176,7 @@ private fun handleHttp(event: KeelEvent) {
 }
 
 /** 回一条带载荷的 COMPLETE；载荷用本二进制的 CRT 分配。 */
-private fun replyCompleteWithPayload(
+internal fun replyCompleteWithPayload(
     request: KeelEvent,
     payload: ByteArray,
     status: Int = KEEL_OK.toInt(),

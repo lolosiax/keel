@@ -5,6 +5,7 @@ import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.TaskHandle
 import moe.lolosia.keel.api.annotation.KeelPluginMain
+import moe.lolosia.keel.api.command.*
 import moe.lolosia.keel.api.web.HttpResponse
 import moe.lolosia.keel.api.web.ResponseBody
 import moe.lolosia.keel.api.web.RouteDescriptor
@@ -83,5 +84,18 @@ class HelloPlugin : Plugin {
 
     override fun onDisable() {
         Log.info("disabled")
+    }
+
+    /** 控制台命令自检：`hello [任意参数]`；不认识的 label 必须返回 false。 */
+    override fun onCommand(
+        sender: CommandSender,
+        command: Command,
+        label: String,
+        args: List<String>,
+    ): Boolean {
+        if (label != "hello") return false
+        sender.sendMessage("hello from keel plugin")
+        sender.sendMessage("label=$label args=${args.joinToString(" ")}")
+        return true
     }
 }

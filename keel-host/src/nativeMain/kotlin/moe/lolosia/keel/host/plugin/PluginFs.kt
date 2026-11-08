@@ -5,12 +5,14 @@ import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
 import platform.posix.fclose
 import platform.posix.fopen
+import platform.posix.fread
 import platform.posix.fwrite
+import platform.posix.remove
 
 /**
- * Host 侧最小文件读写，只覆盖插件加载需要的场景。
+ * Host 侧最小文件读写，只覆盖插件加载 / 安装需要的场景。
  *
- * 故意不引入通用 IO 抽象：这里只有「查大小 / 覆盖写」两个动作，
+ * 故意不引入通用 IO 抽象：这里只有「查大小 / 覆盖写 / 整读 / 删除」四个动作，
  * 配置落盘、日志等其它需求应各自处理。
  */
 internal object PluginFs {
@@ -29,6 +31,37 @@ internal object PluginFs {
             fclose(file)
         }
     }
+
+    /** 整读一个文件；不存在或不可读时抛 [IllegalArgumentException]。 */
+    @OptIn(ExperimentalForeignApi::class)
+    fun readBytes(path: String): ByteArray {
+        val file = fopen(path, "rb") ?: throw IllegalArgumentException("无法读取文件：$path")
+        try {
+            val chunks = mutableListOf<ByteArray>()
+            var total = 0
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = buffer.usePinned { pinned ->
+                    fread(pinned.addressOf(0), 1uL, buffer.size.toULong(), file).toInt()
+                }
+                if (read <= 0) break
+                chunks += buffer.copyOf(read)
+                total += read
+            }
+            val result = ByteArray(total)
+            var offset = 0
+            for (chunk in chunks) {
+                chunk.copyInto(result, offset)
+                offset += chunk.size
+            }
+            return result
+        } finally {
+            fclose(file)
+        }
+    }
+
+    /** 删除文件；返回 false 表示失败（不存在、被占用或无权限）。 */
+    fun delete(path: String): Boolean = remove(path) == 0
 }
 
 /**
