@@ -54,7 +54,7 @@
 
 ### 1.3 落差（做基础栈之前必须补的）
 
-按阻塞程度排序（第 1 / 2 / 3 / 4 / 6 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
+按阻塞程度排序（第 1 / 2 / 3 / 4 / 5 / 6 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
 
 1. **`keel-router-ksp` 是空处理器** —— 插件写不了注解路由，基础栈的 HTTP 面不存在。
 2. **`ModuleDirectory` / `ServiceCaller` / `@ModuleService` codegen 未实现** —— biz → rbac、第三方 → biz/rbac 的跨插件调用不存在。
@@ -965,6 +965,10 @@ Host 启动
   Host 内置 `PERMISSION_CATALOG`（返回聚合权限节点）与 `AUTH_INVALIDATE` / `AUTHZ_INVALIDATE`
   （清认证 / 授权缓存）。冒烟：hello 在定时任务里取权限目录得到 `hello.greeting`，
   并成功投递一次授权缓存失效通知；
+- 第 5 项（`ctx.scope`）已完成：`WorkerScope` 每个插件一个 `SupervisorJob`，启动时重置、停用时取消；
+  `WorkerDispatcher` 把续体放进 `WorkerScheduler` 的队列，由下一次 TIMER 事件在 Worker 线程上排空，
+  `delay` / `withTimeout` 也走同一条定时器（自定义 `Delay` 目前只能 opt-in internal API）。
+  冒烟：hello 在 `onEnable` 里 `launch { delay(60) }`，启动与恢复日志都出现在 Worker 线程上；
 - 第 6 项（Host 认证 / 授权中间件）已完成：`plugin.json` 的 `provides: ["authn"]` / `["authz"]`
   在启用时登记为 SPI 提供者（同一 SPI 冲突则拒绝启用）；Host 经 `HostPump.request` 以 CBOR 请求
   `KEEL_SUBJECT_AUTHN` / `KEEL_SUBJECT_AUTHZ`，插件侧由 `Plugin.authenticator()` / `authorizer()`
@@ -973,7 +977,7 @@ Host 启动
   授权实现时 fail-closed 503；请求期把 `AuthzSnapshot` 并进 `UserSnapshot` 注入 `Context`。
   冒烟（hello 内置桩）：无 token → 401、`guest` → 403、`hello` / `owner` → 200、
   去掉 `provides` 后受保护路由 → 503；
-- 其余 4 项待做（`ctx.scope`、宿主与能力包生命周期、`PluginStorage`）。
+- 其余 3 项待做（宿主与能力包生命周期、`PluginStorage`）。
 
 ### M2 —— rbac 与 biz 落地
 

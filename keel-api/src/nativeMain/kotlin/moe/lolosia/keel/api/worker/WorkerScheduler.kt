@@ -6,6 +6,9 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.Scheduler
 import moe.lolosia.keel.api.TaskHandle
 
+/** 一轮 TIMER 最多执行的协程续体数。 */
+private const val MAX_PENDING_PER_TICK = 1000
+
 /**
  * 绑定在插件 Worker 线程上的调度器。
  *
@@ -32,11 +35,21 @@ internal object WorkerScheduler : Scheduler {
     private var origin = TimeSource.Monotonic.markNow()
     private val jobs = mutableListOf<Job>()
 
-    /** 插件启动 / 关闭时清空任务表与 C 侧定时。 */
+    /** 协程续体：由 [dispatch] 入队，[tick] 在 Worker 线程上排空。 */
+    private val pending = ArrayDeque<() -> Unit>()
+
+    /** 插件启动 / 关闭时清空任务表、协程队列与 C 侧定时。 */
     fun reset() {
         origin = TimeSource.Monotonic.markNow()
         jobs.clear()
+        pending.clear()
         keel_plugin_set_wakeup(-1L)
+    }
+
+    /** 从 [WorkerDispatcher] 投一个协程续体；下一次 TIMER 事件执行。 */
+    fun dispatch(task: () -> Unit) {
+        pending.addLast(task)
+        arm()
     }
 
     override fun schedule(delayMillis: Long, periodMillis: Long, task: () -> Unit): TaskHandle {
@@ -50,8 +63,9 @@ internal object WorkerScheduler : Scheduler {
         return job
     }
 
-    /** 泵线程的 TIMER 事件入口：跑到期任务并重新定时。 */
+    /** 泵线程的 TIMER 事件入口：先排空协程续体，再跑到期任务并重新定时。 */
     fun tick() {
+        runPending()
         val now = nowMs()
         jobs.toList().forEach { job ->
             if (job.cancelled || job.nextAt > now) return@forEach
@@ -79,7 +93,25 @@ internal object WorkerScheduler : Scheduler {
         return if (next <= now) now + period else next
     }
 
+    /** 一轮最多执行这么多续体，避免一个死循环的协程把事件泵卡住。 */
+    private fun runPending() {
+        var budget = MAX_PENDING_PER_TICK
+        while (pending.isNotEmpty() && budget-- > 0) {
+            val task = pending.removeFirst()
+            try {
+                task()
+            } catch (e: Throwable) {
+                Log.error("协程任务失败", cause = e)
+            }
+        }
+    }
+
     private fun arm() {
+        // 有待执行的续体就立刻要一次 TIMER，不必等定时任务
+        if (pending.isNotEmpty()) {
+            keel_plugin_set_wakeup(0L)
+            return
+        }
         val nearest = jobs.asSequence().filterNot { it.cancelled }.minOfOrNull { it.nextAt }
         if (nearest == null) {
             keel_plugin_set_wakeup(-1L)

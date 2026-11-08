@@ -1,5 +1,6 @@
 package moe.lolosia.keel.plugins.hello
 
+import kotlinx.coroutines.*
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
@@ -58,9 +59,19 @@ class HelloPlugin : Plugin {
         Log.info("enabled")
         logLevelSamples()
         scheduleSamples()
+        checkScope()
         checkConfig()
         checkDatabase()
         checkService()
+    }
+
+    /** 协程自检：`ctx.scope` 绑定在 Worker 线程上，`delay` 由插件定时器驱动。 */
+    private fun checkScope() {
+        context.scope.launch {
+            Log.info("协程自检：启动")
+            delay(60)
+            Log.info("协程自检：delay 后在 Worker 线程恢复")
+        }
     }
 
     /** 配置自检：启动期（Host 还在等 START 的 COMPLETE）就要能读到自己的配置。 */

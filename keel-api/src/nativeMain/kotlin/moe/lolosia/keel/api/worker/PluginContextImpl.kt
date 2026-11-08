@@ -31,5 +31,5 @@ internal class PluginContextImpl(
     override val classpath: Classpath = EmptyClasspath
     override val routes: Routes get() = PluginRoutes
     override val scheduler: Scheduler get() = WorkerScheduler
-    override val scope: CoroutineScope get() = error("协程作用域尚未实现")
+    override val scope: CoroutineScope get() = WorkerScope
 }

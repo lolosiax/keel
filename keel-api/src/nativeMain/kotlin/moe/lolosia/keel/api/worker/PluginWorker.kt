@@ -69,6 +69,7 @@ object PluginWorker {
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
         WorkerScheduler.reset()
+        WorkerScope.reset()
         val metadata = PluginMetadata(
             id = pluginId.toString(),
             name = "",
@@ -118,6 +119,7 @@ object PluginWorker {
         PluginRoutes.reset()
         PluginServices.reset()
         WorkerScheduler.reset()
+        WorkerScope.reset()
     }
 }
 
