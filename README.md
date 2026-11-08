@@ -8,7 +8,7 @@
 
 Componentized plug-in is the core capability: components are built independently, dynamically loaded or unloaded, and hot-updated at runtime. The host manages lifecycle, routing, and runtime boundaries.
 
-[中文](README.md) · English
+[中文](README.zh.md) · English
 
 [Quick Start](#quick-start) · [Architecture](#architecture) · [Writing a Plugin](#writing-a-plugin) · [Build Tasks](#build-tasks) · [Further Reading](#further-reading)
 
