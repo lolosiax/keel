@@ -5,6 +5,7 @@ import io.ktor.server.plugins.origin
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.log.Ansi
 import moe.lolosia.keel.api.log.LogLevel
+import moe.lolosia.keel.api.log.LogSite
 
 /**
  * 客户端地址。
@@ -85,6 +86,20 @@ internal object HttpLog {
             sourceAnsi = remote.ansi,
             message = body,
             moduleAnsi = tagStyle,
+        )
+    }
+
+    /** 出站错误：来源列与其它 HTTP 日志一致，保持客户端地址与配色。 */
+    fun error(remote: RemoteInfo, message: String, cause: Throwable, site: LogSite? = null) {
+        Log.emitSource(
+            level = LogLevel.ERROR,
+            tag = "HTTP OUT",
+            source = remote.plain,
+            sourceAnsi = remote.ansi,
+            message = message,
+            cause = cause,
+            moduleAnsi = tagStyle,
+            site = site,
         )
     }
 

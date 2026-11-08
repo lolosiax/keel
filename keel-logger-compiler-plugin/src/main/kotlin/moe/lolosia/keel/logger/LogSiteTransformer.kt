@@ -25,8 +25,11 @@ internal class LogSiteTransformer(
 
     override fun visitCall(expression: IrCall): IrExpression {
         val call = super.visitCall(expression) as? IrCall ?: return expression
+        // 占位函数 `Log.site()`：原地换成 `Log.of(实际调用点)`，用于自定义来源列的日志
+        if (symbols.site != null && call.symbol == symbols.site) {
+            return siteOfCall(call) ?: call
+        }
         val level = symbols.originalLevels[call.symbol] ?: return call
-        val file = currentFile
         val siteLevel = symbols.siteLevels[level] ?: return call
 
         // IR 的 arguments 列表按“全部形参”排布，包含 dispatch / extension receiver
@@ -34,12 +37,20 @@ internal class LogSiteTransformer(
         if (call.arguments.size != arity) {
             pluginContext.messageCollector.report(
                 CompilerMessageSeverity.WARNING,
-                "[keel-logger] ${file.packageFqName.asString()}/${file.fileEntry.name} 的 " +
+                "[keel-logger] ${currentFile.packageFqName.asString()}/${currentFile.fileEntry.name} 的 " +
                     "Log.${level.functionName} 参数数量与 LogSite 不一致（$arity vs ${call.arguments.size}），保留原调用",
             )
             return call
         }
 
+        val ofCall = siteOfCall(call) ?: return call
+        call.symbol = siteLevel
+        call.dispatchReceiver = ofCall
+        return call
+    }
+
+    private fun siteOfCall(call: IrCall): IrCall? {
+        val file = currentFile
         val line = file.fileEntry.getLineNumber(call.startOffset).let { if (it < 0) 1 else it + 1 }
         val site = LogSiteResolver.resolve(file, allScopes, line, pathIndex)
 
@@ -55,10 +66,7 @@ internal class LogSiteTransformer(
         ofCall.arguments[offset + 4] = nullableString(builder, site.className, symbols.ofParameters[4].type)
         ofCall.arguments[offset + 5] = nullableString(builder, site.functionName, symbols.ofParameters[5].type)
         ofCall.arguments[offset + 6] = builder.irInt(site.kind.ordinal)
-
-        call.symbol = siteLevel
-        call.dispatchReceiver = ofCall
-        return call
+        return ofCall
     }
 
     private fun nullableString(builder: IrBuilderWithScope, value: String?, type: IrType): IrExpression =

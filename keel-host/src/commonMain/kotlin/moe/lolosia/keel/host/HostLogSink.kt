@@ -59,6 +59,7 @@ object HostLogSink : LogSink {
         message: String,
         cause: Throwable?,
         moduleAnsi: String?,
+        site: LogSite?,
     ) {
         val module = tag ?: "Host"
         val console = LogLineFormatter.format(
@@ -71,6 +72,7 @@ object HostLogSink : LogSink {
             color = useColor,
             moduleAnsi = moduleAnsi,
             sourceAnsi = if (useColor) sourceAnsi else null,
+            printedAt = site?.traceLocation(),
         )
         println(console)
         appendLogFile(
@@ -83,6 +85,7 @@ object HostLogSink : LogSink {
                     message = message,
                     cause = cause,
                     color = false,
+                    printedAt = site?.traceLocation(),
                 )
             } else {
                 console

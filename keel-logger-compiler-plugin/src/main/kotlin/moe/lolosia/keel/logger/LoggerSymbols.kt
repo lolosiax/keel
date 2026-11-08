@@ -20,6 +20,7 @@ internal class LoggerSymbols(
     val logType: IrType,
     val of: IrSimpleFunctionSymbol,
     val ofParameters: List<IrValueParameter>,
+    val site: IrSimpleFunctionSymbol?,
     val siteLevels: Map<LoggerLevel, IrSimpleFunctionSymbol>,
     val originalLevels: Map<IrSimpleFunctionSymbol, LoggerLevel>,
 ) {
@@ -41,6 +42,9 @@ internal class LoggerSymbols(
                     parameters.size == 7 && parameters[6].type.isInt()
                 } ?: return null
 
+            val site = context.referenceFunctions(CallableId(LOG_ID, Name.identifier("site")))
+                .firstOrNull { valueParameters(it.owner).isEmpty() }
+
             val originalLevels = LoggerLevel.entries.mapNotNull { level ->
                 context.referenceFunctions(CallableId(LOG_ID, Name.identifier(level.functionName)))
                     .firstOrNull()
@@ -60,6 +64,7 @@ internal class LoggerSymbols(
                 logType = logClass.owner.defaultType,
                 of = of,
                 ofParameters = valueParameters(of.owner),
+                site = site,
                 siteLevels = siteLevels,
                 originalLevels = originalLevels,
             )

@@ -154,6 +154,11 @@ gradlew -p keel-plugin-ksp publish
       `Created at / Throwed at / Printed at`，诊断行与栈帧之间空一行；
       跨运行时通过 `KeelErrorEntry.createdAt / throwSites` 传递。可用
       `keelLogger { exceptionTrace = false }` 关闭。
+    - 需要自定义来源列（如 HTTP 的客户端地址）但仍想保留调用点时，用 `Log.site()`：
+      编译器插件会把占位调用换成真实的 `LogSite`，再传给
+      `Log.emitSource(..., site = Log.site())`，`Printed at` 由 sink 统一渲染。
+      `Log.site()` 也可以单独取用（`val site = Log.site()`），不依赖任何日志级别方法；
+      未应用插件时返回 null，`inline` 函数里取到的是 inline 体内的行号。
     - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
 
 ## 5. 插件 API 与跨运行时边界

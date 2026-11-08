@@ -110,7 +110,7 @@ internal object HostHttp {
                     proceed()
                 } catch (e: Throwable) {
                     // 对应 ErrorWebFilter：先记完整错误链，再把异常交回引擎
-                    Log.error("$method $path 处理失败", cause = e, tag = "HTTP OUT")
+                    HttpLog.error(remote, "$method $path 处理失败", e, Log.site())
                     call.attributes.put(
                         ResponseSnippetKey,
                         snippet(e.toString().substringBefore('\n').encodeToByteArray()),
@@ -196,6 +196,7 @@ internal object HostHttp {
     }
 
     private suspend fun dispatch(call: ApplicationCall) {
+        val remote = remoteInfoOf(call)
         val path = call.request.path()
         val method = call.request.httpMethod.value
         val match = HostRoutes.match(method, path)
@@ -225,7 +226,7 @@ internal object HostHttp {
         if (reply != null && reply.status != KEEL_OK.toInt()) {
             val error = remoteError(match.pluginId, reply, callSite)
             // 自己记录并返回 JSON，不再把异常抛给 Ktor（避免它再打一遍 Unhandled）
-            Log.error("$method $path 处理失败", tag = "HTTP OUT", cause = error)
+            HttpLog.error(remote, "$method $path 处理失败", error, Log.site())
             call.respondText(
                 text = errorBody(error.chain.firstOrNull()?.message ?: "插件执行失败"),
                 contentType = ContentType.Application.Json,

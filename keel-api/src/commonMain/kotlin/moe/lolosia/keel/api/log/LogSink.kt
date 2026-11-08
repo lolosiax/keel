@@ -30,5 +30,6 @@ interface LogSink {
         message: String,
         cause: Throwable? = null,
         moduleAnsi: String? = null,
-    ) = log(level, null, tag, message, cause)
+        site: LogSite? = null,
+    ) = log(level, site, tag, message, cause)
 }

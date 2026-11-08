@@ -24,8 +24,8 @@ object StackTraceFormat {
     /** `cause` 链安全上限，防御环形引用。 */
     private const val MAX_CHAIN = 32
 
-    /** `_<hex>_N_knbridgeM`：hex 段是「模块坐标 + 源文件路径」。 */
-    private val BRIDGE = Regex("""^_([0-9a-fA-F]+)_\d+_knbridge""")
+    /** `_<hex>_N_knbridgeM` / `_<hex>_N_kncfunM`：hex 段是「模块坐标 + 源文件路径」。 */
+    private val BRIDGE = Regex("""^_([0-9a-fA-F]+)_\d+_kn(?:bridge|cfun)\d*""")
 
     /** 诊断行续行的缩进，与 `    Created at ` / `    Throwed at ` 的箭头对齐。 */
     private val TRACE_CONTINUATION = "    " + " ".repeat("Throwed at ".length)
@@ -214,8 +214,8 @@ object StackTraceFormat {
     }
 
     /**
-     * K/N 的桥接符号形如 `_6d6f...6b74_1_knbridge1`，中间那段十六进制是
-     * 「模块坐标 + 源文件绝对路径」；取出 `kotlin/` 之后的部分还原成 `包.类`。
+     * K/N 的桥接符号形如 `_6d6f...6b74_1_knbridge1` / `_6d6f...6b74_1_kncfun2`，
+     * 中间那段十六进制是「模块坐标 + 源文件绝对路径」；取出 `kotlin/` 之后的部分还原成 `包.类`。
      */
     private fun bridgeSymbol(raw: String): String? {
         val match = BRIDGE.find(raw) ?: return null

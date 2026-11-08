@@ -73,6 +73,22 @@ object Log {
         LogSiteKind.entries.getOrElse(kind) { LogSiteKind.TOP_LEVEL_FUNCTION },
     )
 
+    /**
+     * 调用点占位：`moe.lolosia.keel.logger` 编译期会把调用替换成 [of]，
+     * 填入真实的类 / 文件 / 行号；没有应用插件时保持 null。
+     *
+     * 可以单独取用，不依赖任何日志级别方法：
+     *
+     * ```
+     * val site = Log.site() ?: return
+     * println("${site.traceLocation()} ${site.functionName}")
+     * ```
+     *
+     * 返回的是 `Log.site()` 这一行本身的位置；如果放在 `inline` 函数体里，
+     * 记录的是 inline 函数里的行号，而不是最终调用方。
+     */
+    fun site(): LogSite? = null
+
     fun trace(message: String, tag: String? = null) = emit(LogLevel.TRACE, null, tag, message, null)
 
     fun debug(message: String, tag: String? = null) = emit(LogLevel.DEBUG, null, tag, message, null)
@@ -109,5 +125,6 @@ object Log {
         message: String,
         cause: Throwable? = null,
         moduleAnsi: String? = null,
-    ) = sink.logWithSource(level, tag, source, sourceAnsi, message, cause, moduleAnsi)
+        site: LogSite? = null,
+    ) = sink.logWithSource(level, tag, source, sourceAnsi, message, cause, moduleAnsi, site)
 }
