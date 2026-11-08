@@ -22,4 +22,7 @@ object HostSubjects {
 
     /** 请求：写入配置（合并后落盘）；载荷 / 应答见 `ConfigWriteRequest` / `ConfigDocReply`。 */
     const val CONFIG_WRITE: Long = 0x1005L
+
+    /** 请求：插件命名空间存储；载荷 / 应答见 `StorageRequest` / `StorageReply`。 */
+    const val STORAGE: Long = 0x1006L
 }

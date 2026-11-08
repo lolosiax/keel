@@ -4,6 +4,7 @@ import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.event.*
 import moe.lolosia.keel.api.messaging.*
 import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.api.storage.*
 import moe.lolosia.keel.classpath.*
 
 /**
@@ -21,6 +22,13 @@ interface KeelServer {
      * 插件访问主线配置时，读和写都委托给 Host。
      */
     val config: Config
+
+    /**
+     * 按插件命名空间隔离的存储（`<workDir>/plugins/<id>/`）。
+     *
+     * 与主线配置一样经反向请求交给 Host 读写，插件不直接碰工作目录。
+     */
+    val storage: PluginStorage
 
     /**
      * Host 自己的资源视图（Host 的 `.keel` / 内嵌 classpath）。

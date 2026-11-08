@@ -20,7 +20,7 @@ internal class PluginContextImpl(
 ) : PluginContext {
 
     override val server: KeelServer by lazy {
-        PluginServer(PluginConfig(host, ConfigScope.MAIN))
+        PluginServer(PluginConfig(host, ConfigScope.MAIN), PluginStorageImpl(host))
     }
     override val host: HostLink get() = HostLinkImpl
     override val modules: ModuleDirectory get() = PluginServices

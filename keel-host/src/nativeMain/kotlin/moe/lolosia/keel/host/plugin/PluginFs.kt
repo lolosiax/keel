@@ -17,12 +17,12 @@ import platform.posix.remove
  */
 internal object PluginFs {
 
-    /** 覆盖写入整个文件；父目录必须已存在。 */
+    /** 覆盖写入整个文件；父目录必须已存在。空数组会创建一个空文件。 */
     @OptIn(ExperimentalForeignApi::class)
     fun writeBytes(path: String, bytes: ByteArray) {
-        require(bytes.isNotEmpty()) { "拒绝写入空文件：$path" }
         val file = fopen(path, "wb") ?: throw IllegalArgumentException("无法写入文件：$path")
         try {
+            if (bytes.isEmpty()) return
             val written = bytes.usePinned { pinned ->
                 fwrite(pinned.addressOf(0), 1uL, bytes.size.toULong(), file)
             }

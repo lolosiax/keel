@@ -61,6 +61,7 @@ class HelloPlugin : Plugin {
         scheduleSamples()
         checkScope()
         checkConfig()
+        checkStorage()
         checkDatabase()
         checkService()
     }
@@ -71,6 +72,17 @@ class HelloPlugin : Plugin {
             Log.info("协程自检：启动")
             delay(60)
             Log.info("协程自检：delay 后在 Worker 线程恢复")
+        }
+    }
+
+    /** 存储自检：写入 / 读回插件命名空间，并确认越界路径被 Host 拒绝。 */
+    private fun checkStorage() {
+        runBlocking {
+            val path = "check/hello.txt"
+            context.server.storage.write(path, "hello storage".encodeToByteArray())
+            val text = context.server.storage.read(path)?.decodeToString()
+            val escapeRejected = runCatching { context.server.storage.read("../escape") }.isFailure
+            Log.info("存储自检：read=$text 越界拒绝=$escapeRejected")
         }
     }
 

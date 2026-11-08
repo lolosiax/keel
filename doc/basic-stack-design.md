@@ -54,7 +54,7 @@
 
 ### 1.3 落差（做基础栈之前必须补的）
 
-按阻塞程度排序（第 1 / 2 / 3 / 4 / 5 / 6 / 7 项已随 M1 落地，最新状态见 §12；下面是立项时的落差快照）：
+按阻塞程度排序（第 1–9 项已随 M1 全部落地，最新状态见 §12；下面是立项时的落差快照）：
 
 1. **`keel-router-ksp` 是空处理器** —— 插件写不了注解路由，基础栈的 HTTP 面不存在。
 2. **`ModuleDirectory` / `ServiceCaller` / `@ModuleService` codegen 未实现** —— biz → rbac、第三方 → biz/rbac 的跨插件调用不存在。
@@ -645,6 +645,9 @@ interface PluginStorage {
 - 插件停用 / 卸载不删数据，重新启用后仍可读；
 - 头像路径固定 `image/avatar/<userId>.<ext>`，与 backend 的布局一致。
 
+> M1 已按此签名落地（见 §12）；`ctx.server.storage` 由 `PluginStorageImpl` 经
+> `HostSubjects.STORAGE` 转发，Host 侧实现在 `keel-host` 的 `HostStorage`。
+
 > 如果将来出现大文件 / 流式需求，再升级成独立的能力包（`keel-capability-storage`），
 > `PluginStorage` 的签名不变。
 
@@ -983,7 +986,12 @@ Host 启动
   依赖不满足的包不会被选中，关闭时先停插件再关能力包。
   冒烟：`demo.requires=["hello"]` 时 hello 先启动、demo 后启动；退出时 demo 先注销；
   只装 demo 时报「缺少依赖 hello（插件未启用）」；
-- 其余 1 项待做（`PluginStorage`）。
+- 第 9 项（`PluginStorage`）已完成：`KeelServer.storage`（`ctx.server.storage`）提供
+  read / write / delete，经 `HostSubjects.STORAGE` 反向请求交给 Host；根目录
+  `<workDir>/plugins/<manifest-id>/`，拒绝 `..` / 绝对路径 / 带盘符段，单对象上限 8 MB，
+  插件停用 / 卸载不删数据。冒烟：hello 启动期写入并读回 `check/hello.txt`，
+  越界路径 `../escape` 被 Host 拒绝；
+- **M1 九项全部完成**，下一阶段是 M2（rbac 与 biz 落地）。
 
 ### M2 —— rbac 与 biz 落地
 

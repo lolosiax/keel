@@ -21,12 +21,14 @@ import moe.lolosia.keel.api.host.PermissionCatalogReply
 import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
+import moe.lolosia.keel.api.storage.*
 import moe.lolosia.keel.api.web.RouteRegistration
 import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
+import moe.lolosia.keel.host.storage.HostStorage
 
 /** 插件间调用的 Host 侧兜底超时；调用方自己的 3s 超时通常先到。 */
 private const val SERVICE_TIMEOUT_MS = 5000L
@@ -400,6 +402,23 @@ internal object HostPump {
             HostSubjects.CONFIG_WRITE -> {
                 val request = decodePayload(ConfigWriteRequest.serializer(), payload, "配置写入")
                 ServiceWire.encode(ConfigDocReply.serializer(), HostConfigs.write(source, request))
+            }
+
+            HostSubjects.STORAGE -> {
+                val request = decodePayload(StorageRequest.serializer(), payload, "存储请求")
+                val data = when (request.op) {
+                    StorageOp.READ -> HostStorage.read(source, request.path)
+                    StorageOp.WRITE -> {
+                        HostStorage.write(source, request.path, request.data ?: ByteArray(0))
+                        null
+                    }
+
+                    StorageOp.DELETE -> {
+                        HostStorage.delete(source, request.path)
+                        null
+                    }
+                }
+                ServiceWire.encode(StorageReply.serializer(), StorageReply(data))
             }
 
             HostSubjects.AUTH_INVALIDATE -> {

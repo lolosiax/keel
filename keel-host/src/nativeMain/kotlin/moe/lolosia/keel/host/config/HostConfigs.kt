@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.config.*
+import moe.lolosia.keel.host.plugin.HostPluginIds
 import moe.lolosia.keel.host.plugin.mkdirs
 
 /**
@@ -24,9 +25,6 @@ internal object HostConfigs {
 
     private var mainline: YamlConfig? = null
 
-    /** 数字 plugin id → manifest id；配置文件按 manifest id 命名。 */
-    private val pluginNames = mutableMapOf<ULong, String>()
-
     /** manifest id → 文件级 Config；停用插件时丢弃缓存，下次启动重新读盘。 */
     private val configs = mutableMapOf<String, YamlConfig>()
 
@@ -36,18 +34,9 @@ internal object HostConfigs {
         mkdirs("$workDir/config/plugins")
     }
 
-    /**
-     * 插件启动前登记 manifest id。
-     *
-     * 必须在 `onLoad` 之前调用：插件在 `onEnable` 里就会读配置，而那时启动流程还没返回。
-     */
-    fun register(pluginId: ULong, name: String) {
-        pluginNames[pluginId] = name
-    }
-
     /** 插件停用 / 卸载：丢掉内存态，文件保留。 */
     fun release(pluginId: ULong) {
-        val name = pluginNames.remove(pluginId) ?: return
+        val name = HostPluginIds.nameOf(pluginId) ?: return
         configs.remove(name)
     }
 
@@ -83,7 +72,7 @@ internal object HostConfigs {
     private fun configFor(pluginId: ULong, scope: ConfigScope): YamlConfig = when (scope) {
         ConfigScope.MAIN -> mainline ?: error("HostConfigs 尚未初始化")
         ConfigScope.PLUGIN -> {
-            val name = pluginNames[pluginId] ?: error("插件 $pluginId 没有登记配置文件名")
+            val name = HostPluginIds.nameOf(pluginId) ?: error("插件 $pluginId 没有登记配置文件名")
             configs.getOrPut(name) { YamlConfig("$workDir/config/plugins/$name.yaml") }
         }
     }
