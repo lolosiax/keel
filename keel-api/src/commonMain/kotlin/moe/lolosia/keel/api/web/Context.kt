@@ -47,6 +47,12 @@ interface Context {
 
     /**
      * 与 backend 的 `ctx.hasPermission` 同义；未登录 / 权限不足返回 false。
+     *
+     * 默认用请求快照本地判定（`owner` 直接放行，其余按 `rules` 规则串），
+     * 不产生跨运行时调用；自定义授权模型可以覆盖。
      */
-    fun hasPermission(permission: String): Boolean
+    fun hasPermission(permission: String): Boolean {
+        val snapshot = user ?: return false
+        return snapshot.owner || Permissions.granted(snapshot.rules, permission)
+    }
 }

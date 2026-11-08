@@ -56,6 +56,7 @@ class HelloPlugin : Plugin {
         Log.info("enabled")
         logLevelSamples()
         scheduleSamples()
+        checkDatabase()
     }
 
     /** 调度器自检：延时任务 + 周期任务，周期任务第 3 次自行取消。 */

@@ -42,7 +42,10 @@ object PluginWorker {
 
         val pluginId = api.pointed.plugin_id
         PluginWorker.pluginId = pluginId
-        PluginWorker.hostInbox = api.pointed.host?.pointed?.host_inbox
+        val host = api.pointed.host
+        PluginWorker.hostInbox = host?.pointed?.host_inbox
+        PluginCapabilities.databaseApi = host?.pointed?.database
+        PluginCapabilities.databaseHandle = host?.pointed?.database_handle
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
         WorkerScheduler.reset()
@@ -72,6 +75,8 @@ object PluginWorker {
     internal fun disable() {
         plugin?.onDisable()
         plugin = null
+        PluginCapabilities.databaseApi = null
+        PluginCapabilities.databaseHandle = null
         WorkerScheduler.reset()
     }
 }

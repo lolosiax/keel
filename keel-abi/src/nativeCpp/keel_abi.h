@@ -9,7 +9,8 @@
  * 2. 结构体通过指针传递；布局以本头文件为唯一来源，Kotlin 侧由 cinterop 生成。
  * 3. 本头文件里的函数由 C 实现（每个二进制各带一份，hidden visibility），
  *    调用时不得进入任何 Kotlin/Native 运行时。
- * 4. 插件 dylib 唯一对外导出的符号是 keel_plugin_bootstrap / keel_plugin_shutdown。
+ * 4. native 插件 dylib 对外导出的符号是 keel_plugin_bootstrap / keel_plugin_shutdown；
+ *    capability 包只导出 keel_capability_entry。
  * 5. 尚未发布任何版本，字段可以随时调整；发布后再改必须提升 KEEL_ABI_VERSION。
  */
 
@@ -181,6 +182,18 @@ typedef struct KeelHostApi {
     KeelHandle (*handle_new)(void *stable_ref, uint64_t owner_module, KeelQueue *owner_inbox);
     void (*handle_retain)(KeelHandle handle);
     void (*handle_release)(KeelHandle handle);
+
+    /*
+     * database 能力（`kind: capability`，`provides: ["database"]`）。
+     *
+     * database 指向 KeelDbApi 函数表（布局在 keel_database.h），database_handle 是能力包
+     * open 返回的实例；两者都由 Host 在启动时填好，没有安装能力包时为 NULL。
+     *
+     * 用 void * 而不是具体结构体指针：两组 cinterop 对同一结构体的类型身份不稳定
+     * （与 KeelQueueTag 同理），插件侧由 keel-database-api 自己 reinterpret。
+     */
+    void *database;
+    void *database_handle;
 } KeelHostApi;
 
 /* 插件能力表：Host 在 bootstrap 后读取，之后只通过 inbox 投递。 */
@@ -204,6 +217,31 @@ typedef struct KeelPluginHandlers {
     uint32_t reserved;
     KeelPluginWorkerEvent on_event;
 } KeelPluginHandlers;
+
+/*
+ * 能力包入口描述（`kind: capability` 的 .keel）。
+ *
+ * 能力包是纯 C 动态库，不初始化 Kotlin 运行时，Host 可以 dlopen / dlclose。
+ * 发现流程：读 plugin.json → 按 lib/<target> 解出库 → dlsym("keel_capability_entry")
+ * → 校验 abi_version / struct_size → open(...)。
+ *
+ * config 的结构由 provides 决定（例如 "database" → keel_database.h 的 KeelDbConfig）；
+ * config_size 由 Host 按自己的头文件计算，能力包发现不匹配时返回 KEEL_ERR_UNSUPPORTED。
+ * open 成功后 instance 是能力实例，api 是该能力的函数表；两者由 close 释放。
+ */
+typedef struct KeelCapabilityDescriptor {
+    uint32_t abi_version;   /* KEEL_ABI_VERSION */
+    uint32_t struct_size;   /* sizeof(KeelCapabilityDescriptor) */
+    const char *id;         /* 与 plugin.json 的 id 一致 */
+    const char *provides;   /* 能力名，与 plugin.json 的 provides 一致 */
+    const char *version;
+    KeelStatus (*open)(const KeelHostApi *host, const void *config, uint32_t config_size,
+                       void **instance, void **api);
+    void (*close)(void *instance);
+} KeelCapabilityDescriptor;
+
+/* 能力包唯一导出的符号。 */
+KEEL_EXPORT const KeelCapabilityDescriptor *keel_capability_entry(void);
 
 /*
  * 插件 Worker 入口（Kotlin 侧 @CName，由 Host 用 plugin.json.entry 解析）。

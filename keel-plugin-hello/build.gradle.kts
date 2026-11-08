@@ -24,5 +24,9 @@ kotlin {
         commonMain.dependencies {
             api("moe.lolosia.keel:keel-api:${libs.versions.keel.get()}")
         }
+        nativeMain.dependencies {
+            // 通过 C ABI 查库：驱动由 database 能力包提供，插件只依赖这份门面
+            api("moe.lolosia.keel:keel-database-api:${libs.versions.keel.get()}")
+        }
     }
 }

@@ -26,8 +26,14 @@ class PluginLoader(
      *
      * 顺序按文件名排序；同 id 的包只接受第一个，后面的记失败。
      * 目录不存在时返回一条失败记录，而不是抛异常。
+     *
+     * @param onCapability 遇到 `kind: capability` 的包时交给它处理（解包 + 登记）；
+     *   为 null 时该包按加载失败处理
      */
-    fun loadAll(pluginsDir: String): PluginLoadResult {
+    fun loadAll(
+        pluginsDir: String,
+        onCapability: ((String) -> Unit)? = null,
+    ): PluginLoadResult {
         val dir = pluginsDir.trimEnd('/', '\\')
         val names = listNames(dir)
             ?: return PluginLoadResult(
@@ -40,7 +46,14 @@ class PluginLoader(
         names.filter { it.endsWith(KEEL_SUFFIX) }.sorted().forEach { name ->
             val keelPath = "$dir/$name"
             try {
-                loaded += load(keelPath)
+                val manifest = PluginPackageReader.read(keelPath)
+                if (manifest.isCapability) {
+                    val handler = onCapability
+                        ?: throw IllegalArgumentException("${manifest.id} 是 capability 包，需要能力加载器")
+                    handler(keelPath)
+                } else {
+                    loaded += load(keelPath, manifest)
+                }
             } catch (e: Exception) {
                 failed += PluginLoadFailure(keelPath, pluginIdOrNull(keelPath), e.message ?: "未知错误")
             }
@@ -54,8 +67,12 @@ class PluginLoader(
      * @throws IllegalArgumentException manifest 缺失、字段非法、abiVersion 不匹配、
      *   当前目标没有对应库、包内缺少该库、插件 id 与已加载的重复
      */
-    fun load(keelPath: String): LoadedPlugin {
-        val manifest = PluginPackageReader.read(keelPath)
+    fun load(keelPath: String): LoadedPlugin = load(keelPath, PluginPackageReader.read(keelPath))
+
+    private fun load(keelPath: String, manifest: KeelPackageManifest): LoadedPlugin {
+        require(!manifest.isCapability) {
+            "${manifest.id} 是 capability 包，不能用 native 插件的方式加载"
+        }
         require(manifest.id.isNotBlank()) { "plugin.json 缺少 id" }
         require(manifest.abiVersion == SUPPORTED_ABI_VERSION) {
             "abiVersion=${manifest.abiVersion}，Host 只支持 $SUPPORTED_ABI_VERSION"
@@ -71,7 +88,7 @@ class PluginLoader(
         val bytes = FileZipClasspath.open(keelPath).read(libPath)
             ?: throw IllegalArgumentException("包内缺少动态库：$libPath")
 
-        val libraryPath = installLibrary(manifest, libPath, bytes)
+        val libraryPath = installLibrary(cacheRoot, manifest, libPath, bytes)
         val ref = host.register(
             PluginClasspathEntry(
                 pluginId = manifest.id,
@@ -87,38 +104,6 @@ class PluginLoader(
     /** 卸载：资源引用立即失效；动态库留在缓存目录，等进程重启回收。 */
     fun unload(pluginId: String) {
         host.unregister(pluginId)
-    }
-
-    /**
-     * 把包内动态库落到缓存目录。
-     *
-     * 每次都重写：只比大小挡不住「同尺寸重构」（改字符串常量很容易让 dll 大小不变），
-     * 曾经因此加载到上一版插件。目标文件被正在运行的进程占用时（Windows 共享冲突、
-     * Linux ETXTBSY），退到 `name.1.dll`、`name.2.dll` …… 换名加载。
-     */
-    private fun installLibrary(
-        manifest: KeelPackageManifest,
-        libPath: String,
-        bytes: ByteArray,
-    ): String {
-        val dir = "$cacheRoot/${manifest.id}/${manifest.version}"
-        mkdirs(dir)
-        val fileName = libPath.substringAfterLast('/')
-        val stem = fileName.substringBeforeLast('.', fileName)
-        val suffix = fileName.removePrefix(stem)
-        var target = "$dir/$fileName"
-        var attempt = 0
-        while (true) {
-            try {
-                PluginFs.writeBytes(target, bytes)
-                return target
-            } catch (e: Throwable) {
-                attempt++
-                // 文件被占用就换名，最多试几个，避免无限增长
-                if (attempt > 8) throw e
-                target = "$dir/$stem.$attempt$suffix"
-            }
-        }
     }
 
     private fun pluginIdOrNull(keelPath: String): String? =

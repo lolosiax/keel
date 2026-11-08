@@ -19,6 +19,9 @@ data class PluginBuildInfo(
  * @property resources 资源在包内的前缀，默认 `resources/`
  * @property color 插件日志模块名的自定义颜色（`#RRGGBB` / `#RGB`），不填则用哈希色
  * @property buildInfo 构建期注入的 git 提交与提交时间
+ * @property kind `native`（默认）或 `capability`
+ * @property provides capability 声明的能力名；业务插件的 `requires` 按这里匹配
+ * @property schemes capability 支持的 URL scheme（当前用于 database）
  */
 @Serializable
 data class KeelPackageManifest(
@@ -28,6 +31,9 @@ data class KeelPackageManifest(
     val abiVersion: Int = 1,
     val entry: String,
     val color: String? = null,
+    val kind: String = KIND_NATIVE,
+    val provides: List<String> = emptyList(),
+    val schemes: List<String> = emptyList(),
     val lib: Map<String, String> = emptyMap(),
     val resources: String = "resources/",
     val requires: List<String> = emptyList(),
@@ -35,6 +41,8 @@ data class KeelPackageManifest(
     val sha256: String? = null,
     val buildInfo: PluginBuildInfo? = null,
 ) {
+
+    val isCapability: Boolean get() = kind == KIND_CAPABILITY
 
     fun libraryFor(target: String): String? = lib[target]
 
@@ -46,4 +54,9 @@ data class KeelPackageManifest(
         authors = authors,
         color = color,
     )
+
+    companion object {
+        const val KIND_NATIVE = "native"
+        const val KIND_CAPABILITY = "capability"
+    }
 }

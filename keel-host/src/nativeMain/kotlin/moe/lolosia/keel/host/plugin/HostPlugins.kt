@@ -2,6 +2,8 @@ package moe.lolosia.keel.host.plugin
 
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.log.ModuleColors
+import moe.lolosia.keel.host.capability.DatabaseSettings
+import moe.lolosia.keel.host.capability.HostCapabilities
 import moe.lolosia.keel.host.classpath.HostClasspath
 import moe.lolosia.keel.host.route.HostRoutes
 
@@ -45,6 +47,7 @@ internal object HostPlugins {
         classpath = host
         directory = pluginsDir
         loader = PluginLoader(host, cacheDir)
+        HostCapabilities.init(cacheDir)
     }
 
     fun list(): List<Entry> = entries.toList()
@@ -53,9 +56,17 @@ internal object HostPlugins {
 
     fun find(id: String): Entry? = entries.firstOrNull { it.id == id }
 
-    /** 扫描插件目录并逐个启动；启动失败计入 [startFailures]，不中断其它插件。 */
+    /**
+     * 扫描插件目录：先解包能力包并 `open`，再逐条启动 native 插件。
+     *
+     * 能力包必须先就绪，否则 `requires: ["database"]` 的插件会被拒绝启用。
+     * 启动失败计入 [startFailures]，不中断其它插件。
+     */
     fun loadAll(): PluginLoadResult {
-        val result = requireLoader().loadAll(directory)
+        val result = requireLoader().loadAll(directory) { keelPath ->
+            HostCapabilities.install(keelPath)
+        }
+        HostCapabilities.activateDatabase(DatabaseSettings.fromEnvironment())
         result.loaded.forEach { loaded ->
             logPackage(loaded)
             val entry = Entry(loaded, nextId++)
@@ -79,6 +90,18 @@ internal object HostPlugins {
         if (copied) {
             require(fileSizeOrNull(target) == null) { "插件目录里已存在同名包：$name" }
             PluginFs.writeBytes(target, PluginFs.readBytes(source))
+        }
+
+        if (PluginPackageReader.read(target).isCapability) {
+            try {
+                HostCapabilities.install(target)
+            } catch (e: Throwable) {
+                if (copied) PluginFs.delete(target)
+                throw e
+            }
+            HostCapabilities.activateDatabase(DatabaseSettings.fromEnvironment())
+            Log.info("installed capability ${target.substringAfterLast('/')}", tag = "Loader")
+            return true
         }
 
         val loaded = try {
@@ -139,15 +162,26 @@ internal object HostPlugins {
         return true
     }
 
-    /** 进程退出前逐个停用。 */
+    /** 进程退出前逐个停用；最后关闭能力包。 */
     fun shutdownAll() {
         val running = entries.filter { it.enabled }
         running.forEach { stop(it) }
         if (running.isNotEmpty()) Log.info("stopped ${running.size} plugin(s)", tag = "Server")
+        HostCapabilities.closeAll()
     }
 
     private fun start(entry: Entry): Boolean {
         val manifest = entry.loaded.manifest
+        val missing = manifest.requires.filter { it in capabilityNames && !HostCapabilities.isAvailable(it) }
+        if (missing.isNotEmpty()) {
+            failedStarts++
+            Log.warn(
+                "start failed: ${manifest.id}: 缺少能力 ${missing.joinToString()}，" +
+                    "请安装对应的能力包并配置 database",
+                tag = "Loader",
+            )
+            return false
+        }
         return try {
             PluginNames.register(entry.pluginId, entry.displayName)
             val runtime = startPlugin(entry.loaded, entry.pluginId)
@@ -193,4 +227,7 @@ internal object HostPlugins {
     }
 
     private fun requireLoader(): PluginLoader = loader ?: error("HostPlugins 尚未初始化")
+
+    /** 由能力包提供、需要在 `requires` 里校验的能力名。 */
+    private val capabilityNames = setOf("database")
 }

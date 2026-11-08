@@ -1,0 +1,4 @@
+headers = keel_database.h
+package = moe.lolosia.keel.database.c
+# 与 keel-api 的 keelabi.def 一致：让 cinterop 看到完整（占位）的不透明句柄
+compilerOpts = -DKEEL_CINTEROP

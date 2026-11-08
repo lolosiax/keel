@@ -106,7 +106,20 @@ internal val hostAbi: CPointer<KeelHostApi> = nativeHeap.alloc<KeelHostApi>().al
     api.handle_new = null
     api.handle_retain = null
     api.handle_release = null
+    // database 能力由 HostCapabilities 在启动时填；没有安装能力包时保持 null
+    api.database = null
+    api.database_handle = null
 }.ptr
+
+/**
+ * 把已打开的 database 能力下发 / 撤销。
+ *
+ * 必须在启动任何 native 插件之前调用；插件在 `worker_main` 里一次性读取。
+ */
+internal fun setHostDatabase(api: COpaquePointer?, handle: COpaquePointer?) {
+    hostAbi.pointed.database = api
+    hostAbi.pointed.database_handle = handle
+}
 
 /**
  * 回投事件的标量快照。

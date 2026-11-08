@@ -58,20 +58,38 @@ keelClasspath {
     }
 }
 
+// 能力加载器需要认识 database 的配置结构（KeelDbConfig）与能力描述符；
+// 业务插件侧的同一份头文件由 keel-database-api 的 cinterop 读取。
+val databaseApiIncludeDir = file("../keel-database-api/src/nativeCpp")
+val keelAbiIncludeDir = file("../keel-abi/src/nativeCpp")
+val databaseDef = file("src/nativeInterop/cinterop/keeldatabase.def")
+
 kotlin {
     mingwX64 {
+        compilations.getByName("main").cinterops.create("keeldatabase") {
+            defFile = databaseDef
+            includeDirs(databaseApiIncludeDir, keelAbiIncludeDir)
+        }
         binaries.executable {
             baseName = "keel-host"
             entryPoint = "moe.lolosia.keel.host.main"
         }
     }
     linuxArm64 {
+        compilations.getByName("main").cinterops.create("keeldatabase") {
+            defFile = databaseDef
+            includeDirs(databaseApiIncludeDir, keelAbiIncludeDir)
+        }
         binaries.executable {
             baseName = "keel-host"
             entryPoint = "moe.lolosia.keel.host.main"
         }
     }
     linuxX64 {
+        compilations.getByName("main").cinterops.create("keeldatabase") {
+            defFile = databaseDef
+            includeDirs(databaseApiIncludeDir, keelAbiIncludeDir)
+        }
         binaries.executable {
             baseName = "keel-host"
             entryPoint = "moe.lolosia.keel.host.main"

@@ -39,6 +39,10 @@
 | `keel-classpath/` | `keel-classpath` | 独立资源 Classpath 库（zip / 目录 / 前缀视图），不依赖 keel-api | 是 |
 | `keel-classpath-full/` | `keel-classpath-full` | Host 注册表、`ClasspathRef`、generation 失效、跨模块代理 | 是 |
 | `keel-api/` | `keel-api` | 插件契约：生命周期、上下文、消息、调度（`moe.lolosia.keel.api`） | 是 |
+| `keel-database-api/` | `keel-database-api` | 数据库能力 ABI + 插件侧 Kotlin 门面（不含驱动、不含加载器） | 是 |
+| `keel-database-mariadb/` | `keel-database-mariadb` | `kind: capability` 的 MariaDB 驱动包（纯 C，打成 `.keel`） | 是（`.keel`） |
+| `keel-plugin-rbac-api/` | `keel-plugin-rbac-api` | rbac 契约：`RbacReader` / `RbacAdmin` / `PermissionCatalog` + DTO + `ROLE_ID_*` | 是 |
+| `keel-plugin-basic-biz-api/` | `keel-plugin-basic-biz-api` | basic-biz 契约：用户 / 账户 / 设置接口 + DTO | 是 |
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
 | `keel-launcher/` | `keel-launcher` | 单文件发行版入口，静态链接 Host 并内嵌插件 | 是（可执行文件） |
 | `keel-plugin-hello/` | `keel-plugin-hello` | 示例插件；新插件按 `keel-plugin-<id>/` 平铺在顶层 | 是 |
@@ -49,11 +53,16 @@
 ```
 keel-*-gradle-plugin / keel-router-ksp ──(构建期)──> keel-plugin-*  (KSP / 打包 / 发布)
 keel-api  <──  keel-host  <──  keel-launcher
-keel-api  <──  keel-plugin-*
+keel-api  <──  keel-database-api  <──  keel-plugin-*
+keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-basic-biz-api
+keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-rbac（实现）
+keel-database-mariadb ──(仅头文件)──> keel-database-api / keel-abi
 ```
 
 - `keel-api` **不得**依赖 `keel-host`、`keel-launcher`、Ktor 或任何第三方服务端库；它是对外承诺的稳定面。
-- `keel-plugin-*` 只能依赖 `keel-api`（以及自己声明的库）；需要宿主能力时走 API，不要反向 include `keel-host`。
+- `keel-plugin-*` 只能依赖 `keel-api`、`keel-database-api` 与各 `-api` 契约库（以及自己声明的库）；
+  需要宿主能力时走 API，不要反向 include `keel-host`。
+- `*-api` 是纯契约（接口 + DTO + `ServiceKey`），**不含实现、不含表结构**；实现方才能依赖数据库能力。
 - 跨构建的依赖一律写 Maven 坐标 `moe.lolosia.keel:<artifact>:<version>`；在根 composite 下 Gradle 会自动替换成本地工程。
 
 ## 2. 构建与验证
@@ -107,7 +116,11 @@ gradlew -p keel-plugin-ksp publish
 | `keel-classpath` | 独立资源 Classpath 库 |
 | `keel-classpath-full` | Host 注册表 / `ClasspathRef` / 跨模块代理 |
 | `keel-abi` | C ABI 静态库 + 头文件工件 |
+| `keel-database-api` | 数据库能力包 ABI + 插件侧 Kotlin 门面（数据插件的唯一查库依赖，不含驱动） |
+| `keel-plugin-rbac-api` | rbac 契约库（第三方只依赖它就能读组 / 规则、做权限管理） |
+| `keel-plugin-basic-biz-api` | basic-biz 契约库（用户查询 / 管理、账户、运行时设置） |
 | `keel-plugin-<id>` | 功能插件，`<id>` 与 `plugin.json` 的 `id` 一致 |
+| `keel-database-<driver>` | `kind: capability` 的数据库驱动包（`keel-database-mariadb` / `-pgsql` …），丢进 `plugins/` |
 | `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` | 构建期 Gradle 插件 |
 | `keel-logger-compiler-plugin` | Kotlin 编译器插件（由 `moe.lolosia.keel.logger` 挂载，不单独 apply） |
 | `keel-router-ksp` / `keel-plugin-ksp` | 构建期 KSP 处理器 |
@@ -284,6 +297,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/config-design.md](doc/config-design.md) | **配置读写**：YAML + 注释保留、分层覆盖、插件配置隔离、原子落盘与变更通知 |
 | [doc/web-design.md](doc/web-design.md) | **Web 路由**：Host 单端口、插件路由注册、Context 快照、流式响应、中间件与鉴权 |
 | [doc/authz-design.md](doc/authz-design.md) | **权限边界**：core 只留 `@Permission` / `Authorizer` SPI，RBAC 实现归 `keel-plugin-rbac`，fail closed |
+| [doc/basic-stack-design.md](doc/basic-stack-design.md) | **基础栈**：`keel-database-api` 是插件侧查库 klib（ABI + 门面），`keel-database-mariadb` 是 `kind: capability` 驱动包，Host 加载器在 `keel-host`；`keel-plugin-rbac` / `keel-plugin-basic-biz` 的边界、RBAC 与 biz 的交叉裁决、Host 认证/授权强制点与分阶段落地 |
 | [doc/capability-design.md](doc/capability-design.md) | **能力插件**：接口在 core、实现按需安装、稳定 C ABI、可卸载；首个示例 Lua 中间件引擎 |
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
 | [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接**：已完成模块、构建命令、验证结果、下一步与已知坑 |
