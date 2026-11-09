@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 100 100" role="img" aria-labelledby="keelTitleSolid">
+  <title id="keelTitleSolid">Keel</title>
+  <defs>
+    <linearGradient id="keelBgSolid" x1="4" y1="4" x2="96" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7F52FF"/>
+      <stop offset="0.5" stop-color="#B125EA"/>
+      <stop offset="1" stop-color="#E44857"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="92" height="92" rx="20" fill="url(#keelBgSolid)"/>
+  <g transform="translate(18 18) scale(2)">
+    <path d="M16.318 2 2 16.318V30h.124L16.132 15.992l-.031-.031L23.05 8.95 29.938 2Z" fill="#FFFFFF" fill-opacity="0.5"/>
+    <path d="M2 2h14.318L2 16.318Z" fill="#FFFFFF"/>
+    <path d="M2 30h28L16.1 15.946Z" fill="#FFFFFF"/>
+  </g>
+</svg>

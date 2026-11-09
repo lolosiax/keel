@@ -210,27 +210,43 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
             val serveMillis = (project.findProperty("keel.run.serveMs") as String?)?.toLongOrNull()
                 ?: extension.runServeMillis
 
-            project.tasks.register("keelRun", KeelRunTask::class.java) { task ->
+            // 运行目录只组装一次；Host 与插件分开准备，避免改插件时重写正在占用的可执行文件
+            val runWorkDir = project.file(extension.runWorkDir)
+            val prepareHost = project.tasks.register("keelPrepareHost", KeelPrepareHostTask::class.java) { task ->
                 task.group = "keel"
-                task.description = "构建插件并启动 Host（集成测试，类似 runServer）"
-                task.dependsOn(packageTask)
-                task.pluginPackages.from(packageTask.flatMap { it.archiveFile })
-                task.extraArtifacts.from(runConfiguration)
+                task.description = "解出运行用的 Host（不启动）"
                 task.hostArchive.from(hostConfiguration)
                 hostProperty?.let { path ->
                     task.hostExecutable.set(project.layout.projectDirectory.file(path))
                 }
-                task.runDirectory.set(project.layout.projectDirectory.dir(extension.runWorkDir))
-                task.port.set(port)
-                serveMillis?.let { task.serveMillis.set(it) }
-                task.environment.set(extension.runEnvironment)
-                task.arguments.set(extension.runArguments)
+                task.hostDirectory.set(runWorkDir.resolve("host"))
+            }
+
+            val prepareRun = project.tasks.register("keelPrepareRun", KeelPrepareRunTask::class.java) { task ->
+                task.group = "keel"
+                task.description = "构建并组装 build/keel-run（不启动 Host）"
+                task.dependsOn(packageTask, prepareHost)
+                task.pluginPackages.from(packageTask.flatMap { it.archiveFile })
+                task.extraArtifacts.from(runConfiguration)
+                task.runDirectory.set(runWorkDir)
+                task.pluginsDirectory.set(runWorkDir.resolve("plugins"))
                 task.configTemplates.from(
                     project.fileTree("dev/config/plugins") { it.include("*.yaml") }
                 )
                 if (project.file("dev/data").isDirectory) {
                     task.dataTemplate.set(project.layout.projectDirectory.dir("dev/data"))
                 }
+            }
+
+            project.tasks.register("keelRun", KeelRunTask::class.java) { task ->
+                task.group = "keel"
+                task.description = "构建插件并启动 Host（集成测试，类似 runServer）"
+                task.dependsOn(prepareRun)
+                task.runDirectory.set(runWorkDir)
+                task.port.set(port)
+                serveMillis?.let { task.serveMillis.set(it) }
+                task.environment.set(extension.runEnvironment)
+                task.arguments.set(extension.runArguments)
             }
         }
     }

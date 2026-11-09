@@ -1,0 +1,16 @@
+<idea-plugin>
+    <id>moe.lolosia.keel.idea</id>
+    <name>Keel</name>
+    <vendor>lolosia</vendor>
+    <description>识别 Keel 插件工程，并把构建与运行拆成 IDEA 的运行配置。</description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.gradle</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <configurationType implementation="moe.lolosia.keel.idea.run.KeelRunConfigurationType"/>
+        <runConfigurationProducer implementation="moe.lolosia.keel.idea.run.KeelRunConfigurationProducer"/>
+        <postStartupActivity implementation="moe.lolosia.keel.idea.run.KeelProjectStartupActivity"/>
+    </extensions>
+</idea-plugin>

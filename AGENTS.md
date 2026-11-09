@@ -46,6 +46,7 @@
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
 | `keel-launcher/` | `keel-launcher` | 单文件发行版入口，静态链接 Host 并内嵌插件 | 是（可执行文件） |
 | `keel-plugin-hello/` | `keel-plugin-hello` | 示例插件；新插件按 `keel-plugin-<id>/` 平铺在顶层 | 是 |
+| `keel-idea-plugin/` | `keel-idea-plugin` | IntelliJ IDEA 插件：识别插件工程、构建 / 运行分离 | 否（不参与 `buildAll`） |
 | `doc/` | — | 设计与计划；图标源文件在 `doc/logo/`（SVG + 生成脚本，不参与构建） | — |
 
 依赖方向（禁止反向）：
@@ -78,6 +79,13 @@ gradlew -p keel-logger-gradle-plugin build
 gradlew -p keel-host linkDebugExecutableMingwX64
 gradlew -p keel-launcher linkReleaseExecutableLinuxArm64
 gradlew -p keel-plugin-hello linkReleaseSharedLibLinuxArm64
+
+# 只组装运行目录（不启动 Host），供 IDE / 调试器使用
+gradlew -p keel-plugin-hello keelPrepareRun
+
+# IDEA 插件（独立构建，不参与 buildAll）
+gradlew -p keel-idea-plugin buildPlugin
+gradlew -p keel-idea-plugin runIde
 
 # 工具链发布到自建 Maven
 gradlew -p keel-classpath-gradle-plugin publish
@@ -127,6 +135,9 @@ gradlew -p keel-plugin-ksp publish
 | `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` | 构建期 Gradle 插件 |
 | `keel-logger-compiler-plugin` | Kotlin 编译器插件（由 `moe.lolosia.keel.logger` 挂载，不单独 apply） |
 | `keel-router-ksp` / `keel-plugin-ksp` | 构建期 KSP 处理器 |
+
+- `keel-idea-plugin` 是 IntelliJ IDEA 插件（IntelliJ Platform Gradle Plugin 2.x，目标社区版），
+  只消费运行目录，不发布 Maven 工件；根 `buildAll` 显式跳过它。
 
 - Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.abi`、`moe.lolosia.keel.logger`。
 - `keel-router-ksp` / `keel-plugin-ksp` 是 **KSP 处理器**，不是 Gradle 插件，没有插件 ID。
@@ -246,6 +257,13 @@ keel-plugin-<id>/
 - **目标形态**：消费方模块只加一行 `keelPlugin { requires("<id>") }`，然后 `ctx.<id>.method(...)`；
   同一模块内调用返回本地实现，跨模块返回生成的客户端。当前消费方仍需手写 `ServiceKey` / 代理。
 - 新增插件 = 在顶层新建 `keel-plugin-<id>/` + 在根 `settings.gradle.kts` 加一行 `includeBuild`；不要塞进某个聚合目录。
+
+- **运行任务分层**：`keelPrepareHost` 只解出 Host，`keelPrepareRun` 只打包 / 拷贝 `.keel` 与配置，
+  `keelRun` = 两者 + exec。IDE 侧把 `keelPrepareRun` 挂成 Gradle before-run task（输出走 IDEA 的
+  Build 面板），构建完成后再直接启动 `build/keel-run/host/keel-host[.exe]`；
+  主 Run 控制台只保留 Host 日志。
+- `keelRun` / IDEA 运行配置默认注入 `FORCE_COLOR=1`（显式 `NO_COLOR` / `CLICOLOR=0` 时尊重用户设置），
+  否则 Gradle exec 把 stdout 接到管道后 Host 的 ANSI 探测会关闭颜色。
 
 - `plugin.json` 是部署单元的唯一清单；**不要**靠扫描类路径或反射找插件（Native 上没有反射）。
 - **配置**：主线 `application.yaml` + 每插件 `config/plugins/<id>.yaml`，**共用同一个 `Config` 接口**。
@@ -406,5 +424,13 @@ keel-logger-compiler-plugin/src/main/…/logger/
   KeelLoggerRegistrar / KeelLoggerCliProcessor / KeelLoggerIrExtension / LogSiteTransformer / LogSiteResolver / SourcePathIndex
   META-INF/services/                    CompilerPluginRegistrar + CommandLineProcessor
 keel-plugin-hello/                     示例插件（单项目形态）
+keel-idea-plugin/src/main/kotlin/moe/lolosia/keel/idea/
+  KeelPluginDiscovery.kt               静态扫描 `plugin.json` + 构建脚本
+  KeelPluginProject.kt                 插件工程模型
+  run/
+    KeelRunConfigurationType / Factory / Options
+    KeelRunConfiguration / KeelRunSettingsEditor / KeelRunProfileState
+    KeelRunConfigurationProducer       当前文件 → Keel 运行配置
+    KeelGradle.kt                      Wrapper / Host 定位
 doc/                                   设计与计划
 ```

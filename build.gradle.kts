@@ -4,8 +4,12 @@
 
 tasks.register("buildAll") {
     group = "build"
-    description = "构建仓库内所有独立 Gradle 构建"
-    dependsOn(gradle.includedBuilds.map { it.task(":build") })
+    description = "构建仓库内所有独立 Gradle 构建（IDEA 插件除外）"
+    dependsOn(
+        gradle.includedBuilds
+            .filter { it.name != "keel-idea-plugin" }
+            .map { it.task(":build") }
+    )
 }
 
 /**

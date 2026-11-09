@@ -39,3 +39,5 @@ includeBuild("keel-launcher")
 includeBuild("keel-plugin-hello")
 includeBuild("keel-plugin-basic-biz")
 includeBuild("keel-database-mariadb")
+// IDEA 插件依赖 IntelliJ 平台，默认不参与 buildAll（见根 build.gradle.kts）
+includeBuild("keel-idea-plugin")
