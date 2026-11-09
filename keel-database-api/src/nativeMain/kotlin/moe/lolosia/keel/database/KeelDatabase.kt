@@ -23,7 +23,8 @@ class KeelDatabase internal constructor(
     fun exec(sql: String, params: List<DbValue> = emptyList()): Long = memScoped {
         val encoded = encodeParams(params)
         val affected = alloc<ULongVar>()
-        val status = api.pointed.exec!!(
+        val status = bridgeExec(
+            api,
             handle,
             sql.cstr.ptr,
             sql.encodeToByteArray().size.toUInt(),
@@ -43,7 +44,8 @@ class KeelDatabase internal constructor(
     fun query(sql: String, params: List<DbValue> = emptyList()): QueryResult = memScoped {
         val encoded = encodeParams(params)
         val out = alloc<CPointerVar<KeelDbResult>>()
-        val status = api.pointed.query!!(
+        val status = bridgeQuery(
+            api,
             handle,
             sql.cstr.ptr,
             sql.encodeToByteArray().size.toUInt(),
@@ -67,17 +69,17 @@ class KeelDatabase internal constructor(
     fun <T> transaction(block: (KeelDatabase) -> T): T {
         val tx = memScoped {
             val out = alloc<CPointerVar<KeelDbHandle>>()
-            val status = api.pointed.begin!!(handle, out.ptr)
+            val status = bridgeBegin(api, handle, out.ptr)
             if (status != STATUS_OK) throw failure(status.toInt(), "begin")
             out.value ?: throw DatabaseException("begin 成功但没有返回事务句柄")
         }
         return try {
             val result = block(KeelDatabase(api, tx))
-            val status = api.pointed.commit!!(tx)
+            val status = bridgeCommit(api, tx)
             if (status != STATUS_OK) throw failure(status.toInt(), "commit")
             result
         } catch (e: Throwable) {
-            api.pointed.rollback!!(tx)
+            bridgeRollback(api, tx)
             throw e
         }
     }
@@ -85,7 +87,7 @@ class KeelDatabase internal constructor(
     /** 最近一次失败的文本；没有错误时为空串。 */
     val lastError: String get() = memScoped {
         val buffer = allocArray<ByteVar>(ERROR_BUFFER_SIZE)
-        val status = api.pointed.last_error!!(handle, buffer, ERROR_BUFFER_SIZE.toUInt())
+        val status = bridgeLastError(api, handle, buffer, ERROR_BUFFER_SIZE.toUInt())
         if (status == STATUS_OK) buffer.toKString() else ""
     }
 

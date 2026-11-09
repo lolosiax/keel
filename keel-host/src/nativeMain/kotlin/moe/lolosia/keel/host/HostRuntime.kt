@@ -50,6 +50,9 @@ internal object HostRuntime {
         HostHttp.stop()
 
         Log.info("shutdown", tag = "Server")
+        // 先把积压的日志消费掉；停用期间 PluginRuntime.shutdown 仍会继续 serve，
+        // 让插件 onDisable 里的日志 / 配置 / 存储 / 服务调用拿到应答。
+        HostPump.drain()
         HostPlugins.shutdownAll()
         HostPump.drain()
     }

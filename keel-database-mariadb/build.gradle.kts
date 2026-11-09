@@ -1,4 +1,5 @@
 import java.io.File
+import org.gradle.api.publish.maven.MavenPublication
 
 /**
  * MariaDB 能力包：纯 C 动态库 + `plugin.json` 打成 `.keel`。
@@ -8,10 +9,13 @@ import java.io.File
  */
 plugins {
     base
+    `maven-publish`
 }
 
 group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
+
+apply(from = "../gradle/publishing.gradle.kts")
 
 val cppDir = layout.projectDirectory.dir("src/nativeCpp")
 val dbAbiDir = layout.projectDirectory.dir("../keel-database-api/src/nativeCpp")
@@ -168,3 +172,14 @@ val keelDatabasePackage by tasks.registering(Zip::class) {
 }
 
 tasks.named("assemble") { dependsOn(keelDatabasePackage) }
+
+// 能力包以 .keel 工件发布，keelRun 通过 requires: ["database"] 自动解析
+publishing {
+    publications {
+        create<MavenPublication>("keel") {
+            artifactId = "keel-database-mariadb"
+            // 必须保留 .keel 扩展名：Host 只扫描 plugins/<id>.keel
+            artifact(keelDatabasePackage) { extension = "keel" }
+        }
+    }
+}

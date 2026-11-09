@@ -41,7 +41,12 @@ internal object HostRoutes {
         Log.info("unregistered ${snapshot.size - next.size} route(s) for plugin $pluginId", tag = "Router")
     }
 
-    /** 线性匹配：精确段 > `{name}` 段；DEMO 规模足够。 */
+    /**
+     * 线性匹配：精确段 > `{name}` 段 > 末尾 `{...}` / `{name...}` 通配。
+     *
+     * 通配只允许出现在最后一段，匹配剩余的全部路径（可以为空）；参数值是**未解码的原始段**
+     * 用 `/` 拼回去，WebDAV 这类协议自己决定怎么解码，Host 不替它做路径归一化。
+     */
     fun match(method: String, path: String): RouteMatch? {
         val snapshot = entries
         val parts = path.trim('/').split('/').filter { it.isNotEmpty() }
@@ -50,16 +55,34 @@ internal object HostRoutes {
             if (!entry.descriptor.method.equals(method, ignoreCase = true)) return@entryLoop
 
             val pattern = entry.descriptor.path.trim('/').split('/').filter { it.isNotEmpty() }
-            if (pattern.size != parts.size) return@entryLoop
-
             val params = mutableMapOf<String, String>()
-            pattern.forEachIndexed { index, segment ->
+
+            for (index in pattern.indices) {
+                val segment = pattern[index]
+                if (segment == "{...}" || (segment.startsWith("{") && segment.endsWith("...}"))) {
+                    val name = if (segment == "{...}") {
+                        "..."
+                    } else {
+                        segment.substring(1, segment.length - 4)
+                    }
+                    params[name] = parts.drop(index).joinToString("/")
+                    return RouteMatch(
+                        pluginId = entry.pluginId,
+                        routeId = entry.descriptor.routeId,
+                        pathParameters = params,
+                        permissions = entry.descriptor.permissions,
+                    )
+                }
+
+                if (index >= parts.size) return@entryLoop
                 if (segment.startsWith("{") && segment.endsWith("}")) {
                     params[segment.substring(1, segment.length - 1)] = parts[index]
                 } else if (segment != parts[index]) {
                     return@entryLoop
                 }
             }
+
+            if (pattern.size != parts.size) return@entryLoop
             return RouteMatch(
                 pluginId = entry.pluginId,
                 routeId = entry.descriptor.routeId,

@@ -31,6 +31,30 @@ open class KeelPluginExtension {
     /** 额外资源目录；统一放进包内 `resources/`。 */
     val resources: MutableList<String> = mutableListOf()
 
+    /**
+     * `keelRun` 用的 Host 可执行文件；为空时按 `keelVersion` 从 Maven 取
+     * `moe.lolosia.keel:keel-host-<target>:<version>@zip`。
+     */
+    var runHostExecutable: String? = null
+
+    /** `keelRun` 的 HTTP 端口；命令行 `-Pkeel.run.port=` 优先。 */
+    var runPort: Int = 7191
+
+    /** `keelRun` 的 `--serve-ms`；为空表示常驻，命令行 `-Pkeel.run.serveMs=` 优先。 */
+    var runServeMillis: Long? = null
+
+    /** `keelRun` 的工作目录；默认 `build/keel-run`。 */
+    var runWorkDir: String = "build/keel-run"
+
+    /** 额外塞进运行目录的 `.keel` 工件坐标（能力包 / 依赖插件）。 */
+    val runPlugins: MutableList<String> = mutableListOf()
+
+    /** `keelRun` 启动 Host 时注入的环境变量。 */
+    val runEnvironment: MutableMap<String, String> = mutableMapOf()
+
+    /** 追加给 Host 的命令行参数。 */
+    val runArguments: MutableList<String> = mutableListOf()
+
     fun target(name: String) {
         targets += name
     }
@@ -41,5 +65,18 @@ open class KeelPluginExtension {
 
     fun resources(vararg paths: String) {
         resources += paths
+    }
+
+    /** 追加一个运行期 `.keel` 工件，例如 `moe.lolosia.keel:keel-database-mariadb:0.1.0-SNAPSHOT@keel`。 */
+    fun runPlugin(coordinate: String) {
+        runPlugins += coordinate
+    }
+
+    fun runEnv(name: String, value: String) {
+        runEnvironment[name] = value
+    }
+
+    fun runArg(value: String) {
+        runArguments += value
     }
 }

@@ -111,6 +111,12 @@ class KeelAbiPlugin : Plugin<Project> {
         }
     }
 
+    /**
+     * 找 ABI 包：显式配置 → composite 里的本地打包产物 → Maven 上的 `keel-abi:<version>@zip`。
+     *
+     * 独立仓库（`keel-plugin-hello` / `lolosia-feel-plugins` 这类）没有兄弟目录，
+     * 只能从 Maven 解析；composite 下仍然走本地任务，避免发布才能构建。
+     */
     private fun resolveZip(project: Project, extension: KeelAbiExtension): File? {
         extension.zipFile?.let { return project.file(it) }
 
@@ -119,7 +125,29 @@ class KeelAbiPlugin : Plugin<Project> {
         if (default.isFile) return default
 
         // 还没打包过：只要 composite 里有 keel-abi，就让解压任务依赖它的打包任务
-        return if (includedAbiBuild(project) != null) default else null
+        if (includedAbiBuild(project) != null) return default
+
+        return resolveFromRepository(project, version)
+    }
+
+    /** 从已配置的仓库解析 `moe.lolosia.keel:keel-abi:<version>@zip`。 */
+    private fun resolveFromRepository(project: Project, version: String): File? {
+        val configuration = project.configurations.findByName(ABI_ARCHIVE) ?: project.configurations.create(ABI_ARCHIVE) {
+            it.isCanBeConsumed = false
+            it.isCanBeResolved = true
+            it.isVisible = false
+            it.description = "keel-abi 静态库包（include/keel_abi.h + lib/<target>）"
+        }
+        if (configuration.dependencies.isEmpty()) {
+            project.dependencies.add(ABI_ARCHIVE, "moe.lolosia.keel:keel-abi:$version@zip")
+        }
+        return runCatching { configuration.resolve().firstOrNull() }.getOrElse { error ->
+            project.logger.warn(
+                "keel-abi: 无法解析 moe.lolosia.keel:keel-abi:$version@zip（${error.message}）；" +
+                    "先执行 gradlew -p keel publishAllToMavenLocal，或在 keelAbi { zipFile = ... } 指定路径"
+            )
+            null
+        }
     }
 
     private fun includedAbiBuild(project: Project) =
@@ -129,6 +157,9 @@ class KeelAbiPlugin : Plugin<Project> {
         name.replaceFirstChar { it.uppercaseChar() }
 
     private companion object {
+        /** 从 Maven 解析 ABI 包的配置名。 */
+        const val ABI_ARCHIVE = "keelAbiArchive"
+
         /**
          * 插件 dylib 固定对外导出的符号。
          *
@@ -138,6 +169,10 @@ class KeelAbiPlugin : Plugin<Project> {
         val DEFAULT_EXPORTS = listOf(
             "keel_plugin_bootstrap",
             "keel_plugin_shutdown",
+            // 分步关闭：Host 在等待泵线程退出期间继续消费事件（onDisable 的反向请求）
+            "keel_plugin_request_shutdown",
+            "keel_plugin_pump_running",
+            "keel_plugin_join",
             "keel_plugin_worker_main",
         )
     }

@@ -5,6 +5,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.auth.*
@@ -220,23 +223,42 @@ private fun handleHttp(event: KeelEvent) {
         return
     }
 
-    val response = runBlocking {
-        val plugin = PluginWorker.pluginContext
-            ?: return@runBlocking HttpResponse(
-                status = 503,
-                body = ResponseBody.Text("plugin context is not ready"),
+    // 业务异常自带 HTTP 状态码：在这里就地转成响应，不能让它走错误信封被统一当成 500
+    val response = try {
+        runBlocking {
+            val plugin = PluginWorker.pluginContext
+                ?: return@runBlocking HttpResponse(
+                    status = 503,
+                    body = ResponseBody.Text("plugin context is not ready"),
+                )
+            PluginRoutes.dispatch(
+                plugin = plugin,
+                routeId = request.routeId,
+                request = request.request,
+                pathParameters = request.pathParameters,
+                user = request.user,
             )
-        PluginRoutes.dispatch(
-            plugin = plugin,
-            routeId = request.routeId,
-            request = request.request,
-            pathParameters = request.pathParameters,
-            user = request.user,
-        )
+        }
+    } catch (e: ApiException) {
+        apiErrorResponse(e)
     }
     val wire = PluginRoutes.toWire(response)
     replyCompleteWithPayload(event, Json.encodeToString(wire).encodeToByteArray())
 }
+
+/** `ApiException` → 与 Host 一致的 `{data,code,msg}` 信封，状态码取自异常。 */
+private fun apiErrorResponse(error: ApiException): HttpResponse =
+    HttpResponse(
+        status = error.status,
+        body = ResponseBody.Text(
+            text = buildJsonObject {
+                put("data", JsonNull)
+                put("code", JsonPrimitive(error.status))
+                put("msg", JsonPrimitive(error.message.orEmpty()))
+            }.toString(),
+            contentType = "application/json; charset=utf-8",
+        ),
+    )
 
 /** 处理其它插件经 Host 转来的服务调用：解码信封 → 走本地分发器 → 回包。 */
 private fun handleServiceCall(event: KeelEvent) {

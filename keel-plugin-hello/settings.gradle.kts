@@ -11,6 +11,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 本地开发：keel 根构建执行 publishAllToMavenLocal 后即可离线消费
+        mavenLocal()
         maven("https://maven.aliyun.com/repository/public")
         mavenCentral()
         val repoFile = java.io.File(settingsDir, "../local.properties")
@@ -22,6 +24,14 @@ dependencyResolutionManagement {
             maven {
                 url = uri(repoUrl)
                 isAllowInsecureProtocol = true
+                val username = properties.getProperty("keel.username").orEmpty()
+                val password = properties.getProperty("keel.password").orEmpty()
+                if (username.isNotBlank() || password.isNotBlank()) {
+                    credentials {
+                        this.username = username
+                        this.password = password
+                    }
+                }
             }
         }
     }

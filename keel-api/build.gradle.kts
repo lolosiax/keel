@@ -1,10 +1,13 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    `maven-publish`
 }
 
 group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
+
+apply(from = "../gradle/publishing.gradle.kts")
 
 // ABI 头文件归 keel-abi 所有（契约与实现同属一个构建）；def 仍留在本构建。
 // 当前直接读兄弟目录的头文件；等 keel-abi 发布 include 产物后改为构建期解压。

@@ -12,6 +12,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 本地开发的 keel-api / classpath-full 从 ~/.m2 取
+        mavenLocal()
         // Ktor 的 native 工件只在 Central 全量同步，镜像可能缺 variant
         mavenCentral()
         maven("https://maven.aliyun.com/repository/public")
@@ -24,6 +26,14 @@ dependencyResolutionManagement {
             maven {
                 url = uri(repoUrl)
                 isAllowInsecureProtocol = true
+                val username = properties.getProperty("keel.username").orEmpty()
+                val password = properties.getProperty("keel.password").orEmpty()
+                if (username.isNotBlank() || password.isNotBlank()) {
+                    credentials {
+                        this.username = username
+                        this.password = password
+                    }
+                }
             }
         }
     }

@@ -1,0 +1,18 @@
+{
+  "id": "basic-biz",
+  "name": "Basic Biz",
+  "color": "#4C9AFF",
+  "version": "0.1.0",
+  "abiVersion": 1,
+  "entry": "keel_plugin_worker_main",
+  "provides": ["authn"],
+  "lib": {
+    "mingwX64": "lib/mingwX64/keel_plugin_basic_biz.dll",
+    "linuxArm64": "lib/linuxArm64/libkeel_plugin_basic_biz.so",
+    "linuxX64": "lib/linuxX64/libkeel_plugin_basic_biz.so"
+  },
+  "resources": "resources/",
+  "requires": ["database"],
+  "authors": ["lolosia"],
+  "description": "用户 / 会话 / 注册 / 运行时设置"
+}

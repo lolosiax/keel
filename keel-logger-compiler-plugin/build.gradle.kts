@@ -1,4 +1,4 @@
-import java.util.*
+import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -17,31 +17,13 @@ dependencies {
     compileOnly(libs.kotlin.compiler.embeddable)
 }
 
-// 发布仓库：地址与账号来自 <repo>/local.properties 的 keel.repo / keel.username / keel.password（不入库）。
-val localProperties = Properties().apply {
-    val file = rootProject.file("../local.properties")
-    if (file.isFile) file.inputStream().use { load(it) }
-}
+apply(from = "../gradle/publishing.gradle.kts")
 
-fun configValue(key: String): String? =
-    (rootProject.findProperty(key) as String?) ?: localProperties.getProperty(key)
-
+// 编译器插件由 moe.lolosia.keel.logger 按 Maven 坐标解析，必须单独发布 jar
 publishing {
-    repositories {
-        val repoUrl = configValue("keel.repo").orEmpty()
-        if (repoUrl.isNotBlank()) {
-            maven {
-                url = uri(repoUrl)
-                isAllowInsecureProtocol = true
-                val repoUsername = configValue("keel.username").orEmpty()
-                val repoPassword = configValue("keel.password").orEmpty()
-                if (repoUsername.isNotBlank() || repoPassword.isNotBlank()) {
-                    credentials {
-                        username = repoUsername
-                        password = repoPassword
-                    }
-                }
-            }
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
         }
     }
 }

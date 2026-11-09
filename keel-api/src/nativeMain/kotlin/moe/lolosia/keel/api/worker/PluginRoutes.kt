@@ -82,7 +82,7 @@ internal object PluginRoutes : Routes {
             is ResponseBody.Stream -> "text/plain; charset=utf-8" to
                 "streaming not supported yet".encodeToByteArray()
         }
-        return HttpRouteResponse(response.status, contentType, body)
+        return HttpRouteResponse(response.status, contentType, body, response.headers)
     }
 
     private fun send(inbox: CPointer<KeelQueue>, subject: UInt, payload: ByteArray) {

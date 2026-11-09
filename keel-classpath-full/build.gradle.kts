@@ -1,9 +1,12 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    `maven-publish`
 }
 
 group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
+
+apply(from = "../gradle/publishing.gradle.kts")
 
 kotlin {
     mingwX64()

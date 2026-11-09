@@ -1,10 +1,13 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    `maven-publish`
 }
 
 group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
+
+apply(from = "../gradle/publishing.gradle.kts")
 
 kotlin {
     // 与 keel-api 一致的目标集合：klib 要被各插件在这三个目标上链接。

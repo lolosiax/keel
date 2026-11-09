@@ -3,6 +3,7 @@ pluginManagement {
     includeBuild("../keel-abi-gradle-plugin")
     includeBuild("../keel-logger-gradle-plugin")
     repositories {
+        mavenLocal()
         maven("https://maven.aliyun.com/repository/public/")
         maven("https://maven.aliyun.com/repository/gradle-plugin")
         gradlePluginPortal()
@@ -12,6 +13,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 本地开发：先 publishAllToMavenLocal，再单独构建本目录
+        mavenLocal()
         maven("https://maven.aliyun.com/repository/public")
         mavenCentral()
     }

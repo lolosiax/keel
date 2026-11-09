@@ -25,9 +25,19 @@ typedef struct KeelPluginState {
     /* 下一次定时唤醒的绝对毫秒；0 表示不定时唤醒 */
     uint64_t wake_at_ms;
     int started;
+    /* 线程句柄是否已由成功的 keel_thread_start 填充 */
+    int thread_started;
 } KeelPluginState;
 
 static KeelPluginState g_plugin;
+
+/*
+ * 事件泵线程存活标记。
+ *
+ * bootstrap 在启动线程前置 1，pump_main 退出前清 0；Host 轮询它来决定能否 join。
+ * 它只是提示，不承担同步：真正的等待仍由 keel_thread_join 完成。
+ */
+static volatile int g_pump_alive = 0;
 
 static void release_payload(KeelEvent *event) {
     if (event->release) event->release(event->release_user, event);
@@ -133,6 +143,7 @@ static KEEL_THREAD_RETURN pump_main(KEEL_THREAD_ARG arg) {
 
         release_payload(&event);
     }
+    g_pump_alive = 0;
     return KEEL_THREAD_RETURN_VALUE;
 }
 
@@ -142,6 +153,23 @@ KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
                                             KeelPluginApi *out) {
     if (!host || !worker_main || !out) return KEEL_ERR_INVALID;
     if (host->abi_version != KEEL_ABI_VERSION) return KEEL_ERR_UNSUPPORTED;
+
+    /*
+     * 上一轮没有走 shutdown 时，先回收已经退出的线程和 inbox。
+     *
+     * 仍有存活泵线程时直接拒绝：g_plugin 是二进制级全局，重复 bootstrap 会让两个线程
+     * 共享同一份状态、抢同一个 inbox，插件单线程假设当场失效。
+     */
+    if (g_plugin.inbox != NULL) {
+        if (g_pump_alive) return KEEL_ERR_INVALID;
+        if (g_plugin.thread_started) {
+            keel_thread_join(&g_plugin.thread);
+            g_plugin.thread_started = 0;
+        }
+        keel_queue_destroy(g_plugin.inbox);
+        g_plugin.inbox = NULL;
+        g_plugin.api.inbox = NULL;
+    }
 
     memset(&g_plugin, 0, sizeof(g_plugin));
     g_plugin.host = host;
@@ -156,18 +184,30 @@ KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
     g_plugin.api.host = host;
     g_plugin.api.inbox = g_plugin.inbox;
 
+    /*
+     * 先置存活标记再建线程：否则线程刚启动、pump_main 尚未执行的那一小段窗口里，
+     * 另一次 bootstrap 会误判「上一轮已退出」而回收刚创建好的 inbox。
+     */
+    g_pump_alive = 1;
     if (keel_thread_start(&g_plugin.thread, pump_main, &g_plugin) != 0) {
+        g_pump_alive = 0;
         keel_queue_destroy(g_plugin.inbox);
         g_plugin.inbox = NULL;
+        g_plugin.api.inbox = NULL;
         return KEEL_ERR_FAILED;
     }
+    g_plugin.thread_started = 1;
 
     *out = g_plugin.api;
     return KEEL_OK;
 }
 
-KEEL_EXPORT void keel_plugin_shutdown(void) {
-    if (!g_plugin.inbox) return;
+KEEL_EXPORT int keel_plugin_pump_running(void) {
+    return g_pump_alive;
+}
+
+KEEL_EXPORT int keel_plugin_request_shutdown(void) {
+    if (!g_plugin.inbox) return 0;
 
     KeelEvent event;
     memset(&event, 0, sizeof(event));
@@ -175,12 +215,27 @@ KEEL_EXPORT void keel_plugin_shutdown(void) {
     event.kind = KEEL_EVENT_SHUTDOWN;
     event.seq = ++g_plugin.seq;
     event.source = g_plugin.api.plugin_id;
-    keel_queue_push(g_plugin.inbox, &event, 0);
+    /* 队列满时等一会儿：丢掉 SHUTDOWN 会让泵线程永远不退出 */
+    return keel_queue_push(g_plugin.inbox, &event, 1000u) == KEEL_OK ? 1 : 0;
+}
 
-    keel_thread_join(&g_plugin.thread);
+KEEL_EXPORT void keel_plugin_join(void) {
+    if (!g_plugin.inbox) return;
 
+    if (g_plugin.thread_started) {
+        keel_thread_join(&g_plugin.thread);
+        g_plugin.thread_started = 0;
+    }
     keel_queue_destroy(g_plugin.inbox);
     g_plugin.inbox = NULL;
+    g_plugin.api.inbox = NULL;
     g_plugin.wake_at_ms = 0;
     g_plugin.started = 0;
+}
+
+KEEL_EXPORT void keel_plugin_shutdown(void) {
+    if (!g_plugin.inbox) return;
+
+    keel_plugin_request_shutdown();
+    keel_plugin_join();
 }

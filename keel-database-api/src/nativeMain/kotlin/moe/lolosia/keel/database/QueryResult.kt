@@ -34,7 +34,7 @@ class QueryResult internal constructor(
         check(!closed) { "结果集已关闭" }
         val out = alloc<CPointerVar<KeelDbValue>>()
         val count = alloc<UIntVar>()
-        val status = api.pointed.next!!(handle, out.ptr, count.ptr)
+        val status = bridgeNext(api, handle, out.ptr, count.ptr)
         if (status < 0) {
             columns = 0
             row = null
@@ -60,7 +60,7 @@ class QueryResult internal constructor(
     override fun close() {
         if (closed) return
         closed = true
-        api.pointed.result_free!!(handle)
+        bridgeResultFree(api, handle)
     }
 }
 

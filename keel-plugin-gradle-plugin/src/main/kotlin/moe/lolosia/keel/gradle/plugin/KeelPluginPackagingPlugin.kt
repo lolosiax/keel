@@ -143,7 +143,7 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                 if (!extension.enabled) return@afterEvaluate
 
                 val kotlin = project.extensions.getByType(KotlinMultiplatformExtension::class.java)
-                val selected = extension.targets.ifEmpty { listOf(defaultTargetName()) }
+                val selected = extension.targets.ifEmpty { listOf(hostTargetName()) }
 
                 kotlin.targets.withType(KotlinNativeTarget::class.java).configureEach { target ->
                     if (target.name !in selected) return@configureEach
@@ -163,6 +163,76 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                 }
             }
         }
+
+        // 运行期工件：插件包之外的 .keel（能力包 / 依赖插件）与 Host
+        val runConfiguration = project.configurations.create("keelRunPlugins") { configuration ->
+            configuration.isCanBeConsumed = false
+            configuration.isCanBeResolved = true
+            configuration.isVisible = false
+            configuration.description = "keelRun 额外加载的 .keel 工件"
+        }
+        val hostConfiguration = project.configurations.create("keelHost") { configuration ->
+            configuration.isCanBeConsumed = false
+            configuration.isCanBeResolved = true
+            configuration.isVisible = false
+            configuration.description = "keelRun 使用的 Host 可执行包"
+        }
+
+        project.afterEvaluate {
+            if (!extension.enabled) return@afterEvaluate
+
+            val version = extension.keelVersion ?: project.version.toString()
+            val target = hostTargetName()
+
+            // plugin.json 的 requires 自动映射成同名能力包，版本与本插件一致
+            val explicit = extension.runPlugins.toMutableList()
+            readRequires(manifest).forEach { id ->
+                val artifact = CAPABILITY_ARTIFACTS[id] ?: return@forEach
+                if (explicit.none { it.contains(":$artifact:") }) {
+                    explicit += "moe.lolosia.keel:$artifact:$version@keel"
+                }
+            }
+            explicit.forEach { coordinate ->
+                project.dependencies.add(runConfiguration.name, coordinate)
+            }
+
+            val hostProperty = (project.findProperty("keel.run.host") as String?)
+                ?: extension.runHostExecutable
+            if (hostProperty == null) {
+                project.dependencies.add(
+                    hostConfiguration.name,
+                    "moe.lolosia.keel:keel-host-dev-$target:$version@zip",
+                )
+            }
+
+            val port = (project.findProperty("keel.run.port") as String?)?.toIntOrNull()
+                ?: extension.runPort
+            val serveMillis = (project.findProperty("keel.run.serveMs") as String?)?.toLongOrNull()
+                ?: extension.runServeMillis
+
+            project.tasks.register("keelRun", KeelRunTask::class.java) { task ->
+                task.group = "keel"
+                task.description = "构建插件并启动 Host（集成测试，类似 runServer）"
+                task.dependsOn(packageTask)
+                task.pluginPackages.from(packageTask.flatMap { it.archiveFile })
+                task.extraArtifacts.from(runConfiguration)
+                task.hostArchive.from(hostConfiguration)
+                hostProperty?.let { path ->
+                    task.hostExecutable.set(project.layout.projectDirectory.file(path))
+                }
+                task.runDirectory.set(project.layout.projectDirectory.dir(extension.runWorkDir))
+                task.port.set(port)
+                serveMillis?.let { task.serveMillis.set(it) }
+                task.environment.set(extension.runEnvironment)
+                task.arguments.set(extension.runArguments)
+                task.configTemplates.from(
+                    project.fileTree("dev/config/plugins") { it.include("*.yaml") }
+                )
+                if (project.file("dev/data").isDirectory) {
+                    task.dataTemplate.set(project.layout.projectDirectory.dir("dev/data"))
+                }
+            }
+        }
     }
 
     /**
@@ -178,13 +248,22 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         return kotlin.targets.findByName(targetName) as? KotlinNativeTarget
     }
 
-    private fun defaultTargetName(): String {
-        val os = System.getProperty("os.name").lowercase(Locale.ROOT)
-        val arch = System.getProperty("os.arch").lowercase(Locale.ROOT)
-        return when {
-            os.contains("win") -> "mingwX64"
-            arch.contains("aarch64") || arch.contains("arm64") -> "linuxArm64"
-            else -> "linuxX64"
-        }
+    /** 读取 `plugin.json` 的 `requires`；文件缺失 / 格式不对时按空列表处理。 */
+    private fun readRequires(manifest: java.io.File): List<String> {
+        if (!manifest.isFile) return emptyList()
+        return runCatching {
+            @Suppress("UNCHECKED_CAST")
+            val json = JsonSlurper().parse(manifest) as Map<String, Any?>
+            (json["requires"] as? List<*>).orEmpty().filterIsInstance<String>()
+        }.getOrDefault(emptyList())
+    }
+
+    private companion object {
+        /** `requires` 里的能力 id → 运行期要加的 `.keel` 工件。 */
+        val CAPABILITY_ARTIFACTS = mapOf(
+            "database" to "keel-database-mariadb",
+            "basic-biz" to "keel-plugin-basic-biz",
+            "rbac" to "keel-plugin-rbac",
+        )
     }
 }

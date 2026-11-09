@@ -1,6 +1,9 @@
+import org.gradle.api.publish.maven.MavenPublication
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    `maven-publish`
     id("moe.lolosia.keel.classpath")
     // Host 主动引入 ABI 静态库；插件工程由 moe.lolosia.keel.plugin 自动带
     id("moe.lolosia.keel.abi")
@@ -10,6 +13,8 @@ plugins {
 
 group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
+
+apply(from = "../gradle/publishing.gradle.kts")
 
 // 构建期注入版本 / 提交 / 工具链，启动横幅与 --inspect 都从这里取
 val buildInfoDir = layout.buildDirectory.dir("generated/buildinfo")
@@ -112,6 +117,49 @@ kotlin {
             implementation(libs.ktor.server.cio)
             // YAML 只在 Host 侧解析；写回用原文本编辑，插件不依赖 KAML
             implementation(libs.kaml)
+        }
+    }
+}
+
+// ——— Host 可执行包 ———
+// keelRun 按 moe.lolosia.keel:keel-host-<target>:<version>@zip 解析；
+// 每个平台各自发布自己的 Host（Windows/mingwX64、Linux/arm64 等）。
+val hostTarget = run {
+    val os = System.getProperty("os.name").lowercase()
+    val arch = System.getProperty("os.arch").lowercase()
+    when {
+        os.contains("win") -> "mingwX64"
+        arch.contains("aarch64") || arch.contains("arm64") -> "linuxArm64"
+        else -> "linuxX64"
+    }
+}
+
+/**
+ * 开发用 Host 包（**debug** 构建）。
+ *
+ * `keelRun` 用它做集成测试：启动快、符号全、崩溃报告能落到行号。
+ * 生产部署的 release 可执行文件不走这个工件，用 `linkReleaseExecutable<target>` 单独构建。
+ *
+ * 当前 release Host 在插件 HTTP 响应路径上有 ACCESS_VIOLATION（debug 正常），
+ * 在定位清楚前 `keelRun` 固定用 debug，避免开发循环被它挡住。
+ */
+val keelHostPackage = tasks.register<Zip>("keelHostPackage") {
+    group = "keel"
+    description = "打包当前宿主的 debug keel-host（$hostTarget），供 keelRun 从 Maven 解析"
+    dependsOn("linkDebugExecutable${hostTarget.replaceFirstChar { it.uppercaseChar() }}")
+    from(layout.buildDirectory.dir("bin/$hostTarget/debugExecutable")) { include("keel-host*") }
+    archiveFileName.set("keel-host-dev-$hostTarget.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("keel"))
+    isPreserveFileTimestamps = false
+    isReproducibleFileOrder = true
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("hostExecutable") {
+            // 不能叫 keel-host-mingwX64：KMP 目标发布在同名目录（Windows 大小写不敏感）会撞车
+            artifactId = "keel-host-dev-$hostTarget"
+            artifact(keelHostPackage)
         }
     }
 }

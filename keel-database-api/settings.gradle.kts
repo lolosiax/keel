@@ -9,6 +9,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 本地开发：根构建 publishAllToMavenLocal 后可单独构建本目录
+        mavenLocal()
         maven("https://maven.aliyun.com/repository/public")
         mavenCentral()
         // 自建 Maven（地址来自 ../local.properties 的 keel.repo；不入库）
@@ -21,6 +23,14 @@ dependencyResolutionManagement {
             maven {
                 url = uri(repoUrl)
                 isAllowInsecureProtocol = true
+                val username = properties.getProperty("keel.username").orEmpty()
+                val password = properties.getProperty("keel.password").orEmpty()
+                if (username.isNotBlank() || password.isNotBlank()) {
+                    credentials {
+                        this.username = username
+                        this.password = password
+                    }
+                }
             }
         }
     }

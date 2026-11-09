@@ -246,7 +246,11 @@ private class KeelRouterProcessor(
 
     private fun argumentOf(parameter: ParameterModel): String = when (val binding = parameter.binding) {
         ContextBinding -> "ctx"
-        BodyBinding -> "json.decodeFromString(serializer<${parameter.type.render()}>(), ctx.request.body.decodeToString())"
+        BodyBinding ->
+            "runCatching { json.decodeFromString(serializer<${parameter.type.render()}>(), " +
+                "ctx.request.body.decodeToString()) }" +
+                ".getOrElse { throw ApiException(400, \"请求体无法解析\") }"
+
         is SimpleBinding -> convertFrom(binding, parameter.type)
     }
 

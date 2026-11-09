@@ -305,11 +305,33 @@ KEEL_EXPORT KeelStatus keel_plugin_bootstrap(const KeelHostApi *host,
                                             KeelPluginApi *out);
 
 /*
- * 向插件 inbox 投递 SHUTDOWN 并等待事件泵线程结束；不会 dlclose。
+ * 关闭插件：投递 SHUTDOWN 并等待事件泵线程结束；不会 dlclose。
  *
  * 可以在任意线程调用：它只做入队 + join，不进入插件运行时。
+ * 等价于 `keel_plugin_request_shutdown()` + `keel_plugin_join()`；
+ * 需要「等待期间继续服务插件反向请求」时改用那两个函数。
  */
 KEEL_EXPORT void keel_plugin_shutdown(void);
+
+/*
+ * 只投递 SHUTDOWN，不等待泵线程退出。
+ *
+ * Host 在停用插件时可以在这之后继续消费事件（插件 `onDisable` 里的日志 / 配置 /
+ * 存储 / 服务调用都需要 Host 应答），再用 [keel_plugin_pump_running] 轮询、最后 join。
+ *
+ * @return 1 表示 SHUTDOWN 已入队；0 表示没有 inbox 或队列满
+ */
+KEEL_EXPORT int keel_plugin_request_shutdown(void);
+
+/* @return 1 表示事件泵线程仍在运行（给 Host 的轮询提示，不替代 join） */
+KEEL_EXPORT int keel_plugin_pump_running(void);
+
+/*
+ * 等待事件泵线程结束并销毁 inbox。
+ *
+ * 只在 [keel_plugin_pump_running] 返回 0 后调用；线程仍在运行时 join 会阻塞。
+ */
+KEEL_EXPORT void keel_plugin_join(void);
 
 /* 以下函数在每个二进制里各有一份（hidden），用于跨运行时队列操作。 */
 

@@ -184,10 +184,14 @@ gradlew -p keel-plugin-ksp publish
 
 - **一个线程只能进入一个 Kotlin/Native 运行时**。插件 Worker 由 C 侧 `pthread_create` / `CreateThread`
   创建；插件的 `@CName` 入口只能在该 Worker 上调用，Host 线程不得直接调用。
-- 插件 dylib **对 Host 只暴露** `keel_plugin_bootstrap` / `keel_plugin_shutdown`（C 实现）与
-  `keel_plugin_worker_main`（Kotlin `@CName` 入口，`plugin.json.entry` 指向它）。
+- 插件 dylib **对 Host 只暴露** `keel_plugin_bootstrap`、`keel_plugin_worker_main`
+  （Kotlin `@CName` 入口，`plugin.json.entry` 指向它），以及三个关闭函数：
+  `keel_plugin_request_shutdown` / `keel_plugin_pump_running` / `keel_plugin_join`
+  （`keel_plugin_shutdown` 仍是它们的组合，供旧 Host 使用）。
   Worker 入口只允许由 bootstrap 在事件泵线程上调用；Host 只 `dlsym`、不调用。
-  mingw 上这三个符号由 `keel-abi-gradle-plugin` 生成的 `.def` 强制导出（Kotlin 符号默认不进导出表）。
+  mingw 上这些符号由 `keel-abi-gradle-plugin` 生成的 `.def` 强制导出（Kotlin 符号默认不进导出表）。
+  停用插件时 Host 先 `request_shutdown`，在等待期间继续消费事件（`onDisable` 的反向请求要得到应答），
+  再用 `pump_running` 轮询、最后 `join`；超过 5s 未退出则放弃 join 并告警。
   队列、句柄表、分配器都是 hidden 符号，每个二进制各带一份，不导出。
 - Kotlin 对象不跨边界：只能传 **C 结构体 / 字节 / 不透明句柄 / 纯 C 函数指针**。
   对象留在拥有者运行时，另一边拿到的是「句柄 + 本地代理」。
@@ -297,6 +301,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/前序讨论.md](doc/前序讨论.md) | Kotlin/Native 插件化的可行性讨论：运行时不可卸载、跨运行时对象、协程边界、序列化协议、风险清单 |
 | [doc/abi-design.md](doc/abi-design.md) | **C ABI 与线程模型**：事件泵、Worker、句柄 / 代理、回调、事件总线、调度器桥接、内存与版本规则 |
 | [doc/codegen-design.md](doc/codegen-design.md) | **零样板模块互访**：Gradle 插件 + KSP 生成客户端 / 分发器 / 访问器 / 回调 / plugin.json |
+| [doc/plugin-contract-discussion.md](doc/plugin-contract-discussion.md) | **插件契约形态讨论记录**（未定稿）：`-impl` 命名取舍、Gradle 多工件可行性、`@KeelExposed` 分期与待决问题 |
 | [doc/config-design.md](doc/config-design.md) | **配置读写**：YAML + 注释保留、分层覆盖、插件配置隔离、原子落盘与变更通知 |
 | [doc/web-design.md](doc/web-design.md) | **Web 路由**：Host 单端口、插件路由注册、Context 快照、流式响应、中间件与鉴权 |
 | [doc/authz-design.md](doc/authz-design.md) | **权限边界**：core 只留 `@Permission` / `Authorizer` SPI，RBAC 实现归 `keel-plugin-rbac`，fail closed |

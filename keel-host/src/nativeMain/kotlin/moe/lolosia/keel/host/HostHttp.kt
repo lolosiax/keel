@@ -1,6 +1,8 @@
 package moe.lolosia.keel.host
 
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.cio.CIO
@@ -9,6 +11,8 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.util.AttributeKey
+import io.ktor.utils.io.*
+import kotlinx.io.readByteArray
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -98,10 +102,14 @@ internal object HostHttp {
                 val method = call.request.httpMethod.value
                 val path = call.request.path()
 
-                // 请求体只在这里读一次；POST/PUT/PATCH 之外的请求体忽略
+                // 请求体只在这里读一次；GET/HEAD 没有语义上的请求体，其余方法（含 WebDAV
+                // 的 PROPFIND / LOCK / MKCOL）一律透传，否则插件拿不到 XML 与上传内容
+                // 必须按字节读：WebDAV 的 PUT 是二进制，receiveText() 会按 UTF-8 解码把内容弄坏。
+                // 走 receiveChannel 而不是 receive<ByteArray>()：后者在空 body 的 OPTIONS
+                // 上会让 Ktor 的转换器解空指针（release 构建直接 ACCESS_VIOLATION）。
                 val requestBody = when (method) {
-                    "POST", "PUT", "PATCH" -> call.receiveText().encodeToByteArray()
-                    else -> ByteArray(0)
+                    "GET", "HEAD" -> ByteArray(0)
+                    else -> call.receiveChannel().readRemaining().readByteArray()
                 }
                 call.attributes.put(RequestBodyKey, requestBody)
 
@@ -343,10 +351,30 @@ internal object HostHttp {
 
         // 出站日志要打印的响应体（截断）
         call.attributes.put(ResponseSnippetKey, snippet(response.body))
-        call.respondBytes(
-            bytes = response.body,
-            contentType = ContentType.parse(response.contentType),
-            status = HttpStatusCode.fromValue(response.status),
-        )
+
+        // 插件给的自定义头（WebDAV 的 DAV / Allow / ETag / Content-Range 等）；
+        // Content-Type / Content-Length 由 respondBytes 统一写，不接受插件覆盖
+        response.headers.forEach { (name, value) ->
+            if (!name.equals(HttpHeaders.ContentType, ignoreCase = true) &&
+                !name.equals(HttpHeaders.ContentLength, ignoreCase = true)
+            ) {
+                call.response.headers.append(name, value, safeOnly = false)
+            }
+        }
+
+        val status = HttpStatusCode.fromValue(response.status)
+        val contentType = runCatching { ContentType.parse(response.contentType) }.getOrNull()
+        if (method.equals(HttpMethod.Head.value, ignoreCase = true)) {
+            // HEAD 只回首部：插件可以给 Content-Length（不必把整个文件读进内存），
+            // 没给时退回 body 的长度
+            val length = response.headers.entries
+                .firstOrNull { it.key.equals(HttpHeaders.ContentLength, ignoreCase = true) }
+                ?.value
+                ?: response.body.size.toString()
+            call.response.headers.append(HttpHeaders.ContentLength, length, safeOnly = false)
+            call.respondBytes(ByteArray(0), contentType, status)
+        } else {
+            call.respondBytes(response.body, contentType, status)
+        }
     }
 }

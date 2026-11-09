@@ -1,4 +1,4 @@
-import java.util.*
+import org.gradle.api.publish.maven.MavenPublication
 
 /**
  * 跨运行时 ABI 的唯一实现：C 源码 + 每目标静态库。
@@ -173,26 +173,19 @@ tasks.named("assemble") { dependsOn(keelAbiPackage) }
 // 发布
 // ---------------------------------------------------------------------------
 
+apply(from = "../gradle/publishing.gradle.kts")
+
+/**
+ * 发布 `keel-abi-<version>.zip`（`include/keel_abi.h` + 各目标静态库）。
+ *
+ * 消费方（`keel-abi-gradle-plugin`）在独立构建里按 `moe.lolosia.keel:keel-abi:<version>@zip`
+ * 解析这个工件；打包产物与 composite 下的本地路径是同一个文件内容。
+ */
 publishing {
-    repositories {
-        val repoFile = rootProject.file("../local.properties")
-        val localProperties = Properties().apply {
-            if (repoFile.isFile) repoFile.inputStream().use { load(it) }
-        }
-        val repoUrl = localProperties.getProperty("keel.repo").orEmpty()
-        if (repoUrl.isNotBlank()) {
-            maven {
-                url = uri(repoUrl)
-                isAllowInsecureProtocol = true
-                val repoUsername = localProperties.getProperty("keel.username").orEmpty()
-                val repoPassword = localProperties.getProperty("keel.password").orEmpty()
-                if (repoUsername.isNotBlank() || repoPassword.isNotBlank()) {
-                    credentials {
-                        username = repoUsername
-                        password = repoPassword
-                    }
-                }
-            }
+    publications {
+        create<MavenPublication>("keelAbi") {
+            artifactId = "keel-abi"
+            artifact(keelAbiPackage)
         }
     }
 }
