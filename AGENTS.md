@@ -338,23 +338,36 @@ keel-classpath-full/src/commonMain/…/classpath/full/
   ClasspathRef / ClasspathRegistry / CompositeClasspath / GuardedClasspath / RegistryClasspath
   ClasspathTransport / RemoteClasspath / HostClasspathTransport / PluginClasspathEntry
 keel-classpath-full/src/nativeMain/…/classpath/full/DefaultClasspathRegistry.kt
+keel-database-api/src/nativeCpp/keel_database.h     数据库能力 C ABI（唯一布局来源）
+keel-database-api/src/nativeMain/…/database/        KeelDatabase / Row / QueryResult / DbValue / currentDatabase()
+keel-database-mariadb/src/nativeCpp/keel_database_mariadb.c   纯 C 能力包（当前后端仅 select 1）
+keel-plugin-rbac-api/src/commonMain/…/rbac/api/      RbacReader / RbacAdmin / PermissionCatalog + DTO + RbacServices
+keel-plugin-basic-biz-api/src/commonMain/…/basic/biz/api/  UserDirectory / UserAdmin / AccountAdmin / SettingApi + DTO
 keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   Plugin / PluginContext / PluginMetadata / PluginRegistry / KeelServer / PluginLogger / Scheduler / TaskHandle
   Log.kt                              统一日志门面（of / 六个级别 / install(LogSink)）
   log/                                LogSite / LogSiteKind / LogLevel / LogSink / LogSiteCodec / StdoutLogSink
                                       Ansi / LogLineFormatter（Spring Boot 配色与行格式）
   annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
-  auth/Authorizer.kt
+  auth/        Authenticator / Authorizer / AuthnRequest / AuthnReply / AuthzRequest / AuthzReply / AuthzSnapshot
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
   command/     Command / CommandSender / ConsoleCommandRequest / ConsoleCommandResult
-  config/      Config / package.kt
+  config/      Config / ConfigScope / ConfigReadRequest / ConfigWriteRequest / package.kt
   event/       Event / EventBus / EventHandler / EventPriority / EventType / Subscription
+  error/       KeelErrorPayload / KeelRemoteException / package.kt
+  host/        HostLink / HostSubjects / InvalidateRequest / PermissionCatalogReply
   messaging/   Message / Messenger
-  service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceUnavailableException
-  web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody / UserSnapshot
-keel-api/src/nativeMain/…/api/worker/PluginWorker.kt   `@CName` Worker 入口分发
-keel-api/src/nativeMain/…/api/worker/NativePluginLogger.kt  插件日志 → Host 收件箱
-keel-api/src/nativeMain/…/api/worker/PluginContextImpl.kt   最小上下文（metadata / logger / 空 classpath）
+  service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceWire
+               GeneratedServices / ServiceBinder / ServiceDispatcher / ServiceRegistration
+  storage/     PluginStorage / StorageOp / StorageRequest / StorageReply
+  web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody
+               UserSnapshot / RouteDescriptor / Routes / GeneratedRoutes / PermissionNode / ApiResult
+keel-api/src/nativeMain/…/api/worker/
+  PluginWorker.kt                     `@CName` Worker 入口分发（生命周期 / PING / TIMER / HTTP / CONSOLE / SERVICE_CALL / AUTHN / AUTHZ）
+  NativePluginLogger.kt               插件日志 → Host 收件箱
+  PluginContextImpl / PluginServer / PluginServices / PluginRoutes / HostLinkImpl
+  PluginCapabilities / PluginConfig / PluginConsole / PluginStorageImpl
+  WorkerScheduler / WorkerScope / WorkerDispatcher / ServiceCallerImpl
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
 keel-host/src/commonMain/…/host/HostLogSink.kt        Host 日志出口（本地时间戳 + 调用点模块列）
@@ -365,17 +378,23 @@ keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 
 keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
 keel-host/src/nativeMain/…/host/console/              HostConsole / ConsolePrompt / ConsoleCommand / HelpCommand / StopCommand / PluginsCommand
 keel-host/src/nativeMain/…/host/plugin/
-  PluginLoader / LoadedPlugin / PluginRuntime / HostPlugins / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
+  PluginLoader / LibraryCache / LoadedPlugin / PluginRuntime / HostPlugins / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
   LogEvent / HostPump / PluginNames（日志解码与 Host 收件箱消费）
-  NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / package.native.kt
+  NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / HostPluginIds / package.native.kt
+keel-host/src/nativeMain/…/host/capability/           能力包发现 / open / close / database 选包
+keel-host/src/nativeMain/…/host/auth/                 Host 认证授权中间件
+keel-host/src/nativeMain/…/host/config/               YAML 配置读写
+keel-host/src/nativeMain/…/host/route/                路由表与权限目录
+keel-host/src/nativeMain/…/host/service/              模块服务注册与转发
+keel-host/src/nativeMain/…/host/storage/              插件命名空间存储
 keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs / package actual
 keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
 keel-abi/src/nativeCpp/
   keel_abi.h                          唯一 ABI 布局来源（不透明句柄 + KEEL_CINTEROP 占位分支）
   keel_platform.h                     线程 / 同步原语（不导出、不进 Kotlin）
   keel_queue.c / keel_event.c / keel_plugin.c / keel_console.c
-keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（当前占位）
-keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口
+keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（@Controller / @GET → KeelPluginRoutes）
+keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口；@ModuleService → Key / Client / Dispatcher
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin
   src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
 keel-logger-compiler-plugin/src/main/…/logger/
