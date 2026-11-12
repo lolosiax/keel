@@ -103,7 +103,25 @@ val abiTargets: List<String> =
         ?.ifEmpty { null }
         ?: listOf(hostTargetName())
 
-val objectTasks = abiTargets.associateWith { target ->
+/**
+ * 预编译目标：只参与打包，不执行编译与归档。
+ *
+ * 跨目标工具链是目标平台的可执行文件（Windows 上跑不了 Linux gcc），
+ * 可以在对应平台（WSL / 板子 / CI）先把 `build/abi/<target>/libkeel_abi.a` 造好，
+ * 再用 `-Pkeel.abi.prebuilt=linuxX64,linuxArm64` 跳过这两个目标的本机构建。
+ */
+val prebuiltTargets: Set<String> =
+    (findProperty("keel.abi.prebuilt") as String?)
+        ?.split(',')
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.toSet()
+        .orEmpty()
+
+/** 需要在本机编译的目标；[prebuiltTargets] 里的直接复用已有静态库。 */
+val compiledTargets: List<String> = abiTargets.filterNot { it in prebuiltTargets }
+
+val objectTasks = compiledTargets.associateWith { target ->
     tasks.register<Exec>("keelAbiObjects$target") {
         group = "keel"
         description = "用 K/N 自带交叉 gcc 编译 keel-abi 的 C 源码（$target）"
@@ -133,7 +151,7 @@ val objectTasks = abiTargets.associateWith { target ->
     }
 }
 
-val archiveTasks = abiTargets.associateWith { target ->
+val archiveTasks = compiledTargets.associateWith { target ->
     tasks.register<Exec>("keelAbiArchive$target") {
         group = "keel"
         description = "把目标文件归档成 libkeel_abi.a（$target）"
