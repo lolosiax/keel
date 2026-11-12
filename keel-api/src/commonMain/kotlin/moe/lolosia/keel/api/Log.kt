@@ -29,6 +29,50 @@ object Log {
         this.sink = sink
     }
 
+    /** 历史日志来源；未安装时历史为空、没有单条记录。 */
+    private var historySource: LogHistory = NoneLogHistory
+
+    /** 安装历史日志来源。Host 装本地环形缓冲，插件装事件泵实现。 */
+    fun installHistory(source: LogHistory) {
+        this.historySource = source
+    }
+
+    /**
+     * 批量拉取文本视图（Host 渲染，格式与控制台一致）。
+     *
+     * @param startId `-1` 只要订阅之后的新日志；`0` 从最老一条重放；`> 0` 只取 id 更大的
+     * @param limit   最多返回多少条
+     */
+    fun history(
+        format: LogTextFormat = LogTextFormat.PLAIN,
+        startId: Long = 0,
+        limit: Int = Int.MAX_VALUE,
+    ): List<Pair<Long, String>> =
+        historySource.page(cursorOf(startId), limit, format.toLogFormat())
+            .lines.map { it.id to it.text }
+
+    /** 批量拉取结构化记录（RAW 视图）。 */
+    fun records(startId: Long = 0, limit: Int = Int.MAX_VALUE): List<Pair<Long, LogRecord>> =
+        historySource.page(cursorOf(startId), limit, LogFormat.RAW)
+            .records.map { it.id to it }
+
+    /** 取单独一条记录；已被淘汰或尚未分配时返回 null。 */
+    fun get(id: Long): LogRecord? = historySource.get(id)
+
+    /** 取单独一条的渲染文本；语义同 [get]。 */
+    fun getText(id: Long, format: LogTextFormat = LogTextFormat.PLAIN): String? =
+        historySource.get(id)?.let { LogRecordFormat.render(it, format) }
+
+    /** 输出一条不加格式化前缀的原始行（横幅等）。 */
+    fun banner(text: String) = sink.logRaw(text)
+
+    /** `-1` 表示「只要新日志」，用游标最大值表达。 */
+    private fun cursorOf(startId: Long): Long =
+        if (startId < 0) Long.MAX_VALUE else startId
+
+    private fun LogTextFormat.toLogFormat(): LogFormat =
+        if (this == LogTextFormat.ANSI) LogFormat.ANSI else LogFormat.PLAIN
+
     /** 调整模块列与来源列宽度。 */
     fun configure(moduleWidth: Int = this.moduleWidth, displayNameWidth: Int = this.displayNameWidth) {
         require(moduleWidth > 3) { "moduleWidth 至少为 4" }

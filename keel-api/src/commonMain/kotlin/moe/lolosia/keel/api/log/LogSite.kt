@@ -1,5 +1,6 @@
 package moe.lolosia.keel.api.log
 
+import kotlinx.serialization.Serializable
 import moe.lolosia.keel.api.Log
 
 /**
@@ -15,6 +16,7 @@ import moe.lolosia.keel.api.Log
  * @property functionName 最近具名函数；属性初始化器 / init 块为 null
  * @property kind        直接包裹语句的声明类型
  */
+@Serializable
 class LogSite(
     val displayName: String,
     val file: String,

@@ -4,6 +4,7 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.host.ClasspathNames
 import moe.lolosia.keel.api.log.ModuleColors
 import moe.lolosia.keel.classpath.Classpath
+import moe.lolosia.keel.host.LogArchive
 import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.capability.DatabaseSettings
 import moe.lolosia.keel.host.capability.HostCapabilities
@@ -60,6 +61,10 @@ internal object HostPlugins {
         loader = PluginLoader(host, cacheDir)
         HostCapabilities.init(cacheDir)
         HostConfigs.init(cacheDir)
+        // 配置就绪后调整归档容量；没有配置项时沿用默认值
+        HostConfigs.logArchiveLimits()?.let { (records, bytes) ->
+            LogArchive.configure(records, bytes)
+        }
         HostStorage.init(cacheDir)
         PluginResources.init(cacheDir)
     }

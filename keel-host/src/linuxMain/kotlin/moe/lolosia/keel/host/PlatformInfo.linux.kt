@@ -12,6 +12,12 @@ actual fun formatLocalTimestamp(): String = memScoped {
     buffer.toKString()
 }
 
+actual fun currentTimeMillis(): Long = memScoped {
+    val tv = alloc<timeval>()
+    gettimeofday(tv.ptr, null)
+    tv.tv_sec * 1000L + tv.tv_usec / 1000L
+}
+
 actual fun currentWorkingDirectory(): String = memScoped {
     val buffer = allocArray<ByteVar>(4096)
     if (getcwd(buffer, 4096uL) == null) "?" else buffer.toKString()

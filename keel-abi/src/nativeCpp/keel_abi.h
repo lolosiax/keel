@@ -116,6 +116,13 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_SERVICE_CALL 9u
 
 /*
+ * Host 通知插件：有新日志。
+ *
+ * 无载荷、可合并，只表示「按游标来拉取」；日志正文永远不放进事件泵。
+ */
+#define KEEL_SUBJECT_LOG_WAKE 10u
+
+/*
  * 认证 SPI：Host 向声明了 `provides: ["authn"]` 的插件询问 token 对应的用户。
  *
  * 请求载荷是 CBOR 的 AuthnRequest（token）；应答是 CBOR 的 AuthnReply，
@@ -151,6 +158,20 @@ typedef struct KeelQueueTag KeelQueue;
 
 /* 不透明句柄：C 层引用计数表的槽位地址，任何语言都不得解引用。 */
 typedef void *KeelHandle;
+
+/*
+ * 不透明互斥锁句柄。
+ *
+ * 与 KeelQueueTag 同理：cinterop 侧给完整占位定义，C 实现侧只看到前向声明。
+ * Kotlin 侧只持有指针，不得解引用、分配或按值传递。
+ */
+#ifdef KEEL_CINTEROP
+typedef struct KeelLockTag {
+    void *reserved;
+} KeelLock;
+#else
+typedef struct KeelLockTag KeelLock;
+#endif
 
 struct KeelEvent;
 
@@ -364,6 +385,16 @@ KeelStatus keel_queue_pop(KeelQueue *queue, KeelEvent *out, uint32_t timeout_ms)
 
 /* 唤醒所有等待者（用于关闭时让 pop 返回 KEEL_ERR_CLOSED）。 */
 void keel_queue_wake(KeelQueue *queue);
+
+/*
+ * 进程内互斥锁：跨线程共享可变状态时使用（如 Host 的日志环形缓冲）。
+ *
+ * 只保证互斥，不保证公平；调用方必须保证 acquire / release 成对。
+ */
+KeelLock *keel_lock_create(void);
+void keel_lock_destroy(KeelLock *lock);
+void keel_lock_acquire(KeelLock *lock);
+void keel_lock_release(KeelLock *lock);
 
 /*
  * 每个二进制自带的默认归还实现：用本二进制的 allocator 释放载荷。

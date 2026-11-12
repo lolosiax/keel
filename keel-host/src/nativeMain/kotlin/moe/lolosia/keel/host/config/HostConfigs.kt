@@ -55,6 +55,23 @@ internal object HostConfigs {
         }
     }
 
+    /**
+     * 日志归档容量：`log.archive.maxRecords` / `log.archive.maxMemoryBytes`。
+     *
+     * 任一项缺失或不是正数时返回 null，沿用 [moe.lolosia.keel.host.LogArchive] 的默认值。
+     */
+    fun logArchiveLimits(): Pair<Int, Long>? {
+        val config = mainline ?: return null
+        val records = runCatching {
+            config.read(Int.serializer(), "log.archive.maxRecords")
+        }.getOrNull() ?: return null
+        val bytes = runCatching {
+            config.read(Long.serializer(), "log.archive.maxMemoryBytes")
+        }.getOrNull() ?: return null
+        if (records <= 0 || bytes <= 0) return null
+        return records to bytes
+    }
+
     fun read(pluginId: ULong, request: ConfigReadRequest): ConfigReadReply {
         val config = configFor(pluginId, request.scope)
         return try {

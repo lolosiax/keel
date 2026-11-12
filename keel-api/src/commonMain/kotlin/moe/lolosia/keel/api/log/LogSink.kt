@@ -32,4 +32,13 @@ interface LogSink {
         moduleAnsi: String? = null,
         site: LogSite? = null,
     ) = log(level, site, tag, message, cause)
+
+    /**
+     * 输出一条不加时间 / 级别 / 模块前缀的原始行（横幅、第三方输出）。
+     *
+     * 默认实现退化成一条 INFO 日志；Host 侧覆盖后原样写入归档与文件。
+     */
+    fun logRaw(text: String) {
+        log(LogLevel.INFO, null, null, text, null)
+    }
 }

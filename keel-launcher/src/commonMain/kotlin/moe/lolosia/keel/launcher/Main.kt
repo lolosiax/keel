@@ -1,7 +1,7 @@
 package moe.lolosia.keel.launcher
 
 import moe.lolosia.keel.api.Log
-import moe.lolosia.keel.host.HostLogSink
+import moe.lolosia.keel.host.installHostLogging
 import moe.lolosia.keel.host.main as runHost
 
 /**
@@ -17,7 +17,7 @@ fun main(args: Array<String>) {
         runHost(args)
         return
     }
-    Log.install(HostLogSink)
+    installHostLogging()
     Log.info("keel launcher 0.1.0-SNAPSHOT")
     runHost(args)
 }

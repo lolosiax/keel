@@ -58,7 +58,7 @@ fun main(args: Array<String>) {
     }
 
     val logDir = startLogFile()
-    Log.install(HostLogSink)
+    installHostLogging()
 
     // --inspect 是一次性诊断，不值得为它常驻一个看门狗进程
     if (args.firstOrNull() != "--inspect") {

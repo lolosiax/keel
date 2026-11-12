@@ -15,6 +15,14 @@ actual fun formatLocalTimestamp(): String = memScoped {
     }
 }
 
+actual fun currentTimeMillis(): Long = memScoped {
+    val fileTime = alloc<FILETIME>()
+    GetSystemTimeAsFileTime(fileTime.ptr)
+    val ticks = (fileTime.dwHighDateTime.toLong() shl 32) or fileTime.dwLowDateTime.toLong()
+    // FILETIME 是 100ns 计数，起点 1601-01-01；换成 Unix epoch 毫秒
+    ticks / 10_000L - 11_644_473_600_000L
+}
+
 actual fun currentWorkingDirectory(): String = memScoped {
     val buffer = allocArray<UShortVar>(32768)
     val length = GetCurrentDirectoryW(32768u, buffer)

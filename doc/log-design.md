@@ -45,10 +45,10 @@ data class LogRecord(
     val error: LogError? = null,
     /** 横幅这类非标准行：文本视图原样输出，不加时间 / 级别前缀。 */
     val banner: Boolean = false,
-    /** 控制台强制模块色（`96` / `38;2;r;g;b`）。只在 Host 进程内使用，不参与序列化。 */
-    @Transient val moduleStyle: String? = null,
-    /** 控制台强制来源色。只在 Host 进程内使用，不参与序列化。 */
-    @Transient val sourceStyle: String? = null,
+    /** 控制台强制模块色（SGR，如 `96`）。只在 Host 进程内使用，不参与序列化。 */
+    @Transient val moduleAnsi: String? = null,
+    /** 控制台已着色的来源列文本。只在 Host 进程内使用，不参与序列化。 */
+    @Transient val sourceAnsi: String? = null,
 )
 ```
 
@@ -398,7 +398,7 @@ keelPlugin {
 
 | 模块 | 改动 |
 |---|---|
-| `keel-api` | 新增 `log/LogRecord.kt`、`log/LogError.kt`、`log/LogLine.kt`、`log/LogPage.kt`、`log/LogFormat.kt`、`log/LogTextFormat.kt`、`log/LogRecordFormat.kt`（Host / 插件共用的渲染器）；`LogSite` 加 `@Serializable`；`Log` 增加 `history` / `records` / `get` / `getText` / `observe` / `observeRecords` / `banner`；`LogSink.logRaw` 默认实现；`LogHistorySource`（`install` 用）；`host/HostSubjects` 追加 3 个 subject；`worker/LogSubscriptions.kt`、`worker/PluginLogSource.kt`；`PluginWorker.dispatchEvent` 处理 `LOG_WAKE` |
+| `keel-api` | 新增 `log/LogRecord.kt`、`log/LogError.kt`、`log/LogLine.kt`、`log/LogPage.kt`、`log/LogFormat.kt`、`log/LogTextFormat.kt`、`log/LogRecordFormat.kt`（Host / 插件共用的渲染器）、`log/LogHistory.kt` + `NoneLogHistory.kt`；`LogSite` 加 `@Serializable`；`Log` 增加 `history` / `records` / `get` / `getText` / `banner` / `installHistory`（`observe` 在 P2 加）；`LogSink.logRaw` 默认实现；`host/HostSubjects` 追加 3 个 subject |
 | `keel-host` | `LogArchive.kt`（环 + 容量核算 + 分页）、`LogHub.kt`（订阅表 / 合并唤醒 / dropPlugin）、`LogLock`（expect + native actual）、`HostLogSource.kt`、`HostLogSink` 改为「建记录 → 渲染」、`HostPump` 处理 3 个 subject 与 `flushWakes`、`HostPlugins.stop` 清理订阅、`HostBootstrap` 改用 `Log.banner`、`currentTimeMillis()` |
 | `keel-abi` | `keel_abi.h` 加 `KEEL_SUBJECT_LOG_WAKE`；`keel_console.c` 加 `keel_console_available` / `keel_console_attach` / `keel_console_alloc` |
 | `keel-plugin-gradle-plugin` | `KeelExecutableExtension.console`、`KeelExecutableTask` 的 PE 子系统 patch、`KeelBundlePlugin` 透传、`KeelRunTask` 注入 `KEEL_CONSOLE=1` |

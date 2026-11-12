@@ -1,12 +1,14 @@
 package moe.lolosia.keel.host
 
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.error.toKeelError
 import moe.lolosia.keel.api.log.*
 
 /**
  * Host 日志出口。
  *
- * 输出格式：`HH:mm:ss 级别 模块 来源 : 消息`。
+ * 每条日志先归档成 [LogRecord]，再从同一条记录渲染控制台行与文件行：
+ * 于是 Console、`work/log` 下的日志文件与插件通过 [Log.history] 拿到的文本逐字节一致。
  *
  * 模块列为 Host / 插件日志名 / 自定义 tag，按 [Log.moduleWidth] 补齐；
  * 来源列为 `短类名:行号`，按 [Log.displayNameWidth] 缩短并补齐；
@@ -20,36 +22,16 @@ object HostLogSink : LogSink {
     private val useColor = ansiSupported()
 
     override fun log(level: LogLevel, site: LogSite?, tag: String?, message: String, cause: Throwable?) {
-        val module = tag ?: "Host"
-        val source = site?.display(Log.displayNameWidth) ?: "-"
-        val console = LogLineFormatter.format(
-            timestamp = formatLocalTimestamp(),
+        emit(
             level = level,
-            module = module,
-            source = source,
+            module = tag ?: "Host",
+            site = site,
+            source = null,
+            moduleAnsi = null,
+            sourceAnsi = null,
             message = message,
-            cause = cause,
-            color = useColor,
-            printedAt = site?.traceLocation(),
-        )
-        consoleOutBegin()
-        println(console)
-        consoleOutEnd()
-        appendLogFile(
-            if (useColor) {
-                LogLineFormatter.format(
-                    timestamp = formatLocalTimestamp(),
-                    level = level,
-                    module = module,
-                    source = source,
-                    message = message,
-                    cause = cause,
-                    color = false,
-                    printedAt = site?.traceLocation(),
-                )
-            } else {
-                console
-            } + "\n",
+            error = cause?.let { logErrorOf(it, site?.traceLocation()) },
+            banner = false,
         )
     }
 
@@ -63,37 +45,82 @@ object HostLogSink : LogSink {
         moduleAnsi: String?,
         site: LogSite?,
     ) {
-        val module = tag ?: "Host"
-        val console = LogLineFormatter.format(
-            timestamp = formatLocalTimestamp(),
+        emit(
             level = level,
-            module = module,
+            module = tag ?: "Host",
+            site = site,
             source = source,
-            message = message,
-            cause = cause,
-            color = useColor,
             moduleAnsi = moduleAnsi,
-            sourceAnsi = if (useColor) sourceAnsi else null,
-            printedAt = site?.traceLocation(),
-        )
-        consoleOutBegin()
-        println(console)
-        consoleOutEnd()
-        appendLogFile(
-            if (useColor) {
-                LogLineFormatter.format(
-                    timestamp = formatLocalTimestamp(),
-                    level = level,
-                    module = module,
-                    source = source,
-                    message = message,
-                    cause = cause,
-                    color = false,
-                    printedAt = site?.traceLocation(),
-                )
-            } else {
-                console
-            } + "\n",
+            sourceAnsi = sourceAnsi,
+            message = message,
+            error = cause?.let { logErrorOf(it, site?.traceLocation()) },
+            banner = false,
         )
     }
+
+    override fun logRaw(text: String) {
+        emit(
+            level = LogLevel.INFO,
+            module = "",
+            site = null,
+            source = null,
+            moduleAnsi = null,
+            sourceAnsi = null,
+            message = text,
+            error = null,
+            banner = true,
+        )
+    }
+
+    private fun emit(
+        level: LogLevel,
+        module: String,
+        site: LogSite?,
+        source: String?,
+        moduleAnsi: String?,
+        sourceAnsi: String?,
+        message: String,
+        error: LogError?,
+        banner: Boolean,
+    ) {
+        val record = LogArchive.append(
+            level = level,
+            module = module,
+            site = site,
+            source = source,
+            moduleAnsi = moduleAnsi,
+            sourceAnsi = sourceAnsi,
+            message = message,
+            error = error,
+            banner = banner,
+        )
+
+        consoleOutBegin()
+        println(
+            LogRecordFormat.render(
+                record,
+                if (useColor) LogTextFormat.ANSI else LogTextFormat.PLAIN,
+            )
+        )
+        consoleOutEnd()
+
+        // 文件里始终是纯文本；着色版只用于控制台
+        appendLogFile(LogRecordFormat.render(record, LogTextFormat.PLAIN) + "\n")
+    }
+}
+
+/**
+ * 把异常转成 [LogError]。
+ *
+ * 先渲染完整文本（要读 `ThrowTrace` 侧表），再拆结构化链——后者会释放侧表条目。
+ */
+private fun logErrorOf(error: Throwable, printedAt: String?): LogError {
+    val text = StackTraceFormat.throwable(error, printedAt)
+    val payload = error.toKeelError()
+    return LogError(
+        chain = payload.chain,
+        text = text,
+        printedAt = printedAt,
+        truncated = payload.truncated,
+    )
 }
