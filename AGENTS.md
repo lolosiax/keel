@@ -193,6 +193,8 @@ gradlew -p keel-plugin-ksp publish
       `Log.site()` 也可以单独取用（`val site = Log.site()`），不依赖任何日志级别方法；
       未应用插件时返回 null，`inline` 函数里取到的是 inline 体内的行号。
     - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
+    - 日志归档、插件订阅（三种视图）与「控制台 / 桌面应用」切换见 [doc/log-design.md](doc/log-design.md)：
+      正文不进事件泵，只投可合并的唤醒，由插件按游标拉取。
 
 ## 5. 插件 API 与跨运行时边界
 
@@ -366,6 +368,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/basic-stack-design.md](doc/basic-stack-design.md) | **基础栈**：`keel-database-api` 是插件侧查库 klib（ABI + 门面），`keel-database-mariadb` 是 `kind: capability` 驱动包，Host 加载器在 `keel-host`；`keel-plugin-rbac` / `keel-plugin-basic-biz` 的边界、RBAC 与 biz 的交叉裁决、Host 认证/授权强制点与分阶段落地 |
 | [doc/capability-design.md](doc/capability-design.md) | **能力插件**：接口在 core、实现按需安装、稳定 C ABI、可卸载；首个示例 Lua 中间件引擎 |
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
+| [doc/log-design.md](doc/log-design.md) | **日志归档与订阅**：环形缓冲与容量核算、文本 / 结构化两种视图、插件 Flow 订阅与背压、控制台 / 桌面应用切换 |
 | [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接**：已完成模块、构建命令、验证结果、下一步与已知坑 |
 | [doc/roadmap.md](doc/roadmap.md) | DEMO / P0 / P1 / P2 的目标、交付物、验收标准与待决问题 |
 | [doc/logo/](doc/logo/) | **图标源文件**：`keel-icon-hollow.svg`（≥40px）、`keel-icon-solid.svg`（<40px）、`generate-icon.py`。构建用的 `keel-icon.ico` 由脚本生成到 `keel-classpath-gradle-plugin/src/main/resources/moe/lolosia/keel/gradle/classpath/`，作为没配 `windows { icon = … }` 时的默认应用图标；不要手工编辑 `.ico`，改 SVG 后重跑脚本 |
