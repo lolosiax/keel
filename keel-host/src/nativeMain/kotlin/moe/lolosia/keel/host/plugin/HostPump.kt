@@ -15,9 +15,7 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
-import moe.lolosia.keel.api.host.HostSubjects
-import moe.lolosia.keel.api.host.InvalidateRequest
-import moe.lolosia.keel.api.host.PermissionCatalogReply
+import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
@@ -431,6 +429,39 @@ internal object HostPump {
                 val request = decodeInvalidate(payload)
                 HostAuth.invalidateAuthorization(request?.userId)
                 ByteArray(0)
+            }
+
+            HostSubjects.CLASSPATH -> {
+                val request = decodePayload(ClasspathRequest.serializer(), payload, "资源读取")
+                val namespace = request.pluginId
+                    ?: HostPluginIds.nameOf(source)
+                    ?: throw IllegalArgumentException("插件 $source 没有登记资源命名空间")
+                val classpath = HostPlugins.classpathOf(namespace)
+                    ?: throw IllegalArgumentException("插件资源不存在：$namespace")
+                ServiceWire.encode(
+                    ClasspathReply.serializer(),
+                    when (request.op) {
+                        ClasspathOp.READ -> ClasspathReply(bytes = classpath.read(request.path))
+                        ClasspathOp.EXISTS -> ClasspathReply(exists = classpath.exists(request.path))
+                        ClasspathOp.LIST -> ClasspathReply(entries = classpath.list(request.path))
+                    },
+                )
+            }
+
+            HostSubjects.CACHE_DIR -> ServiceWire.encode(
+                CacheDirReply.serializer(),
+                CacheDirReply(
+                    PluginResources.cacheDir(source)
+                        ?: throw IllegalStateException("插件 $source 尚未分配资源目录")
+                ),
+            )
+
+            HostSubjects.MATERIALIZE -> {
+                val request = decodePayload(MaterializeRequest.serializer(), payload, "资源物化")
+                ServiceWire.encode(
+                    MaterializeReply.serializer(),
+                    MaterializeReply(PluginResources.materialize(source, request.path)),
+                )
             }
 
             else -> error("Host 没有该 subject 的处理器：$subject")

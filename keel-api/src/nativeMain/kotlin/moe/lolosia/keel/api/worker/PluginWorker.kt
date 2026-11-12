@@ -12,6 +12,7 @@ import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.error.*
+import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.web.*
 
@@ -79,7 +80,17 @@ object PluginWorker {
             version = "",
             entry = "",
         )
-        val context = PluginContextImpl(metadata, logger)
+        // 资源目录在 onLoad 之前拿到：插件把临时文件、物化产物都写在那里
+        val cacheDir = try {
+            ServiceWire.decode(
+                CacheDirReply.serializer(),
+                callHost(HostSubjects.CACHE_DIR.toULong(), ByteArray(0)),
+            ).path
+        } catch (e: Throwable) {
+            Log.error("插件缓存目录分配失败", cause = e)
+            return KEEL_ERR_FAILED
+        }
+        val context = PluginContextImpl(metadata, logger, cacheDir)
         PluginWorker.pluginContext = context
 
         return try {

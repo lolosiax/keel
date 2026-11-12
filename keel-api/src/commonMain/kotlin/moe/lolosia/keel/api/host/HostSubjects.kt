@@ -25,4 +25,13 @@ object HostSubjects {
 
     /** 请求：插件命名空间存储；载荷 / 应答见 `StorageRequest` / `StorageReply`。 */
     const val STORAGE: Long = 0x1006L
+
+    /** 请求：读 `.keel` 资源；载荷 / 应答见 [ClasspathRequest] / [ClasspathReply]。 */
+    const val CLASSPATH: Long = 0x1007L
+
+    /** 请求：本插件的可写缓存目录；载荷为空，应答见 [CacheDirReply]。 */
+    const val CACHE_DIR: Long = 0x1008L
+
+    /** 请求：把包内资源物化到缓存目录；载荷 / 应答见 [MaterializeRequest] / [MaterializeReply]。 */
+    const val MATERIALIZE: Long = 0x1009L
 }

@@ -8,11 +8,12 @@ import platform.posix.fopen
 import platform.posix.fread
 import platform.posix.fwrite
 import platform.posix.remove
+import platform.posix.rmdir
 
 /**
  * Host 侧最小文件读写，只覆盖插件加载 / 安装需要的场景。
  *
- * 故意不引入通用 IO 抽象：这里只有「查大小 / 覆盖写 / 整读 / 删除」四个动作，
+ * 故意不引入通用 IO 抽象：这里只有「查大小 / 覆盖写 / 整读 / 改名 / 删除」几个动作，
  * 配置落盘、日志等其它需求应各自处理。
  */
 internal object PluginFs {
@@ -62,7 +63,13 @@ internal object PluginFs {
 
     /** 删除文件；返回 false 表示失败（不存在、被占用或无权限）。 */
     fun delete(path: String): Boolean = remove(path) == 0
+
+    /** 改名 / 移动文件；目标已存在或跨卷时返回 false，调用方负责清理源文件。 */
+    fun rename(from: String, to: String): Boolean = platform.posix.rename(from, to) == 0
 }
+
+/** `rmdir` 在 mingw 与 linux 的签名一致，共用一份实现。 */
+internal actual fun removeDirectory(path: String): Boolean = rmdir(path) == 0
 
 /**
  * 文件字节数；文件不存在或不可读返回 null。

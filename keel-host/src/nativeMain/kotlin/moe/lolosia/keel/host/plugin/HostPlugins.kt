@@ -1,7 +1,9 @@
 package moe.lolosia.keel.host.plugin
 
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.host.ClasspathNames
 import moe.lolosia.keel.api.log.ModuleColors
+import moe.lolosia.keel.classpath.Classpath
 import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.capability.DatabaseSettings
 import moe.lolosia.keel.host.capability.HostCapabilities
@@ -58,6 +60,18 @@ internal object HostPlugins {
         HostCapabilities.init(cacheDir)
         HostConfigs.init(cacheDir)
         HostStorage.init(cacheDir)
+        PluginResources.init(cacheDir)
+    }
+
+    /**
+     * 按命名空间取资源视图；[ClasspathNames.HOST] 是 Host 自己的 classpath。
+     *
+     * 返回的引用绑定注册时的 generation，插件卸载后读取会立即失效。
+     */
+    fun classpathOf(namespace: String): Classpath? {
+        val host = classpath ?: return null
+        return if (namespace == ClasspathNames.HOST) host.serverClasspath
+        else host.registry.get(namespace)
     }
 
     fun list(): List<Entry> = entries.toList()
@@ -249,6 +263,8 @@ internal object HostPlugins {
         HostPluginIds.register(entry.pluginId, manifest.id)
         return try {
             PluginNames.register(entry.pluginId, entry.displayName)
+            // 每次启用分配新的资源目录：已加载的 DLL 留在旧目录里，不会被覆盖
+            PluginResources.beginLoad(entry.pluginId, entry.loaded)
             val runtime = startPlugin(entry.loaded, entry.pluginId)
             entry.runtime = runtime
             started += entry
@@ -258,6 +274,7 @@ internal object HostPlugins {
             true
         } catch (e: Exception) {
             failedStarts++
+            PluginResources.endLoad(entry.pluginId)
             // 插件在 onEnable 之前已经上报过服务声明，启动失败时一并撤回
             HostRoutes.remove(entry.pluginId)
             HostPermissionCatalog.remove(entry.pluginId)
@@ -274,6 +291,7 @@ internal object HostPlugins {
         entry.runtime?.shutdown()
         entry.runtime = null
         started.remove(entry)
+        PluginResources.endLoad(entry.pluginId)
         HostRoutes.remove(entry.pluginId)
         HostPermissionCatalog.remove(entry.pluginId)
         HostServices.remove(entry.pluginId)

@@ -1,6 +1,8 @@
 package moe.lolosia.keel.host.plugin
 
 import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.toKString
+import platform.posix.getenv
 import platform.posix.mkdir
 
 /**
@@ -15,4 +17,13 @@ internal actual fun mkdirs(path: String) {
         if (current.endsWith(":")) return@forEach
         mkdir(current)
     }
+}
+
+internal actual fun nativePath(path: String): String = path.replace('/', '\\')
+
+@OptIn(ExperimentalForeignApi::class)
+internal actual fun userCacheRoot(): String? {
+    val base = getenv("LOCALAPPDATA")?.toKString()
+        ?: getenv("USERPROFILE")?.toKString()?.let { "$it/AppData/Local" }
+    return base?.let { "$it/keel/cache" }
 }

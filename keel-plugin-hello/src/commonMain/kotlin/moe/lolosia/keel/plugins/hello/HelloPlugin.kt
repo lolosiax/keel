@@ -61,6 +61,7 @@ class HelloPlugin : Plugin {
         scheduleSamples()
         checkScope()
         checkConfig()
+        checkResources()
         checkStorage()
         checkDatabase()
         checkService()
@@ -90,6 +91,21 @@ class HelloPlugin : Plugin {
     private fun checkConfig() {
         val config = context.config.read<HelloConfig>()
         Log.info("配置自检：greeting=${config.greeting} repeat=${config.repeat}")
+    }
+
+    /** 资源自检：缓存目录、资源物化与自身 classpath 读取，越界路径必须被拒绝。 */
+    private fun checkResources() {
+        Log.info("资源自检：cacheDir=${context.cacheDir}")
+        val text = context.classpath.read("hello.txt")?.decodeToString()?.trim()
+        val file = context.materialize("hello.txt")
+        // 目录前缀会整棵写出（`web/` 交给 WebView 这类场景），返回目录路径
+        val webDir = context.materialize("web")
+        // 同一路径重复物化必须落到同一份文件；`..` 由 Host 拒绝
+        val same = context.materialize("hello.txt") == file
+        val rejected = runCatching { context.materialize("../escape") }.isFailure
+        Log.info(
+            "资源自检：classpath=$text materialize=$file web=$webDir 幂等=$same 越界拒绝=$rejected"
+        )
     }
 
     /** `plugin.json` 声明了 `provides: ["authn"]`，Host 会用它解析 Bearer token。 */

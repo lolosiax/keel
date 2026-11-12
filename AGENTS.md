@@ -282,7 +282,9 @@ keel-plugin-<id>/
   只声明权限的业务插件不依赖 rbac 工件；需要管理角色 / 规则时才依赖 `keel-plugin-rbac-api`。
   见 [doc/authz-design.md](doc/authz-design.md)。
 - 资源（模板、静态文件、配置默认值）放 `src/commonMain/resources`，由 `moe.lolosia.keel.classpath` 打包后在运行期读取。
-- 插件不得写 Host 的工作目录；需要持久化时通过 API 申请自己的数据目录（P1 提供）。
+- 插件不写 Host 的工作目录：临时文件与日志写 `ctx.cacheDir`（每次加载独占、下次启动回收）；
+  `LoadLibrary` / WebView 这类需要**真实文件**的资源用 `ctx.materialize("native/x.dll")` 物化到该目录。
+  小文本仍走 `ctx.classpath`。两者都是反向请求，只能在 Worker 线程调用。
 
 ## 7. Maven 发布与凭据
 
@@ -379,6 +381,8 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   event/       Event / EventBus / EventHandler / EventPriority / EventType / Subscription
   error/       KeelErrorPayload / KeelRemoteException / package.kt
   host/        HostLink / HostSubjects / InvalidateRequest / PermissionCatalogReply
+               CacheDirReply / MaterializeRequest / MaterializeReply
+               ClasspathNames / ClasspathOp / ClasspathRequest / ClasspathReply
   messaging/   Message / Messenger
   service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceWire
                GeneratedServices / ServiceBinder / ServiceDispatcher / ServiceRegistration
@@ -389,6 +393,7 @@ keel-api/src/nativeMain/…/api/worker/
   PluginWorker.kt                     `@CName` Worker 入口分发（生命周期 / PING / TIMER / HTTP / CONSOLE / SERVICE_CALL / AUTHN / AUTHZ）
   NativePluginLogger.kt               插件日志 → Host 收件箱
   PluginContextImpl / PluginServer / PluginServices / PluginRoutes / HostLinkImpl
+  PluginClasspath / HostClasspathClient       自身 `.keel` + Host 的远程资源视图
   PluginCapabilities / PluginConfig / PluginConsole / PluginStorageImpl
   WorkerScheduler / WorkerScope / WorkerDispatcher / ServiceCallerImpl
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
@@ -401,7 +406,8 @@ keel-host/src/nativeMain/…/host/                      Inspect / Plugins（CLI 
 keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
 keel-host/src/nativeMain/…/host/console/              HostConsole / ConsolePrompt / ConsoleCommand / HelpCommand / StopCommand / PluginsCommand
 keel-host/src/nativeMain/…/host/plugin/
-  PluginLoader / LibraryCache / LoadedPlugin / PluginRuntime / HostPlugins / KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
+  PluginLoader / LibraryCache / LoadedPlugin / PluginRuntime / HostPlugins / PluginResources
+  KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
   LogEvent / HostPump / PluginNames（日志解码与 Host 收件箱消费）
   NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / HostPluginIds / package.native.kt
 keel-host/src/nativeMain/…/host/capability/           能力包发现 / open / close / database 选包

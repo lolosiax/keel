@@ -65,7 +65,7 @@ hello-0.1.0.keel                  # 外层就是 zip
 - `plugin.json` 在根，不进 `resources/`；
 - 插件 dylib **不链接** `classpath.zip`，资源只在 `.keel` 里；
 - 安装后 dylib 解到缓存目录，`resources/` 不解包；
-- 插件通过 `FileZipClasspath(path, prefix = "resources/")` 读取自己的资源；
+- 插件通过 `ctx.classpath`（Host 反向请求）读取自己的资源；需要真实文件路径时用 `ctx.materialize` 物化到 `ctx.cacheDir`；
 - Host 读其他插件时直接打开对方的 `.keel`，不需要目标插件运行时参与。
 
 `plugin.json` 至少包含：
@@ -189,7 +189,22 @@ pluginId -> PluginClasspathEntry(
   - `HostClasspath`：注册、卸载、Host 资源、`transport()`；
   - `PluginPackageReader` / `KeelPackageManifest`：读取 `.keel` 包根 `plugin.json` 并注册 Classpath。
 
-插件侧的 `ClasspathTransport` 具体实现（走事件泵 / C ABI）仍待 Host 加载器落地；当前只定义了传输层与 Host 侧实现。
+插件侧不走 `ClasspathTransport`：`keel-api` 的 `HostClasspathClient` 直接用
+`HostSubjects.CLASSPATH` 反向请求读取自己的 / `of(id)` 的命名空间，
+`PluginClasspath` 负责「自身 `.keel` 优先、缺失回落 Host」的组合。
+读取只能在 Worker 线程调用；Host 侧按 generation 校验，卸载后旧引用读取报错。
+
+### 6.2 资源物化（`cacheDir` / `materialize`）
+
+二进制（DLL、wasm 产物）不能留在 zip 里，运行期需要真实文件路径：
+
+- `PluginContext.cacheDir`：`<cacheRoot>/<manifest-id>/<version>/<loadSeq>/`，每次加载分配新目录。
+  旧目录不覆盖（Windows 上已加载的 DLL 不能覆盖，改名又会破坏 import 表），由下次 Host 启动时清理。
+- `PluginContext.materialize(path)`：把 `resources/` 下的文件或目录前缀写到 `cacheDir`，
+  返回平台本地分隔符的绝对路径；拒绝 `..`、前导分隔符与盘符；同名同大小不重写。
+- `cacheRoot` 不可写时回退到用户缓存目录（`%LOCALAPPDATA%\keel\cache` / `$XDG_CACHE_HOME/keel`）。
+- Host 侧实现在 `keel-host` 的 `PluginResources`，分发入口是 `HostSubjects.CACHE_DIR` / `MATERIALIZE`；
+  物化在事件泵线程同步执行，单个文件一次读入内存后落盘，不经事件载荷传输。
 
 ---
 

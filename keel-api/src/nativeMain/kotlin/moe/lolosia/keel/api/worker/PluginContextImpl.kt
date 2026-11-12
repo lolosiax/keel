@@ -12,11 +12,13 @@ import moe.lolosia.keel.classpath.*
 /**
  * 插件上下文的最小实现。
  *
- * 当前提供元信息、日志、调度器、配置与空 classpath；其余能力在对应运行时接入前访问会直接报错。
+ * 资源相关能力（[cacheDir] / [materialize] / [classpath]）经反向请求交给 Host；
+ * 其余尚未接入的能力访问时会直接报错。
  */
 internal class PluginContextImpl(
     override val metadata: PluginMetadata,
     override val logger: PluginLogger,
+    override val cacheDir: String,
 ) : PluginContext {
 
     override val server: KeelServer by lazy {
@@ -28,8 +30,17 @@ internal class PluginContextImpl(
     override val config: Config by lazy {
         PluginConfig(host, ConfigScope.PLUGIN)
     }
-    override val classpath: Classpath = EmptyClasspath
+    override val classpath: Classpath by lazy { PluginClasspath() }
     override val routes: Routes get() = PluginRoutes
     override val scheduler: Scheduler get() = WorkerScheduler
     override val scope: CoroutineScope get() = WorkerScope
+
+    override fun materialize(path: String): String =
+        ServiceWire.decode(
+            MaterializeReply.serializer(),
+            host.request(
+                HostSubjects.MATERIALIZE,
+                ServiceWire.encode(MaterializeRequest.serializer(), MaterializeRequest(path)),
+            ),
+        ).path
 }
