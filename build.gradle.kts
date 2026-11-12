@@ -32,6 +32,7 @@ val publishableBuilds = listOf(
     "keel-classpath-full",
     "keel-api",
     "keel-host",
+    "keel-launcher",
     "keel-database-api",
     "keel-database-mariadb",
     "keel-plugin-rbac-api",

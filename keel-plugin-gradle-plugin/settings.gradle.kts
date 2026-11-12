@@ -11,6 +11,9 @@ pluginManagement {
     }
 }
 
+// 单 exe 产出复用 keel-classpath-gradle-plugin 的 Windows 资源 helper
+includeBuild("../keel-classpath-gradle-plugin")
+
 dependencyResolutionManagement {
     repositories {
         // 本地开发：先 publishAllToMavenLocal，再单独构建本目录

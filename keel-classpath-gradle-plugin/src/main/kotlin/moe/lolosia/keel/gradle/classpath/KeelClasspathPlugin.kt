@@ -154,12 +154,26 @@ class KeelClasspathPlugin : Plugin<Project> {
             task.outputs.file(rc)
             task.doLast {
                 embedDir.mkdirs()
-                val icon = embedDir.resolve(ICON_FILE)
-                if (iconSource != null) iconSource.copyTo(icon, overwrite = true) else extractDefaultIcon(icon)
+                val icon = embedDir.resolve(KeelWindowsResources.ICON_FILE)
+                if (iconSource != null) {
+                    iconSource.copyTo(icon, overwrite = true)
+                } else {
+                    KeelWindowsResources.extractDefaultIcon(icon)
+                }
                 rc.writeText(
-                    buildWindowsResourceScript(
-                        embedClasspath = zipTask != null,
-                        icon = ICON_FILE,
+                    KeelWindowsResources.buildScript(
+                        embedded = if (zipTask != null) {
+                            listOf(
+                                KeelEmbeddedResource(
+                                    id = "IDR_CLASSPATH",
+                                    type = "CLASSPATH",
+                                    file = CLASSPATH_ZIP_NAME,
+                                )
+                            )
+                        } else {
+                            emptyList()
+                        },
+                        icon = KeelWindowsResources.ICON_FILE,
                         version = version,
                         productName = productName,
                         fileDescription = fileDescription,
@@ -182,7 +196,7 @@ class KeelClasspathPlugin : Plugin<Project> {
             zipTask?.let { task.inputs.file(embedDir.resolve(CLASSPATH_ZIP_NAME)) }
             task.outputs.file(embedDir.resolve(CLASSPATH_RES))
 
-            val binDir = konanMingwBinDir()
+            val binDir = KeelWindowsResources.konanMingwBinDir()
             task.commandLine(
                 File(binDir, "windres").absolutePath,
                 // 版本信息里可能有中文，资源脚本按 UTF-8 写，windres 也要按 UTF-8 读
@@ -304,98 +318,6 @@ class KeelClasspathPlugin : Plugin<Project> {
         return "/mnt/$drive$rest"
     }
 
-    /**
-     * 生成 windres 用的 `.rc`。
-     *
-     * 版本号取 Gradle 的 `version`（FILEVERSION 只认 4 段数字，`-SNAPSHOT` 这类后缀会被丢掉），
-     * 文件内容按 UTF-8 写，windres 侧用 `--codepage=65001` 读。
-     */
-    private fun buildWindowsResourceScript(
-        embedClasspath: Boolean,
-        icon: String,
-        version: String,
-        productName: String,
-        fileDescription: String,
-        companyName: String,
-        copyright: String,
-        internalName: String,
-        executableName: String,
-    ): String {
-        val quad = winVersionParts(version).joinToString(",")
-        val quote = { value: String -> value.replace("\"", "'") }
-
-        return buildString {
-            appendLine("// 由 Gradle 生成，不要手改：版本号取工程 version，名称来自 keelClasspath { windows { … } }。")
-            appendLine("// 文件本身是 UTF-8，windres 以 --codepage=65001 读取。")
-            if (embedClasspath) {
-                appendLine()
-                appendLine("// 内嵌 classpath.zip（自定义资源类型），名字与 EmbeddedClasspath.mingw.kt 的查找逻辑对应。")
-                appendLine("IDR_CLASSPATH  CLASSPATH  \"$CLASSPATH_ZIP_NAME\"")
-            }
-            appendLine()
-            appendLine("// 应用图标；未配置 keelClasspath { windows { icon = … } } 时用插件内置的默认图标。")
-            appendLine("1 ICON \"$icon\"")
-            appendLine()
-            appendLine("1 VERSIONINFO")
-            appendLine("FILEVERSION $quad")
-            appendLine("PRODUCTVERSION $quad")
-            appendLine("FILEFLAGSMASK 0x3fL")
-            appendLine("FILEFLAGS 0x0L")
-            appendLine("FILEOS 0x40004L")
-            appendLine("FILETYPE 0x1L")
-            appendLine("FILESUBTYPE 0x0L")
-            appendLine("BEGIN")
-            appendLine("  BLOCK \"StringFileInfo\"")
-            appendLine("  BEGIN")
-            appendLine("    BLOCK \"040904b0\"")
-            appendLine("    BEGIN")
-            if (companyName.isNotBlank()) {
-                appendLine("      VALUE \"CompanyName\", \"${quote(companyName)}\"")
-            }
-            appendLine("      VALUE \"FileDescription\", \"${quote(fileDescription)}\"")
-            appendLine("      VALUE \"FileVersion\", \"${quote(version)}\"")
-            appendLine("      VALUE \"InternalName\", \"${quote(internalName)}\"")
-            if (copyright.isNotBlank()) {
-                appendLine("      VALUE \"LegalCopyright\", \"${quote(copyright)}\"")
-            }
-            appendLine("      VALUE \"OriginalFilename\", \"${quote(executableName)}\"")
-            appendLine("      VALUE \"ProductName\", \"${quote(productName)}\"")
-            appendLine("      VALUE \"ProductVersion\", \"${quote(version)}\"")
-            appendLine("    END")
-            appendLine("  END")
-            appendLine("  BLOCK \"VarFileInfo\"")
-            appendLine("  BEGIN")
-            appendLine("    VALUE \"Translation\", 0x409, 1200")
-            appendLine("  END")
-            appendLine("END")
-        }
-    }
-
-    /** `1.0.0-SNAPSHOT` → `[1, 0, 0, 0]`：FILEVERSION 只接受 4 段数字。 */
-    private fun winVersionParts(version: String): List<Int> {
-        val numeric = version.substringBefore('-').substringBefore('+')
-        val parts = numeric.split('.').map { segment -> segment.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
-        return (parts + List(4) { 0 }).take(4)
-    }
-
-    /** 把插件内置的默认图标释放到构建目录，供 windres 读取。 */
-    private fun extractDefaultIcon(target: File) {
-        val stream = KeelClasspathPlugin::class.java.getResourceAsStream(DEFAULT_ICON_RESOURCE)
-            ?: error("插件 jar 内找不到默认图标：$DEFAULT_ICON_RESOURCE")
-        stream.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
-    }
-
-    private fun konanMingwBinDir(): File {
-        val konanDataDir = System.getenv("KONAN_DATA_DIR")
-            ?: "${System.getProperty("user.home")}/.konan"
-        val binDir = File(konanDataDir, "dependencies/msys2-mingw-w64-x86_64-2/bin")
-        check(binDir.isDirectory) {
-            "未找到 Kotlin/Native 自带的 mingw 工具链：$binDir\n" +
-                "请先执行一次 mingwX64 链接（会自动下载工具链），或检查 KONAN_DATA_DIR。"
-        }
-        return binDir
-    }
-
     private data class ObjcopyConfig(
         val tool: String,
         val outputFormat: String,
@@ -419,7 +341,5 @@ class KeelClasspathPlugin : Plugin<Project> {
         const val CLASSPATH_RES = "classpath.res"
         const val CLASSPATH_OBJECT = "classpath.o"
         const val RC_FILE = "classpath.rc"
-        const val ICON_FILE = "keel-icon.ico"
-        const val DEFAULT_ICON_RESOURCE = "/moe/lolosia/keel/gradle/classpath/keel-icon.ico"
     }
 }

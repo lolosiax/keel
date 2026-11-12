@@ -1,12 +1,16 @@
 package moe.lolosia.keel.gradle.plugin
 
+import org.gradle.api.Action
+import org.gradle.api.Project
+
 /**
  * `.keel` 打包扩展。
  *
  * 默认把 `src/commonMain/resources` 作为资源，`plugin.json` 放在包根；
  * `targets` 为空时按当前宿主选择（Windows → mingwX64，Linux ARM → linuxArm64）。
+ * 显式开启 [executable] 时，同一个工程额外产出一个内嵌 bundle 的单文件 exe。
  */
-open class KeelPluginExtension {
+open class KeelPluginExtension(private val project: Project) {
 
     var enabled: Boolean = true
 
@@ -30,6 +34,9 @@ open class KeelPluginExtension {
 
     /** 额外资源目录；统一放进包内 `resources/`。 */
     val resources: MutableList<String> = mutableListOf()
+
+    /** 单 exe 产出配置；默认关闭。 */
+    val executable: KeelExecutableExtension = KeelExecutableExtension(project)
 
     /**
      * `keelRun` 用的 Host 可执行文件；为空时按 `keelVersion` 从 Maven 取
@@ -65,6 +72,10 @@ open class KeelPluginExtension {
 
     fun resources(vararg paths: String) {
         resources += paths
+    }
+
+    fun executable(action: Action<KeelExecutableExtension>) {
+        action.execute(executable)
     }
 
     /** 追加一个运行期 `.keel` 工件，例如 `moe.lolosia.keel:keel-database-mariadb:0.1.0-SNAPSHOT@keel`。 */

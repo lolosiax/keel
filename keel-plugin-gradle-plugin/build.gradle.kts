@@ -18,10 +18,14 @@ dependencies {
     implementation(libs.kotlin.gradle.plugin)
     // 插件工程自动带上 ABI 静态库注入；composite 下由 includeBuild 替换成本地工程
     implementation("moe.lolosia.keel.toolchain:keel-abi-gradle-plugin:${libs.versions.keel.get()}")
+    // 单 exe 产出复用 classpath 插件的 Windows 资源脚本 / windres 定位
+    implementation("moe.lolosia.keel.toolchain:keel-classpath-gradle-plugin:${libs.versions.keel.get()}")
     // 插件工程自动 apply KSP，并接入 Worker 入口生成器
     implementation("com.google.devtools.ksp:symbol-processing-gradle-plugin:${libs.versions.ksp.get()}")
     // 插件工程自动带日志调用改写
     implementation("moe.lolosia.keel.toolchain:keel-logger-gradle-plugin:${libs.versions.keel.get()}")
+    // Windows PE 资源注入（单 exe 的版本 / 图标 / 内嵌 bundle）
+    implementation(libs.jna.platform)
 }
 
 gradlePlugin {
@@ -29,6 +33,10 @@ gradlePlugin {
         create("keelPluginPackaging") {
             id = "moe.lolosia.keel.plugin"
             implementationClass = "moe.lolosia.keel.gradle.plugin.KeelPluginPackagingPlugin"
+        }
+        create("keelBundle") {
+            id = "moe.lolosia.keel.bundle"
+            implementationClass = "moe.lolosia.keel.gradle.plugin.KeelBundlePlugin"
         }
     }
 }

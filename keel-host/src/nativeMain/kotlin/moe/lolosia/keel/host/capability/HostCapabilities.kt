@@ -1,6 +1,9 @@
 package moe.lolosia.keel.host.capability
 
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.host.plugin.FilePluginPackage
+import moe.lolosia.keel.host.plugin.PluginPackage
+import moe.lolosia.keel.host.plugin.PluginPackageReader
 import moe.lolosia.keel.host.plugin.setHostDatabase
 
 /**
@@ -23,16 +26,24 @@ internal object HostCapabilities {
         loader = CapabilityLoader(cacheRoot)
     }
 
-    /** 解包一个 `kind: capability` 的包；失败由调用方计入加载失败。 */
+    /** 解包一个磁盘上的 `kind: capability` 包；失败由调用方计入加载失败。 */
     fun install(keelPath: String) {
-        val entry = requireLoader().install(keelPath)
-        installed += entry
+        install(FilePluginPackage(keelPath, PluginPackageReader.read(keelPath)))
+    }
+
+    /** 解包一个已解析的能力包条目（磁盘或内嵌 bundle）；失败由调用方计入加载失败。 */
+    fun install(entry: PluginPackage) {
+        val capability = requireLoader().install(entry)
+        installed += capability
         Log.info(
-            "capability ${entry.manifest.id} v${entry.manifest.version}" +
-                " provides=${entry.manifest.provides} schemes=${entry.manifest.schemes}",
+            "capability ${capability.manifest.id} v${capability.manifest.version}" +
+                " provides=${capability.manifest.provides} schemes=${capability.manifest.schemes}",
             tag = "Loader",
         )
     }
+
+    /** 已安装能力包的 id；用于判断磁盘包是否认领了内嵌条目。 */
+    fun installedIds(): Set<String> = installed.mapTo(mutableSetOf()) { it.manifest.id }
 
     /** `requires` 里声明的能力是否已经 `open`。 */
     fun isAvailable(name: String): Boolean = name in active

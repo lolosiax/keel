@@ -26,9 +26,12 @@ class DefaultClasspathRegistry(
 
     override fun register(entry: PluginClasspathEntry): ClasspathRef {
         require(entry.pluginId.isNotBlank()) { "pluginId 不能为空" }
-        require(entry.keelPath.isNotBlank()) { "keelPath 不能为空" }
+        require(entry.classpath != null || entry.keelPath.isNotBlank()) {
+            "keelPath 与 classpath 至少提供一个"
+        }
 
-        val classpath = FileZipClasspath.open(entry.keelPath, entry.resourcesPrefix)
+        val classpath = entry.classpath
+            ?: FileZipClasspath.open(entry.keelPath, entry.resourcesPrefix)
         val generation = nextGeneration++
         val state = State(entry, generation, classpath)
 

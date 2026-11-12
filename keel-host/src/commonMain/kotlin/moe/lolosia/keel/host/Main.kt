@@ -34,6 +34,17 @@ internal expect fun loadPluginsFromCli(
 /** 读取当前可执行文件内嵌 classpath 中的资源；未嵌入时返回 null。 */
 internal expect fun embeddedResource(path: String): String?
 
+/** 当前可执行文件是否内嵌了插件 bundle（单文件发行版）。 */
+internal expect fun hasEmbeddedPluginBundle(): Boolean
+
+/**
+ * 加载可执行文件内嵌的 bundle 并运行。
+ *
+ * 外部 `plugins/` 仍然参与扫描，可覆盖同 id 的内嵌包；
+ * 参数语义与 `--plugins` 一致，null 表示不常驻。
+ */
+internal expect fun runEmbeddedPlugins(serveMillis: Long?, httpPort: Int?)
+
 /**
  * Host 入口。
  *
@@ -108,6 +119,54 @@ fun main(args: Array<String>) {
         }
     }
 
+    // 单文件发行版：没有子命令时直接跑内嵌插件；--once / --serve-ms / --http 与 --plugins 同义
+    if (hasEmbeddedPluginBundle()) {
+        val options = parseRunOptions(args)
+        val effectiveServe = options.serveMillis ?: if (options.once) null else 0L
+        runEmbeddedPlugins(effectiveServe, options.httpPort)
+        return
+    }
+
     Log.info("keel host ${BuildInfo.BUILD_ID}")
     Log.info("embedded host.txt: ${embeddedResource("host.txt")}")
+    if (args.isNotEmpty()) {
+        println(
+            "用法：keel-host [--plugins <插件目录> | --inspect <.keel 路径>]\n" +
+                "      [--once] [--http=<端口>] [--serve-ms=<毫秒>]"
+        )
+    }
+}
+
+/** 常驻 / HTTP 相关命令行选项；`--plugins` 与内嵌 bundle 共用同一套解析。 */
+private class RunOptions(
+    val once: Boolean,
+    val serveMillis: Long?,
+    val httpPort: Int?,
+)
+
+/**
+ * 解析 `--once` / `--serve` / `--serve-ms=` / `--http=`。
+ *
+ * @throws IllegalStateException 出现无法识别的参数或取值非法
+ */
+private fun parseRunOptions(args: Array<String>): RunOptions {
+    var once = false
+    var serveMillis: Long? = null
+    var httpPort: Int? = null
+    args.forEach { arg ->
+        when {
+            arg == "--once" -> once = true
+            arg == "--serve" -> serveMillis = 0L
+            arg.startsWith("--serve-ms=") ->
+                serveMillis = arg.substringAfter('=').toLongOrNull()
+                    ?: error("--serve-ms 需要毫秒数：$arg")
+
+            arg.startsWith("--http=") ->
+                httpPort = arg.substringAfter('=').toIntOrNull()
+                    ?: error("--http 需要端口号：$arg")
+
+            else -> error("无法识别的参数：$arg")
+        }
+    }
+    return RunOptions(once, serveMillis, httpPort)
 }

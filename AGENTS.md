@@ -10,7 +10,8 @@
 - **运行时**：Kotlin/Native（KMP），目标 `mingwX64`（Windows 开发）、`linuxArm64`（开发板，代表机型 RK3566）、`linuxX64`；**没有 JVM 目标**。
 - **交付形态**：
   - 常规模式：`Host` 可执行文件 + 每个插件一个动态库（`.dll` / `.so`）。
-  - Launcher 模式：Host、插件与资源内嵌为**单文件**，启动时不释放 `.so` / `.dll`（做不到时退化为解包到缓存目录）。
+  - Launcher 模式：`Host` + 插件 + 资源内嵌为**单文件**；`.keel` 与 `resources/` 不落盘（内存 zip），
+    只有插件 / 能力包的动态库物化到缓存目录后 `dlopen`。
 - **硬约束**（来自 [前序讨论.md](doc/前序讨论.md)，不要在设计里假设可以绕过）：
   - Kotlin/Native 运行时**不可安全卸载**：`dlclose` 后 TLS / GC 会延迟崩溃，只能「引用计数归零但永不 unmap」。
   - Host 与插件是**两个独立运行时**：只能传 blittable 类型与不透明指针，不能传 Kotlin 对象 / 接口。
@@ -28,7 +29,7 @@
 | 目录 | rootProject.name | 角色 | 是否发布 |
 | --- | --- | --- | --- |
 | `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入 + Windows 版本资源插件 `moe.lolosia.keel.classpath` | 是 |
-| `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin` | 是 |
+| `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin`；单 exe 产出 `moe.lolosia.keel.bundle`（由前者自动 apply） | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
 | `keel-plugin-ksp/` | `keel-plugin-ksp` | Worker 入口 KSP 处理器：`@KeelPluginMain` → 生成 `keel_plugin_worker_main` | 是 |
@@ -139,7 +140,7 @@ gradlew -p keel-plugin-ksp publish
 - `keel-idea-plugin` 是 IntelliJ IDEA 插件（IntelliJ Platform Gradle Plugin 2.x，目标社区版），
   只消费运行目录，不发布 Maven 工件；根 `buildAll` 显式跳过它。
 
-- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.abi`、`moe.lolosia.keel.logger`。
+- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.bundle`、`moe.lolosia.keel.abi`、`moe.lolosia.keel.logger`。
 - `keel-router-ksp` / `keel-plugin-ksp` 是 **KSP 处理器**，不是 Gradle 插件，没有插件 ID。
 
 ## 4. 代码风格
@@ -286,6 +287,38 @@ keel-plugin-<id>/
   `LoadLibrary` / WebView 这类需要**真实文件**的资源用 `ctx.materialize("native/x.dll")` 物化到该目录。
   小文本仍走 `ctx.classpath`。两者都是反向请求，只能在 Worker 线程调用。
 
+### 6.1 单 exe 产出（`keelPlugin.executable`）
+
+- 用户工程**始终只是插件工程**：不声明 application / executable，不加 `keel-host` 依赖。
+  单 exe 由 `moe.lolosia.keel.bundle`（`moe.lolosia.keel.plugin` 自动 apply）把本工程 `.keel`
+  与 `include(...)` 的 `.keel` 摊平成 bundle，再注入**预编译 launcher 副本**。
+- 默认关闭；开启后同一工程同时产出 `.keel` 与单文件，产物在 `build/keel/<target>/<name>[.exe]`。
+
+```kotlin
+keelPlugin {
+    executable {
+        enabled = true                                   // 默认 false
+        name = "myapp"                                   // 默认 project.name；Windows 自动补 .exe
+        include(file("libs/keel-database-mariadb-0.1.0.keel"))
+        include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖 keelPackage
+        launcher = null                                  // 可选：本地 launcher，便于调试
+        buildType = "DEBUG"                              // 取哪份预编译 launcher
+        windows { productName = "My App"; icon = "app.ico" }   // 与 keelClasspath.windows {} 同形
+    }
+}
+```
+
+- 注入方式：Windows 写 PE 资源（`.rc` → `windres` → JNA `UpdateResource`，资源 `IDR_KEEL_BUNDLE` /
+  `KEELBUNDLE`），Linux 在文件尾追加 32 字节 trailer（`offset` / `size` / `format` / `crc32` / `KEELBNDL`）。
+  两处格式与 `KeelExecutableTask` 里的常量必须一致。
+- 运行期语义：bundle 只在内存 zip 里打开，`.keel` 与 `resources/` **不落盘**；
+  只有插件 / 能力包的动态库物化到 `$root/.cache/<id>/<version>/`。
+- 同 id 以磁盘 `plugins/` 优先：磁盘 manifest 可解析即「认领」该 id，加载失败也不回退内嵌版本。
+  运行时 `install` 不能覆盖已加载的内嵌插件（K/N 无法卸载），会保留文件并要求重启。
+- 工作根：`KEEL_HOME` → exe 所在目录 → 用户缓存目录；`plugins/` 与 `.cache/` 都在其下。
+- HTTP 端口：`--http` > `KEEL_HTTP_PORT` > `application.yaml` 的 `server.port` > 7191（仅 bundle 模式默认开）。
+- `.keel` 与 bundle 都按 `lib/<target>/` 裁剪，只带当前目标的动态库。
+
 ## 7. Maven 发布与凭据
 
 - 发布地址与账号**只放本机 `local.properties`**（已被 `.gitignore` 忽略），键名：
@@ -338,7 +371,10 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 - capability provider（以 Lua 为示例）的可行性、默认分发形态（外部纯 C 库 vs 静态内嵌）与中间件沙箱边界，见 [doc/capability-design.md](doc/capability-design.md)。
 - 目标 Kotlin/Native 版本已固定为 `gradle/libs.versions.toml` 的 `2.4.20`，三个目标的编译已跑通；
   仍需在板子上做一次 `linuxArm64` 运行时验证（`dlopen` / `dlsym` / 事件泵）。
-- Launcher 在三个平台上能否**内存加载**插件动态库；不能时统一的回退目录与清理策略。
+- 单 exe 内嵌（Windows PE 资源 / Linux trailer）已在 `mingwX64` 上端到端跑通；
+  `linuxArm64` / `linuxX64` 的 launcher 工件与 trailer 读取仍需在对应平台验证。
+- release Host 的 HTTP `ACCESS_VIOLATION` 修复后，才补 `keel-launcher-<target>` 的 release 工件
+  （当前单 exe 只解析 `keel-launcher-dev-<target>`）。
 
 ## 11. 文件地图
 
@@ -357,8 +393,9 @@ keel-classpath/src/nativeMain/…/classpath/
   package.kt                          工厂函数（`classpathFromZipFile` / `classpathFromDirectory`）
   ZipInflate.kt                       共享 raw deflate
   EmbeddedClasspath.kt / EmbeddedClasspathImage.kt   读取内嵌 `classpath.zip`
+  EmbeddedPluginBundle.kt                           单 exe 内嵌 `keel-bundle.zip`（expect + mingw PE 资源 / linux trailer）
   RandomAccessFile.kt                 平台随机读（expect）
-keel-classpath/src/{linux,mingwX64}Main/…/classpath/  RandomAccessFile actual
+keel-classpath/src/{linux,mingwX64}Main/…/classpath/  RandomAccessFile / EmbeddedPluginBundle actual
 keel-classpath-full/src/commonMain/…/classpath/full/
   ClasspathRef / ClasspathRegistry / CompositeClasspath / GuardedClasspath / RegistryClasspath
   ClasspathTransport / RemoteClasspath / HostClasspathTransport / PluginClasspathEntry
@@ -407,6 +444,7 @@ keel-host/src/nativeMain/…/host/classpath/HostClasspath.kt
 keel-host/src/nativeMain/…/host/console/              HostConsole / ConsolePrompt / ConsoleCommand / HelpCommand / StopCommand / PluginsCommand
 keel-host/src/nativeMain/…/host/plugin/
   PluginLoader / LibraryCache / LoadedPlugin / PluginRuntime / HostPlugins / PluginResources
+  PluginPackage / FilePluginPackage / BundlePluginPackage / PluginBundle / PluginScan
   KeelPackageManifest / PluginPackageReader / PluginLoadResult / PluginLoadFailure
   LogEvent / HostPump / PluginNames（日志解码与 Host 收件箱消费）
   NativeLibrary(expect) / PluginFs / HostAbi / HostTarget / HostPluginIds / package.native.kt
@@ -426,6 +464,8 @@ keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路�
 keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口；@ModuleService → Key / Client / Dispatcher
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin
   src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
+keel-plugin-gradle-plugin/src/main/…/gradle/plugin/
+  KeelBundlePlugin / KeelBundleTask / KeelExecutableTask / KeelExecutableExtension / KeelWindowsResourceInjector   单 exe 产出
 keel-logger-compiler-plugin/src/main/…/logger/
   KeelLoggerRegistrar / KeelLoggerCliProcessor / KeelLoggerIrExtension / LogSiteTransformer / LogSiteResolver / SourcePathIndex
   META-INF/services/                    CompilerPluginRegistrar + CommandLineProcessor

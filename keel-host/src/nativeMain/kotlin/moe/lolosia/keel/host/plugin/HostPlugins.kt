@@ -81,24 +81,83 @@ internal object HostPlugins {
     fun find(id: String): Entry? = entries.firstOrNull { it.id == id }
 
     /**
-     * 扫描插件目录：先解包能力包并 `open`，再逐条启动 native 插件。
+     * 扫描插件目录与内嵌 bundle 并启动插件。
      *
-     * 能力包必须先就绪，否则 `requires: ["database"]` 的插件会被拒绝启用。
-     * 启动失败计入 [startFailures]，不中断其它插件。
+     * 顺序固定为：磁盘能力包 → 内嵌能力包 → 磁盘插件 → 内嵌插件。
+     * 能力包必须先就绪，否则 `requires: ["database"]` 的插件会被拒绝启用；
+     * 两类来源都装完才统一校验依赖、激活数据库。
+     *
+     * 同 id 以磁盘为准：磁盘 manifest 能被解析就算「认领」该 id，
+     * 即使随后加载失败也不再回退内嵌版本（否则会出现「磁盘版本坏了却悄悄跑旧版」）。
+     *
+     * @param bundle 可执行文件内嵌的 bundle；无内嵌时传 null
      */
-    fun loadAll(): PluginLoadResult {
-        val result = requireLoader().loadAll(directory) { keelPath ->
-            HostCapabilities.install(keelPath)
+    fun loadAll(bundle: PluginBundle? = null): PluginLoadResult {
+        val scan = requireLoader().scanDirectory(directory)
+        val loaded = mutableListOf<LoadedPlugin>()
+        val failed = scan.failed.toMutableList()
+
+        val claimed = scan.packages.mapTo(mutableSetOf()) { it.manifest.id }
+        val bundleEntries = bundle?.entries.orEmpty()
+        if (bundle != null) {
+            Log.info(
+                "bundle: ${bundle.origin}（${bundle.entries.size} 个内嵌包，" +
+                    "被磁盘覆盖 ${bundle.entries.count { it.id in claimed }} 个）",
+                tag = "Loader",
+            )
         }
+
+        installCapabilities(scan.packages.filter { it.manifest.isCapability }, failed)
+        installCapabilities(
+            bundleEntries.filter { it.manifest.isCapability && it.id !in claimed }
+                .map { bundle!!.open(it) },
+            failed,
+        )
+
+        scan.packages.filterNot { it.manifest.isCapability }
+            .forEach { loadInto(it, loaded, failed) }
+        bundleEntries.filter { !it.manifest.isCapability && it.id !in claimed }
+            .forEach { loadInto(bundle!!.open(it), loaded, failed) }
+
         HostCapabilities.validateDependencies()
         HostCapabilities.activateDatabase(DatabaseSettings.fromEnvironment())
-        result.loaded.forEach { loaded ->
-            logPackage(loaded)
-            entries += Entry(loaded, nextId++)
+
+        loaded.forEach { loadedPlugin ->
+            logPackage(loadedPlugin)
+            entries += Entry(loadedPlugin, nextId++)
         }
         // 按 requires 拓扑启动：被依赖的插件先进入 onEnable
         orderByRequires(entries).forEach { start(it) }
-        return result
+        return PluginLoadResult(loaded, failed)
+    }
+
+    private fun installCapabilities(
+        packages: List<PluginPackage>,
+        failed: MutableList<PluginLoadFailure>,
+    ) {
+        packages.forEach { entry ->
+            try {
+                HostCapabilities.install(entry)
+            } catch (e: Exception) {
+                failed += PluginLoadFailure(
+                    entry.origin,
+                    entry.manifest.id,
+                    e.message ?: "未知错误",
+                )
+            }
+        }
+    }
+
+    private fun loadInto(
+        entry: PluginPackage,
+        loaded: MutableList<LoadedPlugin>,
+        failed: MutableList<PluginLoadFailure>,
+    ) {
+        try {
+            loaded += requireLoader().load(entry)
+        } catch (e: Exception) {
+            failed += PluginLoadFailure(entry.origin, entry.manifest.id, e.message ?: "未知错误")
+        }
     }
 
     /**
@@ -117,7 +176,8 @@ internal object HostPlugins {
             PluginFs.writeBytes(target, PluginFs.readBytes(source))
         }
 
-        if (PluginPackageReader.read(target).isCapability) {
+        val manifest = PluginPackageReader.read(target)
+        if (manifest.isCapability) {
             try {
                 HostCapabilities.install(target)
             } catch (e: Throwable) {
@@ -127,6 +187,15 @@ internal object HostPlugins {
             HostCapabilities.activateDatabase(DatabaseSettings.fromEnvironment())
             Log.info("installed capability ${target.substringAfterLast('/')}", tag = "Loader")
             return true
+        }
+
+        // 内嵌插件已在进程里：K/N 无法卸载已加载的库，只能重启后由磁盘目录覆盖。
+        // 这里保留刚复制进来的包，不在用户不知情的情况下删掉他的文件。
+        if (find(manifest.id)?.loaded?.bundled == true) {
+            throw IllegalArgumentException(
+                "${manifest.id} 来自内嵌 bundle，运行时无法覆盖；" +
+                    "包已放到 $target，重启后生效"
+            )
         }
 
         val loaded = try {
@@ -162,11 +231,14 @@ internal object HostPlugins {
         entries.remove(entry)
         classpath?.unregister(id)
         // 不删 PluginNames：数字 id 永不复用，晚到的日志仍该显示插件名
-        val deleted = if (isInstalledPackage(entry.loaded.keelPath)) {
-            PluginFs.delete(entry.loaded.keelPath)
-        } else {
-            Log.warn("包不在插件目录内，保留文件：${entry.loaded.keelPath}", tag = "Loader")
-            false
+        val deleted = when {
+            // 内嵌插件没有独立部署文件，卸载只让引用失效
+            entry.loaded.bundled -> false
+            isInstalledPackage(entry.loaded.keelPath) -> PluginFs.delete(entry.loaded.keelPath)
+            else -> {
+                Log.warn("包不在插件目录内，保留文件：${entry.loaded.keelPath}", tag = "Loader")
+                false
+            }
         }
         Log.info("uninstalled $id，deleted=$deleted，动态库仍留在进程内", tag = "Loader")
         return true

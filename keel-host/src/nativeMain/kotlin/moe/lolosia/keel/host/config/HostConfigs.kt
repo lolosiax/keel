@@ -1,5 +1,6 @@
 package moe.lolosia.keel.host.config
 
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import moe.lolosia.keel.api.Log
@@ -38,6 +39,20 @@ internal object HostConfigs {
     fun release(pluginId: ULong) {
         val name = HostPluginIds.nameOf(pluginId) ?: return
         configs.remove(name)
+    }
+
+    /**
+     * 主线 `application.yaml` 的 `server.port`；没配或不是整数时返回 null。
+     *
+     * 只在启动阶段读一次，用于决定 HTTP 绑定端口。
+     */
+    fun serverPort(): Int? {
+        val config = mainline ?: return null
+        return try {
+            config.read(Int.serializer(), "server.port")
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun read(pluginId: ULong, request: ConfigReadRequest): ConfigReadReply {

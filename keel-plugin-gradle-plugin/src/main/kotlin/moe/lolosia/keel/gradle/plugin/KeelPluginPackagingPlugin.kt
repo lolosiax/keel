@@ -37,7 +37,7 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         // 日志调用改写：插件工程不手动加 id("moe.lolosia.keel.logger")
         project.plugins.apply(KeelLoggerGradlePlugin::class.java)
 
-        val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java)
+        val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java, project)
         val manifest = project.file(extension.manifest)
 
         // 构建期把 git sha / 提交时间合并进 plugin.json；不改仓库里的源文件
@@ -103,6 +103,9 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                 it.into("resources")
             })
         }
+
+        // 单 exe 产出（默认关闭）：与 .keel 打包互不影响，显式开启后额外注入 launcher
+        project.pluginManager.apply("moe.lolosia.keel.bundle")
 
         project.plugins.withId("org.jetbrains.kotlin.multiplatform") {
             // KSP 在自己的 afterEvaluate 里创建 `ksp<target>` 配置并固定处理器 classpath，

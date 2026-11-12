@@ -1,6 +1,5 @@
 package moe.lolosia.keel.host.capability
 
-import moe.lolosia.keel.classpath.FileZipClasspath
 import moe.lolosia.keel.host.plugin.*
 
 /**
@@ -17,13 +16,22 @@ internal class CapabilityLoader(private val cacheRoot: String) {
     fun all(): List<InstalledCapability> = installed.values.toList()
 
     /**
-     * 读取并解包一个能力包。
+     * 读取并解包一个磁盘上的能力包。
      *
      * @throws IllegalArgumentException manifest 缺失、kind 不是 capability、
      *   abiVersion 不匹配、当前目标没有对应库、包内缺少该库、id 重复
      */
-    fun install(keelPath: String): InstalledCapability {
-        val manifest = PluginPackageReader.read(keelPath)
+    fun install(keelPath: String): InstalledCapability =
+        install(FilePluginPackage(keelPath, PluginPackageReader.read(keelPath)))
+
+    /**
+     * 解包一个已解析的能力包条目（磁盘或内嵌 bundle）。
+     *
+     * @throws IllegalArgumentException kind 不是 capability、abiVersion 不匹配、
+     *   当前目标没有对应库、包内缺少该库、id 重复
+     */
+    fun install(entry: PluginPackage): InstalledCapability {
+        val manifest = entry.manifest
         require(manifest.isCapability) { "${manifest.id} 不是 capability 包" }
         require(manifest.id.isNotBlank()) { "plugin.json 缺少 id" }
         require(manifest.abiVersion == SUPPORTED_ABI_VERSION) {
@@ -37,11 +45,11 @@ internal class CapabilityLoader(private val cacheRoot: String) {
                 "plugin.json 的 lib 不含目标 $currentTargetName" +
                     "（已有：${manifest.lib.keys.joinToString().ifEmpty { "无" }}）"
             )
-        val bytes = FileZipClasspath.open(keelPath).read(libPath)
+        val bytes = entry.read(libPath)
             ?: throw IllegalArgumentException("包内缺少动态库：$libPath")
 
         val libraryPath = installLibrary(cacheRoot, manifest, libPath, bytes)
-        val result = InstalledCapability(manifest, keelPath, libraryPath)
+        val result = InstalledCapability(manifest, entry.origin, libraryPath)
         installed[manifest.id] = result
         return result
     }

@@ -12,6 +12,7 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import javax.inject.Inject
 
 /**
@@ -20,6 +21,7 @@ import javax.inject.Inject
  * 这一步只做「打包 + 拷贝」，供 IDE 的运行配置在启动 Host 前调用；
  * 命令行仍可用 `keelRun` 一次完成构建与启动。
  */
+@DisableCachingByDefault(because = "只是把包与配置拷进本地运行目录")
 abstract class KeelPrepareRunTask : DefaultTask() {
 
     /** 本插件的 `.keel`（`keelPackage` 产物）。 */

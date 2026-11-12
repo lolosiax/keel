@@ -135,10 +135,12 @@ keel-router-ksp / keel-plugin-ksp（构建期，不在运行时图里）
    - 插件改为 `.keel` 包：`plugin.json` + `lib/<target>` + `resources/`；资源不解包，
      插件与 Host 都按 zip 读取；插件之间只能通过 `ctx.classpath.of(id)` 访问。
      见 [classpath-design.md](classpath-design.md)。
-5. **Launcher 第一版**
-   - 单文件分发：Host + 选定插件静态链接；插件清单作为资源内嵌。
-   - 支持 `--plugin-dir`：运行时额外加载「手抖放进来」的插件；启动失败只跳过该插件。
-   - CLI：`list` / `enable <id>` / `disable <id>` / `load <path>`。
+5. **Launcher 第一版**（已落地，2026-11-12）
+   - 单文件分发：预编译 launcher 静态并入 Host，`moe.lolosia.keel.bundle` 把本工程与
+     `include(...)` 的 `.keel` 摊平成 bundle，按 PE 资源（Windows）/ 文件尾 trailer（Linux）注入。
+   - 运行期 bundle 只在内存打开；外部 `plugins/` 目录始终扫描，同 id 磁盘优先（启动失败只跳过该插件）。
+   - 控制台已有 `plugins list` / `enable` / `disable` / `install` / `uninstall`（§3.15）。
+   - 待办：`linuxArm64` / `linuxX64` 在对应平台验证 trailer 读取与启动。
 6. **运维兜底**
    - systemd 单元 + 定时重启；Windows 侧的重命名-替换-重启删除流程写进脚本。
    - 监控：进程 Private Commit、插件队列深度、消息延迟、任务积压。
@@ -149,7 +151,8 @@ keel-router-ksp / keel-plugin-ksp（构建期，不在运行时图里）
 - [ ] 新增一个「带路由的业务插件」只需复制 `keel-plugin-hello` 模板 + 改 `plugin.json`，不需要动 Host。
 - [ ] 路由由 KSP 生成，运行期无反射；未标注的控制器不会被注册。
 - [ ] 插件配置错误时只影响该插件；Host 与其它插件继续服务。
-- [ ] Launcher 单文件在三个平台启动成功；`--plugin-dir` 加入的插件能被列出、启停。
+- [ ] Launcher 单文件在三个平台启动成功（mingwX64 已通过，Linux 两目标待验证）；
+      `plugins/` 放进去的插件能被列出、启停。
 - [ ] 定时重启后所有插件恢复启用状态；旧版本文件被清理。
 
 ---
@@ -250,7 +253,9 @@ keel-router-ksp / keel-plugin-ksp（构建期，不在运行时图里）
 ## 7. 开放问题（进入 P0 前需拍板）
 
 1. 泰山派上自建 Maven 的地址、仓库路径、鉴权方式与备份策略（DEMO 的硬前置）。
-2. Launcher 在三个平台能否内存加载插件动态库；若不能，解包目录放在哪、何时清理。
+2. ~~Launcher 在三个平台能否内存加载插件动态库~~（已定，2026-11-12）：`.keel` 与资源全程不落盘，
+   只有插件 / 能力包的动态库物化到 `<工作根>/.cache/<id>/<version>/` 后 `dlopen`；
+   旧目录在下次 Host 启动时回收，正在使用的库因文件被占用不会被覆盖。
 3. 插件 `id` 是否允许点分命名空间（`system.users`），以及和目录名、Maven `artifactId` 的对应规则。
 4. `plugin.json` 的 `apiVersion` 语义：取 Host 主版本，还是独立的 ABI 版本号。
 5. 插件之间是否允许同步调用；若允许，默认超时与「调用链最大深度」的取值。

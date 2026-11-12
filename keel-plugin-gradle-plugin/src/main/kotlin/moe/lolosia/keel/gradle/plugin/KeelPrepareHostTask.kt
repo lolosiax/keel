@@ -13,6 +13,7 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import javax.inject.Inject
 
 /**
@@ -21,6 +22,7 @@ import javax.inject.Inject
  * 与 [KeelPrepareRunTask] 分开是为了避免每次改插件都重写 Host 可执行文件：
  * Windows 上正在运行的 Host 会占用文件，重复解包会直接失败。
  */
+@DisableCachingByDefault(because = "只是把 Host 包解到本地运行目录")
 abstract class KeelPrepareHostTask : DefaultTask() {
 
     /** 从 Maven 解析到的 Host 包（`keel-host-dev-<target>@zip`）。 */
@@ -30,6 +32,7 @@ abstract class KeelPrepareHostTask : DefaultTask() {
 
     /** 本地 Host 可执行文件；优先于 [hostArchive]。 */
     @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
     @get:Optional
     abstract val hostExecutable: RegularFileProperty
 

@@ -22,17 +22,24 @@ object PluginPackageReader {
      *
      * @throws IllegalArgumentException 包内没有 manifest 或 JSON 无法解析
      */
-    fun read(keelPath: String): KeelPackageManifest {
-        val classpath = FileZipClasspath.open(keelPath)
+    fun read(keelPath: String): KeelPackageManifest =
+        read(FileZipClasspath.open(keelPath), keelPath)
+
+    /**
+     * 从已打开的包视图读取 `plugin.json`；参数是日志里展示的来源标识。
+     *
+     * @throws IllegalArgumentException 包内没有 manifest 或 JSON 无法解析
+     */
+    fun read(classpath: Classpath, origin: String = classpath.origin): KeelPackageManifest {
         if (classpath.entries.isEmpty()) {
-            throw IllegalArgumentException("$keelPath 不是有效的 .keel（zip 无法解析或为空）")
+            throw IllegalArgumentException("$origin 不是有效的 .keel（zip 无法解析或为空）")
         }
         val bytes = classpath.read(MANIFEST_PATH)
-            ?: throw IllegalArgumentException("$keelPath 缺少 $MANIFEST_PATH")
+            ?: throw IllegalArgumentException("$origin 缺少 $MANIFEST_PATH")
         return try {
             json.decodeFromString(bytes.decodeToString())
         } catch (e: Exception) {
-            throw IllegalArgumentException("$keelPath 的 $MANIFEST_PATH 解析失败", e)
+            throw IllegalArgumentException("$origin 的 $MANIFEST_PATH 解析失败", e)
         }
     }
 

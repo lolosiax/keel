@@ -1,19 +1,18 @@
 package moe.lolosia.keel.host.plugin
 
-import moe.lolosia.keel.classpath.FileZipClasspath
 import moe.lolosia.keel.classpath.full.PluginClasspathEntry
 import moe.lolosia.keel.host.classpath.HostClasspath
 
 /**
  * `.keel` 目录扫描与安装。
  *
- * 只做到「可以 `dlopen`」为止，不碰 C ABI：
- * 1. 读 `plugin.json`，校验 id / abiVersion / 当前目标是否有库 / entry；
- * 2. 从包里取出动态库，落到 `<cacheRoot>/<id>/<version>/`（K/N 运行时不可卸载，
- *    所以按版本目录保留，绝不覆盖正在使用的库）；
- * 3. 把 `resources/` 注册进 Host 的 classpath 注册表，得到带 generation 的引用。
+ * 分两步，便于内嵌 bundle 与磁盘包共用同一套校验：
+ * 1. [scanDirectory] 只读 `plugin.json`，收集可安装单元与失败原因，不落任何动态库；
+ * 2. [load] 校验 id / abiVersion / 目标库，把动态库落到 `<cacheRoot>/<id>/<version>/`
+ *    （K/N 运行时不可卸载，所以按版本目录保留，绝不覆盖正在使用的库），
+ *    再把 `resources/` 注册进 Host 的 classpath 注册表。
  *
- * 动态库解包与 `dlopen` 失败都在 [loadAll] 里被隔离成 [PluginLoadFailure]，
+ * 动态库解包与 `dlopen` 失败都由调用方隔离成 [PluginLoadFailure]，
  * 单个坏插件不会中断整轮加载。
  */
 class PluginLoader(
@@ -22,43 +21,30 @@ class PluginLoader(
 ) {
 
     /**
-     * 扫描目录下所有 `.keel` 并逐个安装。
+     * 扫描目录下所有 `.keel`，只解析 manifest。
      *
-     * 顺序按文件名排序；同 id 的包只接受第一个，后面的记失败。
-     * 目录不存在时返回一条失败记录，而不是抛异常。
-     *
-     * @param onCapability 遇到 `kind: capability` 的包时交给它处理（解包 + 登记）；
-     *   为 null 时该包按加载失败处理
+     * 顺序按文件名排序；目录不存在时返回一条失败记录，而不是抛异常。
+     * capability 包也一并返回，由调用方按「能力先于业务插件」的顺序安装。
      */
-    fun loadAll(
-        pluginsDir: String,
-        onCapability: ((String) -> Unit)? = null,
-    ): PluginLoadResult {
+    internal fun scanDirectory(pluginsDir: String): PluginScan {
         val dir = pluginsDir.trimEnd('/', '\\')
         val names = listNames(dir)
-            ?: return PluginLoadResult(
-                loaded = emptyList(),
+            ?: return PluginScan(
+                packages = emptyList(),
                 failed = listOf(PluginLoadFailure(dir, null, "插件目录不存在或不可读：$dir")),
             )
 
-        val loaded = mutableListOf<LoadedPlugin>()
+        val packages = mutableListOf<PluginPackage>()
         val failed = mutableListOf<PluginLoadFailure>()
         names.filter { it.endsWith(KEEL_SUFFIX) }.sorted().forEach { name ->
             val keelPath = "$dir/$name"
             try {
-                val manifest = PluginPackageReader.read(keelPath)
-                if (manifest.isCapability) {
-                    val handler = onCapability
-                        ?: throw IllegalArgumentException("${manifest.id} 是 capability 包，需要能力加载器")
-                    handler(keelPath)
-                } else {
-                    loaded += load(keelPath, manifest)
-                }
+                packages += FilePluginPackage(keelPath, PluginPackageReader.read(keelPath))
             } catch (e: Exception) {
                 failed += PluginLoadFailure(keelPath, pluginIdOrNull(keelPath), e.message ?: "未知错误")
             }
         }
-        return PluginLoadResult(loaded, failed)
+        return PluginScan(packages, failed)
     }
 
     /**
@@ -67,9 +53,17 @@ class PluginLoader(
      * @throws IllegalArgumentException manifest 缺失、字段非法、abiVersion 不匹配、
      *   当前目标没有对应库、包内缺少该库、插件 id 与已加载的重复
      */
-    fun load(keelPath: String): LoadedPlugin = load(keelPath, PluginPackageReader.read(keelPath))
+    fun load(keelPath: String): LoadedPlugin =
+        load(FilePluginPackage(keelPath, PluginPackageReader.read(keelPath)))
 
-    private fun load(keelPath: String, manifest: KeelPackageManifest): LoadedPlugin {
+    /**
+     * 安装一个已解析的插件单元（磁盘包或内嵌条目）。
+     *
+     * @throws IllegalArgumentException 是 capability 包、字段非法、abiVersion 不匹配、
+     *   当前目标没有对应库、包内缺少该库、插件 id 与已加载的重复
+     */
+    fun load(entry: PluginPackage): LoadedPlugin {
+        val manifest = entry.manifest
         require(!manifest.isCapability) {
             "${manifest.id} 是 capability 包，不能用 native 插件的方式加载"
         }
@@ -85,20 +79,27 @@ class PluginLoader(
                 "plugin.json 的 lib 不含目标 $currentTargetName" +
                     "（已有：${manifest.lib.keys.joinToString().ifEmpty { "无" }}）"
             )
-        val bytes = FileZipClasspath.open(keelPath).read(libPath)
+        val bytes = entry.read(libPath)
             ?: throw IllegalArgumentException("包内缺少动态库：$libPath")
 
         val libraryPath = installLibrary(cacheRoot, manifest, libPath, bytes)
         val ref = host.register(
             PluginClasspathEntry(
                 pluginId = manifest.id,
-                keelPath = keelPath,
+                keelPath = entry.origin,
                 resourcesPrefix = manifest.resources,
                 version = manifest.version,
                 sha256 = manifest.sha256,
+                classpath = entry.classpath,
             )
         )
-        return LoadedPlugin(manifest, keelPath, libraryPath, ref)
+        return LoadedPlugin(
+            manifest = manifest,
+            keelPath = entry.origin,
+            libraryPath = libraryPath,
+            classpathRef = ref,
+            bundled = entry.bundled,
+        )
     }
 
     /** 卸载：资源引用立即失效；动态库留在缓存目录，等进程重启回收。 */
