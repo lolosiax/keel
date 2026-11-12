@@ -1,13 +1,28 @@
 import java.io.File
+import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
     id("moe.lolosia.keel.plugin")
+    `maven-publish`
 }
 
 group = "moe.lolosia.keel.plugins"
 version = libs.versions.keel.get()
+
+apply(from = "../gradle/publishing.gradle.kts")
+
+// 插件包以 .keel 工件发布；其它工程用
+// keelPlugin.executable.include("moe.lolosia.keel.plugins:keel-plugin-console:<version>@keel") 引用
+publishing {
+    publications {
+        create<MavenPublication>("keel") {
+            artifactId = "keel-plugin-console"
+            artifact(tasks.named("keelPackage")) { extension = "keel" }
+        }
+    }
+}
 
 keelPlugin {
     // 控制台窗口只存在于 Windows
