@@ -28,7 +28,9 @@ class KeelBundlePlugin : Plugin<Project> {
             val executable = keelPlugin.executable
             if (!executable.enabled) return@afterEvaluate
 
-            val version = keelPlugin.keelVersion ?: project.version.toString()
+            // launcher 按 keel 框架版本解析，exe 的版本资源用工程自己的 version
+            val keelVersion = keelPlugin.keelVersion ?: project.version.toString()
+            val appVersion = project.version.toString()
             val kotlin = project.extensions.getByType(KotlinMultiplatformExtension::class.java)
             val targets = kotlin.targets.withType(KotlinNativeTarget::class.java)
                 .filter { target ->
@@ -91,7 +93,7 @@ class KeelBundlePlugin : Plugin<Project> {
                     }
                     project.dependencies.add(
                         config.name,
-                        "moe.lolosia.keel:$artifact:$version@zip",
+                        "moe.lolosia.keel:$artifact:$keelVersion@zip",
                     )
                     project.files(config)
                 } else {
@@ -109,7 +111,7 @@ class KeelBundlePlugin : Plugin<Project> {
                     task.launcherArtifacts.from(launcherFiles)
                     task.target.set(target.name)
                     task.appName.set(executable.name)
-                    task.version.set(version)
+                    task.version.set(appVersion)
                     task.productName.set(
                         project.provider {
                             executable.windows.productName.ifBlank { executable.name }
