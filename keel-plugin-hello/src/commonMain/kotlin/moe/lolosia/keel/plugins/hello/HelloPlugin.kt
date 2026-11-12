@@ -9,6 +9,7 @@ import moe.lolosia.keel.api.annotation.KeelPluginMain
 import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.command.*
 import moe.lolosia.keel.api.config.*
+import moe.lolosia.keel.api.log.LogTextFormat
 import moe.lolosia.keel.api.web.HttpResponse
 import moe.lolosia.keel.api.web.ResponseBody
 import moe.lolosia.keel.api.web.RouteDescriptor
@@ -65,6 +66,23 @@ class HelloPlugin : Plugin {
         checkStorage()
         checkDatabase()
         checkService()
+        checkLogArchive()
+    }
+
+    /**
+     * 日志归档自检：批量重放与单条查询都经事件泵向 Host 拉取。
+     *
+     * 此时归档里已经有启动横幅、Loader 与本插件的前几条日志，
+     * 所以 `history` 不为空、`get` 能取到同一条记录的 RAW 对象。
+     */
+    private fun checkLogArchive() {
+        val history = Log.history(LogTextFormat.PLAIN, limit = 3)
+        val last = history.lastOrNull()
+        val record = last?.let { Log.get(it.first) }
+        Log.info(
+            "日志归档自检：history=${history.size} id=${last?.first} " +
+                "module=${record?.module} level=${record?.level} banner=${record?.banner}"
+        )
     }
 
     /** 协程自检：`ctx.scope` 绑定在 Worker 线程上，`delay` 由插件定时器驱动。 */

@@ -1,11 +1,18 @@
 package moe.lolosia.keel.host
 
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import moe.lolosia.keel.api.log.*
+
+/** 订阅时每页最多读取多少条。 */
+private const val OBSERVE_PAGE = 256
 
 /**
  * Host 侧日志历史：直接读本地环形缓冲。
  *
- * 文本视图在这里渲染，保证与 Console、日志文件使用同一套格式。
+ * 文本视图在这里渲染，保证与 Console、日志文件使用同一套格式；
+ * 订阅用本地协程通道接收合并唤醒，不经过事件泵。
  */
 internal object HostLogSource : LogHistory {
 
@@ -33,4 +40,23 @@ internal object HostLogSource : LogHistory {
     }
 
     override fun get(id: Long): LogRecord? = LogArchive.get(id)
+
+    override fun observe(cursor: Long, format: LogFormat): Flow<LogPage> = flow {
+        val wake = Channel<Unit>(Channel.CONFLATED)
+        val subscriptionId = registerLocalLogWake(wake)
+        try {
+            var current = cursor
+            while (true) {
+                while (true) {
+                    val page = page(current, OBSERVE_PAGE, format)
+                    if (page.lines.isEmpty() && page.records.isEmpty()) break
+                    emit(page)
+                    current = page.nextId - 1
+                }
+                wake.receive()
+            }
+        } finally {
+            unregisterLocalLogWake(subscriptionId)
+        }
+    }
 }

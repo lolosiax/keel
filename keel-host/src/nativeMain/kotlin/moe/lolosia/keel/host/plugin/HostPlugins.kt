@@ -5,6 +5,7 @@ import moe.lolosia.keel.api.host.ClasspathNames
 import moe.lolosia.keel.api.log.ModuleColors
 import moe.lolosia.keel.classpath.Classpath
 import moe.lolosia.keel.host.LogArchive
+import moe.lolosia.keel.host.LogHub
 import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.capability.DatabaseSettings
 import moe.lolosia.keel.host.capability.HostCapabilities
@@ -377,6 +378,7 @@ internal object HostPlugins {
         HostConfigs.release(entry.pluginId)
         HostPluginIds.release(entry.pluginId)
         HostPump.dropPlugin(entry.pluginId)
+        LogHub.dropPlugin(entry.pluginId)
     }
 
     private fun logPackage(loaded: LoadedPlugin) {

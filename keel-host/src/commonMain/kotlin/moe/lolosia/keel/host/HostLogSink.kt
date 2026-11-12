@@ -19,7 +19,10 @@ import moe.lolosia.keel.api.log.*
  */
 object HostLogSink : LogSink {
 
-    private val useColor = ansiSupported()
+    /** 桌面应用（GUI 子系统、无控制台）下仍然归档与写文件，只是不往 stdout 打。 */
+    private val useConsole = consoleAvailable()
+
+    private val useColor = useConsole && ansiSupported()
 
     override fun log(level: LogLevel, site: LogSite?, tag: String?, message: String, cause: Throwable?) {
         emit(
@@ -95,17 +98,22 @@ object HostLogSink : LogSink {
             banner = banner,
         )
 
-        consoleOutBegin()
-        println(
-            LogRecordFormat.render(
-                record,
-                if (useColor) LogTextFormat.ANSI else LogTextFormat.PLAIN,
+        if (useConsole) {
+            consoleOutBegin()
+            println(
+                LogRecordFormat.render(
+                    record,
+                    if (useColor) LogTextFormat.ANSI else LogTextFormat.PLAIN,
+                )
             )
-        )
-        consoleOutEnd()
+            consoleOutEnd()
+        }
 
         // 文件里始终是纯文本；着色版只用于控制台
         appendLogFile(LogRecordFormat.render(record, LogTextFormat.PLAIN) + "\n")
+
+        // 合并唤醒：只置标记，正文由订阅方按游标拉取
+        LogWake.mark()
     }
 }
 

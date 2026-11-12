@@ -1,5 +1,7 @@
 package moe.lolosia.keel.api.log
 
+import kotlinx.coroutines.flow.Flow
+
 /**
  * 日志历史来源。
  *
@@ -17,4 +19,11 @@ interface LogHistory {
 
     /** 取单独一条；id 已被淘汰或尚未分配时返回 null。 */
     fun get(id: Long): LogRecord?
+
+    /**
+     * 订阅日志：先把 `id > cursor` 的历史逐页给出，之后按 Host 的合并唤醒续流。
+     *
+     * 收集方慢时 Flow 挂起，Host 侧只保留「有新日志」的标记，不会堆积正文。
+     */
+    fun observe(cursor: Long, format: LogFormat): Flow<LogPage>
 }

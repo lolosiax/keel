@@ -1,5 +1,7 @@
 package moe.lolosia.keel.api
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.transform
 import moe.lolosia.keel.api.log.*
 
 /**
@@ -62,6 +64,23 @@ object Log {
     /** 取单独一条的渲染文本；语义同 [get]。 */
     fun getText(id: Long, format: LogTextFormat = LogTextFormat.PLAIN): String? =
         historySource.get(id)?.let { LogRecordFormat.render(it, format) }
+
+    /**
+     * 订阅文本流；先重放 `id > startId` 的历史，之后持续接收新日志。
+     *
+     * 只能在插件 Worker（或 Host 主线程）收集；下游消费慢时自动背压。
+     */
+    fun observe(
+        format: LogTextFormat = LogTextFormat.PLAIN,
+        startId: Long = 0,
+    ): Flow<Pair<Long, String>> =
+        historySource.observe(cursorOf(startId), format.toLogFormat())
+            .transform { page -> page.lines.forEach { emit(it.id to it.text) } }
+
+    /** 订阅结构化记录流（RAW 视图）。 */
+    fun observeRecords(startId: Long = 0): Flow<Pair<Long, LogRecord>> =
+        historySource.observe(cursorOf(startId), LogFormat.RAW)
+            .transform { page -> page.records.forEach { emit(it.id to it) } }
 
     /** 输出一条不加格式化前缀的原始行（横幅等）。 */
     fun banner(text: String) = sink.logRaw(text)

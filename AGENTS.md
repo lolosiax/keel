@@ -193,8 +193,14 @@ gradlew -p keel-plugin-ksp publish
       `Log.site()` 也可以单独取用（`val site = Log.site()`），不依赖任何日志级别方法；
       未应用插件时返回 null，`inline` 函数里取到的是 inline 体内的行号。
     - 例外：CLI 的用法说明与 `--plugins` / `--inspect` 的结果输出可以直接写 stdout。
-    - 日志归档、插件订阅（三种视图）与「控制台 / 桌面应用」切换见 [doc/log-design.md](doc/log-design.md)：
+    - 日志归档与订阅见 [doc/log-design.md](doc/log-design.md)：Host 先归档成 `LogRecord` 再渲染，
+      插件用 `Log.history` / `records` / `get` / `getText` / `observe` / `observeRecords` 消费
+      （PLAIN / ANSI 是 Host 渲染的文本，RAW 是结构化记录 + 自带完整文本的 `LogError`）。
+      缓冲上限由 `application.yaml` 的 `log.archive.maxRecords` / `maxMemoryBytes` 控制；
       正文不进事件泵，只投可合并的唤醒，由插件按游标拉取。
+    - 「控制台应用 / 桌面应用」由 `keelPlugin.executable.console` 决定（改写 PE 子系统），
+      运行期 `--console` / `--no-console` / `KEEL_CONSOLE` 可覆盖；无控制台时只跳过 stdout，
+      归档与订阅照常工作。
 
 ## 5. 插件 API 与跨运行时边界
 
@@ -306,6 +312,7 @@ keelPlugin {
     executable {
         enabled = true                                   // 默认 false
         name = "myapp"                                   // 默认 project.name；Windows 自动补 .exe
+        console = true                                   // false = 桌面应用（Windows GUI 子系统）
         include(file("libs/keel-database-mariadb-0.1.0.keel"))
         include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖 keelPackage
         launcher = null                                  // 可选：本地 launcher，便于调试
@@ -418,6 +425,8 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   Log.kt                              统一日志门面（of / 六个级别 / install(LogSink)）
   log/                                LogSite / LogSiteKind / LogLevel / LogSink / LogSiteCodec / StdoutLogSink
                                       Ansi / LogLineFormatter（Spring Boot 配色与行格式）
+                                      LogRecord / LogError / LogLine / LogPage / LogFormat / LogTextFormat
+                                      LogRecordFormat（PLAIN / ANSI / RAW 的共享渲染）/ LogHistory / NoneLogHistory
   annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
   auth/        Authenticator / Authorizer / AuthnRequest / AuthnReply / AuthzRequest / AuthzReply / AuthzSnapshot
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
@@ -444,6 +453,8 @@ keel-api/src/nativeMain/…/api/worker/
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
 keel-host/src/commonMain/…/host/HostLogSink.kt        Host 日志出口（本地时间戳 + 调用点模块列）
+keel-host/src/commonMain/…/host/                      LogArchive（expect）/ HostLogSource / Logging / LogWake / Console
+keel-host/src/nativeMain/…/host/                      LogArchive.native / LogHub / LogLocalSubscriptions.native
 keel-host/src/commonMain/…/host/Banner.kt             启动横幅
 keel-host/src/commonMain/…/host/AnsiSupport.kt        ANSI 检测（expect）+ mingw/linux actual
 keel-host/src/commonMain/…/host/ConsoleOut.kt         日志行前后的控制台钩子（expect），native 侧接 ConsolePrompt

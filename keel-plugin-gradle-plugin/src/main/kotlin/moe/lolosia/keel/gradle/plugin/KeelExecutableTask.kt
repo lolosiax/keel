@@ -48,6 +48,10 @@ abstract class KeelExecutableTask : DefaultTask() {
     @get:Input
     abstract val appName: Property<String>
 
+    /** `true` = 控制台子系统，`false` = GUI 子系统；只影响 Windows 目标。 */
+    @get:Input
+    abstract val console: Property<Boolean>
+
     @get:Input
     abstract val version: Property<String>
 
@@ -174,7 +178,30 @@ abstract class KeelExecutableTask : DefaultTask() {
         }
 
         KeelWindowsResourceInjector.inject(exe, res)
+        patchSubsystem(exe, console.get())
         exe.copyTo(output, overwrite = true)
+    }
+
+    /**
+     * 改写 PE Optional Header 的 `Subsystem`：`3` = 控制台，`2` = GUI。
+     *
+     * 资源注入不会改动 Optional Header，所以放在注入之后、拷贝到输出之前。
+     */
+    private fun patchSubsystem(exe: File, console: Boolean) {
+        val bytes = exe.readBytes()
+        if (bytes.size < 0x40) throw GradleException("${exe.name} 太小，不是 PE 文件")
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val peOffset = buffer.getInt(0x3C)
+        if (peOffset <= 0 || peOffset + 24 + 70 > bytes.size) {
+            throw GradleException("${exe.name} 的 PE 头越界")
+        }
+        if (buffer.getInt(peOffset) != 0x00004550) {
+            throw GradleException("${exe.name} 不是有效的 PE 文件")
+        }
+        // Optional Header 起点 = PE 签名(4) + COFF 头(20)；Subsystem 在其偏移 68
+        val subsystemOffset = peOffset + 4 + 20 + 68
+        buffer.putShort(subsystemOffset, if (console) 3 else 2)
+        exe.writeBytes(bytes)
     }
 
     private fun buildLinux(launcher: File, output: File) {

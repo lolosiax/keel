@@ -16,11 +16,15 @@ import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.host.*
+import moe.lolosia.keel.api.log.*
 import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.storage.*
 import moe.lolosia.keel.api.web.RouteRegistration
+import moe.lolosia.keel.host.HostLogSource
+import moe.lolosia.keel.host.LogArchive
+import moe.lolosia.keel.host.LogHub
 import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.route.HostPermissionCatalog
@@ -88,6 +92,7 @@ internal object HostPump {
             // 返回 false 表示收件箱已空
         }
         expireRequests()
+        LogHub.flushWakes()
     }
 
     /** 阻塞等待并处理一条事件；长驻 Host 的主循环每轮调用一次。 */
@@ -96,6 +101,7 @@ internal object HostPump {
         expireRequests()
         popHostEventRaw(timeoutMs) { event -> dispatch(event) }
         expireRequests()
+        LogHub.flushWakes()
     }
 
     /**
@@ -461,6 +467,39 @@ internal object HostPump {
                 ServiceWire.encode(
                     MaterializeReply.serializer(),
                     MaterializeReply(PluginResources.materialize(source, request.path)),
+                )
+            }
+
+            HostSubjects.LOG_SUBSCRIBE -> {
+                val request = decodePayload(LogSubscribeRequest.serializer(), payload, "日志订阅")
+                ServiceWire.encode(
+                    LogSubscribeReply.serializer(),
+                    LogHub.subscribe(source, request.startId),
+                )
+            }
+
+            HostSubjects.LOG_FETCH -> {
+                val request = decodePayload(LogFetchRequest.serializer(), payload, "日志拉取")
+                if (!LogHub.owns(source, request.subscriptionId)) {
+                    throw IllegalArgumentException("日志订阅 ${request.subscriptionId} 不属于插件 $source")
+                }
+                ServiceWire.encode(
+                    LogPage.serializer(),
+                    HostLogSource.page(request.cursor, request.maxEntries, request.format),
+                )
+            }
+
+            HostSubjects.LOG_UNSUBSCRIBE -> {
+                val request = decodePayload(LogUnsubscribeRequest.serializer(), payload, "日志退订")
+                LogHub.unsubscribe(request.subscriptionId)
+                ByteArray(0)
+            }
+
+            HostSubjects.LOG_GET -> {
+                val request = decodePayload(LogGetRequest.serializer(), payload, "日志查询")
+                ServiceWire.encode(
+                    LogGetReply.serializer(),
+                    LogGetReply(LogArchive.get(request.id)),
                 )
             }
 

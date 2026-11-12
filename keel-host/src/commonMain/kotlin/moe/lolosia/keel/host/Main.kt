@@ -58,6 +58,8 @@ fun main(args: Array<String>) {
     }
 
     val logDir = startLogFile()
+    // 桌面应用可能需要附着 / 新建控制台；必须在安装日志出口之前
+    prepareConsole(args)
     installHostLogging()
 
     // --inspect 是一次性诊断，不值得为它常驻一个看门狗进程
@@ -107,6 +109,10 @@ fun main(args: Array<String>) {
                     arg.startsWith("--http=") ->
                         httpPort = arg.substringAfter('=').toIntOrNull()
                             ?: error("--http 需要端口号：$arg")
+
+                    arg == "--console" || arg == "--no-console" -> {
+                        // 控制台开关由 prepareConsole 处理
+                    }
 
                     cache == null -> cache = arg
                     else -> error("无法识别的参数：$arg")
@@ -164,6 +170,10 @@ private fun parseRunOptions(args: Array<String>): RunOptions {
             arg.startsWith("--http=") ->
                 httpPort = arg.substringAfter('=').toIntOrNull()
                     ?: error("--http 需要端口号：$arg")
+
+            arg == "--console" || arg == "--no-console" -> {
+                // 控制台开关由 prepareConsole 处理
+            }
 
             else -> error("无法识别的参数：$arg")
         }

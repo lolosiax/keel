@@ -18,6 +18,15 @@ open class KeelExecutableExtension(private val project: Project) {
     /** 是否产出单 exe；默认关闭。 */
     var enabled: Boolean = false
 
+    /**
+     * 构建控制台应用还是桌面应用。
+     *
+     * `true`（默认）写 PE 控制台子系统；`false` 写 GUI 子系统，双击不弹窗，
+     * 运行期用 `--console` 或 `KEEL_CONSOLE=1` 仍可附着 / 新建控制台。
+     * 只影响 Windows 单 exe；`.keel` 与 Linux 目标不受影响。
+     */
+    var console: Boolean = true
+
     /** 输出文件名；默认工程名。Windows 自动补 `.exe`。 */
     var name: String = project.name
 

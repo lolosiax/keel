@@ -34,4 +34,16 @@ object HostSubjects {
 
     /** 请求：把包内资源物化到缓存目录；载荷 / 应答见 [MaterializeRequest] / [MaterializeReply]。 */
     const val MATERIALIZE: Long = 0x1009L
+
+    /** 请求：订阅日志；载荷 / 应答见 [LogSubscribeRequest] / [LogSubscribeReply]。 */
+    const val LOG_SUBSCRIBE: Long = 0x100AL
+
+    /** 请求：拉取日志；载荷 / 应答见 [LogFetchRequest] / `LogPage`。 */
+    const val LOG_FETCH: Long = 0x100BL
+
+    /** 通知：退订；载荷见 [LogUnsubscribeRequest]。 */
+    const val LOG_UNSUBSCRIBE: Long = 0x100CL
+
+    /** 请求：取单独一条日志；载荷 / 应答见 [LogGetRequest] / [LogGetReply]。 */
+    const val LOG_GET: Long = 0x100DL
 }

@@ -72,6 +72,7 @@ object PluginWorker {
         PluginCapabilities.databaseHandle = host?.pointed?.database_handle
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
+        Log.installHistory(PluginLogSource)
         WorkerScheduler.reset()
         WorkerScope.reset()
         val metadata = PluginMetadata(
@@ -132,6 +133,7 @@ object PluginWorker {
         PluginCapabilities.databaseHandle = null
         PluginRoutes.reset()
         PluginServices.reset()
+        LogSubscriptions.reset()
         WorkerScheduler.reset()
         WorkerScope.reset()
     }
@@ -174,6 +176,7 @@ internal fun dispatchEvent(e: KeelEvent) {
             KEEL_SUBJECT_SERVICE_CALL.toULong() -> handleServiceCall(e)
             KEEL_SUBJECT_AUTHN.toULong() -> handleAuthn(e)
             KEEL_SUBJECT_AUTHZ.toULong() -> handleAuthz(e)
+            KEEL_SUBJECT_LOG_WAKE.toULong() -> LogSubscriptions.signal(e.correlation.toLong())
             else -> warnOnce(kind)
         }
 

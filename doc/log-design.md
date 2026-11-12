@@ -1,6 +1,6 @@
 # 日志归档与订阅设计
 
-> 状态：设计定稿，尚未实现（P1–P4 见 §9）。
+> 状态：P1–P3 已落地（环形缓冲、三种视图、订阅与背压、控制台 / 桌面切换）；P4 的示例与约定随实现提交。
 > 目标：日志既能按控制台样式输出，也能被插件以**结构化对象**或**文本**两种方式消费，
 > 且日志风暴不得填满事件泵；同时让发行版可以在「控制台应用」与「桌面应用」之间切换。
 > 相关：[abi-design.md](abi-design.md)（事件泵与跨运行时约束）、[capability-design.md](capability-design.md)、[../AGENTS.md](../AGENTS.md) 第 4.10 节。
@@ -298,6 +298,7 @@ fun observeRecords(startId: Long): Flow<Pair<Long, LogRecord>> = flow {
 | `LOG_SUBSCRIBE` | `0x100A` | 插件 → Host | 请求，`{startId}` → `LogSubscribeReply` |
 | `LOG_FETCH` | `0x100B` | 插件 → Host | 请求，`LogFetchRequest` → `LogPage` |
 | `LOG_UNSUBSCRIBE` | `0x100C` | 插件 → Host | 通知，`{subscriptionId}` |
+| `LOG_GET` | `0x100D` | 插件 → Host | 请求，`{id}` → `LogGetReply`（单条 RAW 记录） |
 
 `keel_abi.h` 追加协议 subject：
 
@@ -398,9 +399,9 @@ keelPlugin {
 
 | 模块 | 改动 |
 |---|---|
-| `keel-api` | 新增 `log/LogRecord.kt`、`log/LogError.kt`、`log/LogLine.kt`、`log/LogPage.kt`、`log/LogFormat.kt`、`log/LogTextFormat.kt`、`log/LogRecordFormat.kt`（Host / 插件共用的渲染器）、`log/LogHistory.kt` + `NoneLogHistory.kt`；`LogSite` 加 `@Serializable`；`Log` 增加 `history` / `records` / `get` / `getText` / `banner` / `installHistory`（`observe` 在 P2 加）；`LogSink.logRaw` 默认实现；`host/HostSubjects` 追加 3 个 subject |
-| `keel-host` | `LogArchive.kt`（环 + 容量核算 + 分页）、`LogHub.kt`（订阅表 / 合并唤醒 / dropPlugin）、`LogLock`（expect + native actual）、`HostLogSource.kt`、`HostLogSink` 改为「建记录 → 渲染」、`HostPump` 处理 3 个 subject 与 `flushWakes`、`HostPlugins.stop` 清理订阅、`HostBootstrap` 改用 `Log.banner`、`currentTimeMillis()` |
-| `keel-abi` | `keel_abi.h` 加 `KEEL_SUBJECT_LOG_WAKE`；`keel_console.c` 加 `keel_console_available` / `keel_console_attach` / `keel_console_alloc` |
+| `keel-api` | 新增 `log/LogRecord.kt`、`log/LogError.kt`、`log/LogLine.kt`、`log/LogPage.kt`、`log/LogFormat.kt`、`log/LogTextFormat.kt`、`log/LogRecordFormat.kt`（Host / 插件共用的渲染器）、`log/LogHistory.kt` + `NoneLogHistory.kt`、`host/LogSubscribe*.kt` / `LogFetchRequest.kt` / `LogUnsubscribeRequest.kt` / `LogGet*.kt`；`LogSite` 加 `@Serializable`；`Log` 增加 `history` / `records` / `get` / `getText` / `observe` / `observeRecords` / `banner` / `installHistory`；`LogSink.logRaw` 默认实现；`worker/LogSubscriptions.kt`、`worker/PluginLogSource.kt`、`PluginWorker` 处理 `LOG_WAKE` |
+| `keel-host` | `LogArchive.kt`（环 + 容量核算 + 分页）、`LogHub.kt`（订阅表 / 合并唤醒 / dropPlugin）、`LogWake`、`HostLogSource.kt`、`HostLogSink` 改为「建记录 → 渲染」、`HostPump` 处理 4 个 subject 与 `flushWakes`、`HostPlugins.stop` 清理订阅、`HostBootstrap` 改用 `Log.banner`、`currentTimeMillis()`、`Console`（可用性 / 附着） |
+| `keel-abi` | `keel_lock.c`；`KEEL_SUBJECT_LOG_WAKE`；`keel_console_available` / `keel_console_attach` |
 | `keel-plugin-gradle-plugin` | `KeelExecutableExtension.console`、`KeelExecutableTask` 的 PE 子系统 patch、`KeelBundlePlugin` 透传、`KeelRunTask` 注入 `KEEL_CONSOLE=1` |
 | `keel-plugin-hello` | 增加 `observeRecords(startId = -1)` 与 `getText(id)` 的最小示例 |
 | `../AGENTS.md` | 第 4.10 节与文档地图指向本文 |
@@ -412,20 +413,20 @@ keelPlugin {
 **P1 本地环 + 渲染**
 `LogRecord` / `LogError` / `LogArchive` / Banner 入环 / `history` / `records` / `get` / `getText` / `LogRecordFormat`。
 验收：10000 条后正确淘汰；中文模块名列对齐；横幅是 `id = 1`；异常日志同时有 `chain` 与 `text`；
-`LogArchive` 的追加 / 淘汰不遍历全量。
+`LogArchive` 的追加 / 淘汰不遍历全量。**已落地。**
 
 **P2 跨运行时订阅**
 3 个 subject + `LogHub` 合并唤醒 + 插件侧 Flow。
 验收：日志风暴下插件 inbox 不溢出；慢消费者只落后不阻塞泵；`-1` 只收新日志、`0` 完整重放；
-`dropped` 在有覆盖时置位。
+`dropped` 在有覆盖时置位。**已落地**（另补了 `LOG_GET` 供单条查询）。
 
 **P3 控制台 / 桌面**
 PE 子系统 patch + 运行期 attach/alloc + `keelRun` 默认控制台。
 验收：`console = false` 双击不弹窗；从 cmd 启动能看到日志；`--console` 能新建控制台；
-`console = false` 时 `observeRecords` 仍能拿到完整日志。
+`console = false` 时 `observeRecords` 仍能拿到完整日志。**已落地。**
 
 **P4 文档与示例**
-`AGENTS.md` 定稿约定（`log.archive`、`console`、订阅规则），`keel-plugin-hello` 示例可运行。
+`AGENTS.md` 定稿约定（`log.archive`、`console`、订阅规则），`keel-plugin-hello` 示例可运行。**已落地。**
 
 ---
 

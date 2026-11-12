@@ -111,6 +111,7 @@ class KeelBundlePlugin : Plugin<Project> {
                     task.launcherArtifacts.from(launcherFiles)
                     task.target.set(target.name)
                     task.appName.set(executable.name)
+                    task.console.set(executable.console)
                     task.version.set(appVersion)
                     task.productName.set(
                         project.provider {

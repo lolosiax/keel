@@ -148,3 +148,36 @@ int keel_console_poll(char *buf, uint32_t capacity) {
     keel_mutex_unlock(&g_mutex);
     return result;
 }
+
+int keel_console_available(void) {
+#ifdef _WIN32
+    /*
+     * 看 stdout 句柄是否可用，而不是「有没有控制台窗口」：
+     * 管道 / 重定向到文件时仍然是有效输出；GUI 子系统双击启动时句柄无效。
+     */
+    HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out == NULL || out == INVALID_HANDLE_VALUE) return 0;
+    DWORD type = GetFileType(out);
+    if (type == FILE_TYPE_UNKNOWN && GetLastError() != NO_ERROR) return 0;
+    return 1;
+#else
+    return isatty(STDOUT_FILENO) ? 1 : 0;
+#endif
+}
+
+int keel_console_attach(void) {
+#ifdef _WIN32
+    if (GetConsoleWindow() != NULL) return 1;
+
+    /* 从 cmd / PowerShell 启动时父进程有控制台；双击启动则新建一个 */
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && !AllocConsole()) return 0;
+
+    SetConsoleOutputCP(CP_UTF8);
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+    freopen("CONIN$", "r", stdin);
+    return 1;
+#else
+    return isatty(STDOUT_FILENO) ? 1 : 0;
+#endif
+}

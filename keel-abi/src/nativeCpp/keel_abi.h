@@ -441,6 +441,21 @@ int keel_console_start(void);
 int keel_console_poll(char *buf, uint32_t capacity);
 
 /*
+ * @return 1 表示当前进程已附着到控制台（GUI 子系统下双击启动时为 0）
+ *
+ * Host 据此决定是否往 stdout 写日志；日志归档与文件输出不受影响。
+ */
+int keel_console_available(void);
+
+/*
+ * 桌面应用需要控制台时调用：优先附着到父进程的控制台，失败再新建一个，
+ * 并把 stdout / stderr / stdin 接上去（UTF-8 代码页）。
+ *
+ * @return 1 表示可用
+ */
+int keel_console_attach(void);
+
+/*
  * 按日切割的文本日志。
  *
  * 文件名固定 `<dir>/keel-YYYY-MM-DD.log`，跨日自动切换；每次写入都刷盘。

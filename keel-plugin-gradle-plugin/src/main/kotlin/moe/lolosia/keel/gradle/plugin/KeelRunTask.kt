@@ -83,6 +83,10 @@ abstract class KeelRunTask : DefaultTask() {
         if (!colorDisabled && env.keys.none { it.equals("FORCE_COLOR", ignoreCase = true) }) {
             env["FORCE_COLOR"] = "1"
         }
+        // 显式要求控制台：keelRun 的输出走 Gradle 管道，宿主仍应打印日志
+        if (env.keys.none { it.equals("KEEL_CONSOLE", ignoreCase = true) }) {
+            env["KEEL_CONSOLE"] = "1"
+        }
 
         logger.lifecycle("keelRun: ${host.absolutePath} ${command.joinToString(" ")}")
         exec.exec {
