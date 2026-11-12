@@ -111,7 +111,8 @@ gradlew -p keel-plugin-ksp publish
   - 会创建文件的处理器不要在首轮 `deferred`：KSP 会重跑同一轮，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`。
   - 处理器依赖必须赶在 `ksp<target>` 配置创建时挂上（用 `configurations.configureEach`）；
     晚于 KSP 的 `afterEvaluate` 再加就只有空 classpath，症状是「KSP 跑完但什么都没生成」。
-- **当前没有自动化测试**（`commonTest` 未接入）；验证靠编译 + `keel-host --inspect` / `--plugins` 冒烟。
+- **当前没有自动化测试**（`commonTest` 未接入）；验证靠编译 + `keel-host --inspect` / `--plugins` 冒烟，
+  历史输出见 [doc/记忆/验证记录.md](doc/记忆/验证记录.md)。
 
 ## 3. 版本、坐标与命名
 
@@ -377,7 +378,10 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
 | [doc/log-design.md](doc/log-design.md) | **日志归档与订阅**：环形缓冲与容量核算、文本 / 结构化两种视图、插件 Flow 订阅与背压、控制台 / 桌面应用切换 |
 | [doc/console-design.md](doc/console-design.md) | **控制台窗口插件**：子进程 helper + 双向管道帧协议、TTY 语义保留、Messenger 补全、日志 Flow 回放与背压 |
-| [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接**：已完成模块、构建命令、验证结果、下一步与已知坑 |
+| [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接（冷启动先读这里）**：现状速览、设计决策、下一步、坑索引。只读本文，不要全量读 |
+| [doc/记忆/实现现状.md](doc/记忆/实现现状.md) | **逐模块实现现状**（原任务记忆 §3；编号不变）+ 关键编译命令 |
+| [doc/记忆/验证记录.md](doc/记忆/验证记录.md) | **历史冒烟快照**（原任务记忆 §4）；归档材料，平时不用读 |
+| [doc/记忆/踩坑.md](doc/记忆/踩坑.md) | **踩坑记录**（原任务记忆 §7），按构建 / KSP / ABI / 日志 / HTTP / 控制台 / 运行期分组 |
 | [doc/roadmap.md](doc/roadmap.md) | DEMO / P0 / P1 / P2 的目标、交付物、验收标准与待决问题 |
 | [doc/logo/](doc/logo/) | **图标源文件**：`keel-icon-hollow.svg`（≥40px）、`keel-icon-solid.svg`（<40px）、`generate-icon.py`。构建用的 `keel-icon.ico` 由脚本生成到 `keel-classpath-gradle-plugin/src/main/resources/moe/lolosia/keel/gradle/classpath/`，作为没配 `windows { icon = … }` 时的默认应用图标；不要手工编辑 `.ico`，改 SVG 后重跑脚本 |
 
@@ -499,4 +503,8 @@ keel-idea-plugin/src/main/kotlin/moe/lolosia/keel/idea/
     KeelRunConfigurationProducer       当前文件 → Keel 运行配置
     KeelGradle.kt                      Wrapper / Host 定位
 doc/                                   设计与计划
+  任务记忆.md                          长任务交接首页（冷启动先读；只读这一份）
+  记忆/实现现状.md                     逐模块实现现状（原任务记忆 §3）
+  记忆/验证记录.md                     历史冒烟快照（原任务记忆 §4）
+  记忆/踩坑.md                         按主题分组的踩坑（原任务记忆 §7）
 ```
