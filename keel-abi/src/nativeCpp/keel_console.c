@@ -34,6 +34,14 @@ static keel_thread_t g_thread;
 static int g_mutex_ready;
 static int g_started;
 
+/* 互斥量懒初始化：stdin 读线程与 Host 的注入路径都可能先到。 */
+static void console_ensure_mutex(void) {
+    if (!g_mutex_ready) {
+        keel_mutex_init(&g_mutex);
+        g_mutex_ready = 1;
+    }
+}
+
 static void console_push(const char *text, size_t length) {
     if (length == 0) return;
     if (length >= KEEL_CONSOLE_LINE) length = KEEL_CONSOLE_LINE - 1;
@@ -122,13 +130,30 @@ static int console_interactive(void) {
 int keel_console_start(void) {
     if (g_started) return console_interactive();
 
-    if (!g_mutex_ready) {
-        keel_mutex_init(&g_mutex);
-        g_mutex_ready = 1;
-    }
+    console_ensure_mutex();
     if (keel_thread_start(&g_thread, console_main, NULL) != 0) return 0;
     g_started = 1;
     return console_interactive();
+}
+
+int keel_console_push(const char *text, uint32_t length) {
+    if (!text || length == 0) return 0;
+
+    console_ensure_mutex();
+    if (length >= KEEL_CONSOLE_LINE) length = KEEL_CONSOLE_LINE - 1;
+
+    int result = 0;
+    keel_mutex_lock(&g_mutex);
+    if (g_count < KEEL_CONSOLE_SLOTS) {
+        uint32_t index = (g_head + g_count) % KEEL_CONSOLE_SLOTS;
+        memcpy(g_lines[index], text, length);
+        g_lines[index][length] = '\0';
+        g_lengths[index] = length;
+        g_count++;
+        result = 1;
+    }
+    keel_mutex_unlock(&g_mutex);
+    return result;
 }
 
 int keel_console_poll(char *buf, uint32_t capacity) {

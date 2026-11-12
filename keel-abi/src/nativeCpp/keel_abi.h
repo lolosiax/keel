@@ -123,6 +123,15 @@ typedef enum KeelLogLevel {
 #define KEEL_SUBJECT_LOG_WAKE 10u
 
 /*
+ * Host 把一条插件间消息交给目标插件。
+ *
+ * 载荷是 CBOR 的 Message（keel-api 的 `moe.lolosia.keel.api.messaging`）。
+ * correlation 为 0 表示单向通知，插件不需要回包；非 0 时插件必须回一条同
+ * correlation 的 COMPLETE，载荷就是接收方返回的原始字节。
+ */
+#define KEEL_SUBJECT_MESSAGE 11u
+
+/*
  * 认证 SPI：Host 向声明了 `provides: ["authn"]` 的插件询问 token 对应的用户。
  *
  * 请求载荷是 CBOR 的 AuthnRequest（token）；应答是 CBOR 的 AuthnReply，
@@ -439,6 +448,19 @@ int keel_console_start(void);
  * @return 复制到的字节数；0 表示当前没有输入（或读线程已结束）
  */
 int keel_console_poll(char *buf, uint32_t capacity);
+
+/*
+ * 往 stdin 接收器的环形缓冲里注入一行（不含行尾换行）。
+ *
+ * 与 [keel_console_start] 启动的读线程共用同一个缓冲和互斥量，因此插件经
+ * Host 转发过来的控制台输入与真实 stdin 完全同构。可以在任意线程调用；
+ * 首次调用会自行初始化互斥量，不要求先调用 [keel_console_start]。
+ *
+ * @param text   UTF-8 字节，不要求以 '\0' 结尾
+ * @param length 字节数；超过单行容量时截断
+ * @return 1 表示已入队；0 表示缓冲满、参数非法或内存不足
+ */
+int keel_console_push(const char *text, uint32_t length);
 
 /*
  * @return 1 表示当前进程已附着到控制台（GUI 子系统下双击启动时为 0）

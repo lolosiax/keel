@@ -13,6 +13,7 @@ import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.error.*
 import moe.lolosia.keel.api.host.*
+import moe.lolosia.keel.api.messaging.*
 import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.web.*
 
@@ -177,11 +178,44 @@ internal fun dispatchEvent(e: KeelEvent) {
             KEEL_SUBJECT_AUTHN.toULong() -> handleAuthn(e)
             KEEL_SUBJECT_AUTHZ.toULong() -> handleAuthz(e)
             KEEL_SUBJECT_LOG_WAKE.toULong() -> LogSubscriptions.signal(e.correlation.toLong())
+            KEEL_SUBJECT_MESSAGE.toULong() -> handleMessage(e)
             else -> warnOnce(kind)
         }
 
         else -> warnOnce(kind)
     }
+}
+
+/** 处理其它插件经 Host 转来的消息：通知不回包，请求回 COMPLETE。 */
+private fun handleMessage(event: KeelEvent) {
+    val message = try {
+        ServiceWire.decode(Message.serializer(), payloadOf(event))
+    } catch (t: Throwable) {
+        if (event.correlation == 0uL) {
+            Log.error("插件消息无法解码", cause = t)
+        } else {
+            replyError(event, IllegalArgumentException("插件消息无法解码", t))
+        }
+        return
+    }
+
+    val reply = try {
+        PluginWorker.plugin?.onMessage(message)
+    } catch (t: Throwable) {
+        if (event.correlation == 0uL) {
+            Log.error("onMessage 处理失败（channel=${message.channel}）", cause = t)
+            return
+        }
+        replyError(event, t)
+        return
+    }
+
+    if (event.correlation == 0uL) return
+    if (reply == null) {
+        replyError(event, IllegalArgumentException("插件未处理消息：channel=${message.channel}"))
+        return
+    }
+    replyCompleteWithPayload(event, reply)
 }
 
 /** 把错误编码成信封回给 Host；Host 侧据此重建 `KeelRemoteException`。 */

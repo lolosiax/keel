@@ -2,6 +2,7 @@ package moe.lolosia.keel.api
 
 import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.command.*
+import moe.lolosia.keel.api.messaging.*
 
 /**
  * 一个部署单元的生命周期入口。
@@ -55,4 +56,15 @@ interface Plugin {
         label: String,
         args: List<String>,
     ): Boolean = false
+
+    /**
+     * 收到其他插件发来的消息。
+     *
+     * 与 [onCommand] 一样只在 Worker 线程调用；返回值是应答载荷：
+     * `null` 表示未处理（请求方会收到错误信封），空数组表示已处理但没有内容。
+     * 单向通知（`Messenger.post`）忽略返回值。
+     *
+     * 内部再发起 `Messenger.request` 会重入事件泵，按需使用。
+     */
+    fun onMessage(message: Message): ByteArray? = null
 }

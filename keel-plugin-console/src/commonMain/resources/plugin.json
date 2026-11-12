@@ -1,0 +1,17 @@
+{
+  "id": "console",
+  "name": "Keel Console",
+  "logTag": "Console",
+  "color": "#4FC3F7",
+  "version": "0.1.0-SNAPSHOT",
+  "abiVersion": 1,
+  "entry": "keel_plugin_worker_main",
+  "provides": [],
+  "lib": {
+    "mingwX64": "lib/mingwX64/keel_plugin_console.dll"
+  },
+  "resources": "resources/",
+  "requires": [],
+  "authors": ["lolosia"],
+  "description": "Keel Console Plugin"
+}

@@ -46,4 +46,13 @@ object HostSubjects {
 
     /** 请求：取单独一条日志；载荷 / 应答见 [LogGetRequest] / [LogGetReply]。 */
     const val LOG_GET: Long = 0x100DL
+
+    /** 通知：插件间消息（`Messenger.post`）；载荷是 CBOR 的 `Message`。 */
+    const val MESSAGE_POST: Long = 0x100EL
+
+    /** 请求：插件间请求（`Messenger.request`）；载荷是 CBOR 的 `Message`。 */
+    const val MESSAGE_REQUEST: Long = 0x100FL
+
+    /** 通知：把窗口里输入的一行送进 Host 的 stdin 接收器；载荷是 UTF-8 整行。 */
+    const val CONSOLE_INPUT: Long = 0x1010L
 }

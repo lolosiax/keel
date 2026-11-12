@@ -17,6 +17,7 @@ import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.log.*
+import moe.lolosia.keel.api.messaging.*
 import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
@@ -27,6 +28,7 @@ import moe.lolosia.keel.host.LogArchive
 import moe.lolosia.keel.host.LogHub
 import moe.lolosia.keel.host.auth.HostAuth
 import moe.lolosia.keel.host.config.HostConfigs
+import moe.lolosia.keel.host.console.HostConsole
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
@@ -50,12 +52,14 @@ internal class HostRequest(
     var deadlineMs: Long = 0L
 }
 
-/** 一条插件 → 插件的在途服务调用；Host 只负责按 id 转发与带回包。 */
-private class ServiceForward(
+/** 一条插件 → 插件的在途请求；Host 只负责按 id 转发与带回包。 */
+private class Forward(
     val callerId: ULong,
     val callerCorrelation: ULong,
     val providerId: ULong,
     val deadlineMs: Long,
+    /** 转发给提供方时使用的 subject，回包与超时错误都原样带回。 */
+    val subject: ULong,
 )
 
 /**
@@ -82,7 +86,7 @@ internal object HostPump {
     private val pending = mutableMapOf<ULong, HostRequest>()
 
     /** Host 分配的 correlation → 插件间在途调用；只在泵线程读写。 */
-    private val forwards = mutableMapOf<ULong, ServiceForward>()
+    private val forwards = mutableMapOf<ULong, Forward>()
 
     /** 非阻塞地取空当前收件箱。 */
     fun drain() {
@@ -289,16 +293,106 @@ internal object HostPump {
             )
             return
         }
-        forwards[correlation] = ServiceForward(
+        forwards[correlation] = Forward(
             callerId = event.source,
             callerCorrelation = event.correlation,
             providerId = provider,
             deadlineMs = nowMs() + SERVICE_TIMEOUT_MS,
+            subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
         )
     }
 
+    /**
+     * 插件 → 插件的请求：解析 [Message]、按 manifest id 找到目标、换 correlation 转发。
+     *
+     * 与 service 调用共用 [forwards] 表；提供方回 COMPLETE 后由 [completeForward]
+     * 把 correlation 换回调用方当初的值。
+     */
+    private fun routeMessageRequest(event: HostEvent) {
+        val message = try {
+            ServiceWire.decode(Message.serializer(), event.payload ?: ByteArray(0))
+        } catch (error: Throwable) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "message payload cannot be decoded: ${error.message}",
+                HostSubjects.MESSAGE_REQUEST.toULong(),
+            )
+            return
+        }
+
+        val target = HostPlugins.find(message.target)?.takeIf { it.enabled }
+        if (target == null) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "message target unavailable: ${message.target}",
+                HostSubjects.MESSAGE_REQUEST.toULong(),
+            )
+            return
+        }
+
+        val wire = ServiceWire.encode(
+            Message.serializer(),
+            message.copy(source = HostPluginIds.nameOf(event.source).orEmpty()),
+        )
+        val correlation = nextCorrelation()
+        if (!pushToPlugin(
+                pluginId = target.pluginId,
+                kind = KEEL_EVENT_COMMAND.toInt(),
+                subject = KEEL_SUBJECT_MESSAGE.toULong(),
+                correlation = correlation,
+                payload = wire,
+                source = event.source,
+            )
+        ) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "message target offline: ${message.target}",
+                HostSubjects.MESSAGE_REQUEST.toULong(),
+            )
+            return
+        }
+
+        forwards[correlation] = Forward(
+            callerId = event.source,
+            callerCorrelation = event.correlation,
+            providerId = target.pluginId,
+            deadlineMs = nowMs() + SERVICE_TIMEOUT_MS,
+            subject = KEEL_SUBJECT_MESSAGE.toULong(),
+        )
+    }
+
+    /** 插件 → 插件的单向通知：目标不在线只告警，不影响调用方。 */
+    private fun routeMessagePost(source: ULong, payload: ByteArray?): ByteArray {
+        val message = decodePayload(Message.serializer(), payload, "插件消息")
+        val target = HostPlugins.find(message.target)?.takeIf { it.enabled }
+        if (target == null) {
+            warnOnce("message-post:${message.target}", "消息目标不可用：${message.target}")
+            return ByteArray(0)
+        }
+
+        val wire = ServiceWire.encode(
+            Message.serializer(),
+            message.copy(source = HostPluginIds.nameOf(source).orEmpty()),
+        )
+        if (!pushToPlugin(
+                pluginId = target.pluginId,
+                kind = KEEL_EVENT_COMMAND.toInt(),
+                subject = KEEL_SUBJECT_MESSAGE.toULong(),
+                correlation = 0uL,
+                payload = wire,
+                source = source,
+            )
+        ) {
+            warnOnce("message-post-offline:${message.target}", "消息目标离线：${message.target}")
+        }
+        return ByteArray(0)
+    }
+
     /** 把提供者的回包送回调用方；correlation 换回调用方当初发出去的值。 */
-    private fun completeForward(forward: ServiceForward, reply: HostEvent) {
+    private fun completeForward(forward: Forward, reply: HostEvent) {
         val pushed = pushToPlugin(
             pluginId = forward.callerId,
             kind = KEEL_EVENT_COMPLETE.toInt(),
@@ -314,7 +408,12 @@ internal object HostPump {
     }
 
     /** 以错误信封回一条 COMPLETE，调用方会把它重建成 `KeelRemoteException`。 */
-    private fun replyServiceError(callerId: ULong, correlation: ULong, message: String) {
+    private fun replyServiceError(
+        callerId: ULong,
+        correlation: ULong,
+        message: String,
+        subject: ULong = KEEL_SUBJECT_SERVICE_CALL.toULong(),
+    ) {
         val payload = Json.encodeToString(
             KeelErrorPayload(
                 plugin = "host",
@@ -324,7 +423,7 @@ internal object HostPump {
         pushToPlugin(
             pluginId = callerId,
             kind = KEEL_EVENT_COMPLETE.toInt(),
-            subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
+            subject = subject,
             correlation = correlation,
             status = KEEL_ERR_FAILED.toInt(),
             payload = payload,
@@ -347,6 +446,12 @@ internal object HostPump {
      * 失败时用 `KeelErrorPayload` 让插件侧重建异常。
      */
     private fun handleHostRequest(event: HostEvent) {
+        // 插件间请求不能立即回包：先转发，等提供方回 COMPLETE 再换 correlation 带回
+        if (event.subject == HostSubjects.MESSAGE_REQUEST.toULong()) {
+            routeMessageRequest(event)
+            return
+        }
+
         val oneWay = event.correlation == 0uL
         val result = runCatching { dispatchHostSubject(event.source, event.subject, event.payload) }
         result.exceptionOrNull()?.let { error ->
@@ -503,6 +608,15 @@ internal object HostPump {
                 )
             }
 
+            HostSubjects.MESSAGE_POST -> routeMessagePost(source, payload)
+
+            HostSubjects.CONSOLE_INPUT -> {
+                // 与真实 stdin 完全同构：一行一条，空行直接丢弃
+                val line = payload?.decodeToString().orEmpty().trimEnd('\r', '\n')
+                if (line.isNotEmpty()) HostConsole.inject(line)
+                ByteArray(0)
+            }
+
             else -> error("Host 没有该 subject 的处理器：$subject")
         }
 
@@ -608,10 +722,14 @@ internal object HostPump {
             val expired = forwards.filterValues { it.deadlineMs <= now }.keys.toList()
             expired.forEach { correlation ->
                 val forward = forwards.remove(correlation) ?: return@forEach
+                val reason =
+                    if (forward.subject == KEEL_SUBJECT_MESSAGE.toULong()) "message timed out"
+                    else "service call timed out"
                 replyServiceError(
                     forward.callerId,
                     forward.callerCorrelation,
-                    "service call timed out",
+                    reason,
+                    forward.subject,
                 )
             }
         }

@@ -376,6 +376,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/capability-design.md](doc/capability-design.md) | **能力插件**：接口在 core、实现按需安装、稳定 C ABI、可卸载；首个示例 Lua 中间件引擎 |
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
 | [doc/log-design.md](doc/log-design.md) | **日志归档与订阅**：环形缓冲与容量核算、文本 / 结构化两种视图、插件 Flow 订阅与背压、控制台 / 桌面应用切换 |
+| [doc/console-design.md](doc/console-design.md) | **控制台窗口插件**：子进程 helper + 双向管道帧协议、TTY 语义保留、Messenger 补全、日志 Flow 回放与背压 |
 | [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接**：已完成模块、构建命令、验证结果、下一步与已知坑 |
 | [doc/roadmap.md](doc/roadmap.md) | DEMO / P0 / P1 / P2 的目标、交付物、验收标准与待决问题 |
 | [doc/logo/](doc/logo/) | **图标源文件**：`keel-icon-hollow.svg`（≥40px）、`keel-icon-solid.svg`（<40px）、`generate-icon.py`。构建用的 `keel-icon.ico` 由脚本生成到 `keel-classpath-gradle-plugin/src/main/resources/moe/lolosia/keel/gradle/classpath/`，作为没配 `windows { icon = … }` 时的默认应用图标；不要手工编辑 `.ico`，改 SVG 后重跑脚本 |

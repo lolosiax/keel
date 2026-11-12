@@ -30,6 +30,7 @@ internal object HostConsole {
     private val commands = mutableMapOf<String, ConsoleCommand>()
     private val buffer = ByteArray(LINE_CAPACITY)
     private var stopRequested = false
+    private var injectWarned = false
 
     /** `/stop` 置位后由 HostRuntime 检查，走正常的优雅停机。 */
     val shouldStop: Boolean get() = stopRequested
@@ -64,6 +65,25 @@ internal object HostConsole {
             // 命令可能刚停用了插件：立刻消费它的最后几条日志，避免积压到下一轮
             HostPump.drain()
             ConsolePrompt.afterLine()
+        }
+    }
+
+    /**
+     * 把插件转发过来的一行注入 stdin 接收器。
+     *
+     * 与 C 侧读线程共用同一条环形缓冲，下一轮 [poll] 会像真实输入一样执行它；
+     * Host 未进入命令循环（`--once`）或缓冲已满时只告警一次。
+     */
+    fun inject(line: String) {
+        val text = line.trimEnd('\r', '\n')
+        if (text.isEmpty()) return
+        val bytes = text.encodeToByteArray()
+        val pushed = bytes.usePinned {
+            keel_console_push(it.addressOf(0), bytes.size.toUInt())
+        } != 0
+        if (!pushed && !injectWarned) {
+            injectWarned = true
+            Log.warn("控制台输入注入失败：Host 未运行命令循环或缓冲已满", tag = "Console")
         }
     }
 

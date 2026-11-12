@@ -2,6 +2,7 @@ package moe.lolosia.keel.api.worker
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import moe.lolosia.keel.api.host.HostRequestException
 import moe.lolosia.keel.api.log.*
 
 /** 每页最多拉取多少条；与 Host 的默认值一致。 */
@@ -25,7 +26,12 @@ internal object PluginLogSource : LogHistory {
             var current = handle.cursor
             while (true) {
                 while (true) {
-                    val page = LogSubscriptions.page(handle.id, current, PAGE_ENTRIES, format)
+                    // 插件停用 / Host 不再应答时安静结束：观察是一条后台流，不该让异常逃逸
+                    val page = try {
+                        LogSubscriptions.page(handle.id, current, PAGE_ENTRIES, format)
+                    } catch (e: HostRequestException) {
+                        return@flow
+                    }
                     if (page.lines.isEmpty() && page.records.isEmpty()) break
                     emit(page)
                     current = page.nextId - 1

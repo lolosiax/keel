@@ -52,11 +52,17 @@ internal fun callHost(
             val remaining = deadline - TimeSource.Monotonic.markNow()
             if (remaining <= Duration.ZERO) throw timeout(subject)
 
+            // 分片等待：插件停用后要尽快退出，不能一直等到整个超时
+            val slice = if (remaining < CALL_SLICE) remaining else CALL_SLICE
             val status = keel_queue_pop(
                 inbox,
                 event.ptr,
-                remaining.inWholeMilliseconds.coerceAtLeast(1).toUInt(),
+                slice.inWholeMilliseconds.coerceAtLeast(1).toUInt(),
             )
+            if (status == KEEL_ERR_TIMEOUT) {
+                if (PluginWorker.plugin == null) throw disabled(subject)
+                continue
+            }
             if (status != KEEL_OK) throw timeout(subject)
 
             if (event.kind.toInt() == KEEL_EVENT_COMPLETE.toInt() &&
@@ -77,13 +83,19 @@ internal fun callHost(
                 event.release?.invoke(event.release_user, event.ptr)
             }
             if (PluginWorker.plugin == null) {
-                throw HostRequestException(subject.toLong(), "插件已停用，Host 请求被取消")
+                throw disabled(subject)
             }
         }
     } finally {
         nativeHeap.free(event)
     }
 }
+
+/** 等待期间的重入等待片：决定「插件已停用」被发现的延迟。 */
+private val CALL_SLICE: Duration = 100.milliseconds
+
+private fun disabled(subject: ULong): HostRequestException =
+    HostRequestException(subject.toLong(), "插件已停用，Host 请求被取消")
 
 private fun timeout(subject: ULong): HostRequestException =
     HostRequestException(subject.toLong(), "Host 请求超时：subject=$subject")

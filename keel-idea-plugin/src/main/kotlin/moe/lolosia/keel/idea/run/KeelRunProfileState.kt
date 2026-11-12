@@ -12,7 +12,7 @@ import java.io.File
 /**
  * 直接启动 Host。
  *
- * 构建由 [KeelRunConfiguration.getBeforeRunTasks] 里的 Gradle before-run task 负责，
+ * 构建由 [KeelRunConfiguration.ensureBuildTask] 维护的 Gradle before-run task 负责，
  * 输出在 IDEA 的 Build 面板；这里只把 Host 进程接到 Run 控制台。
  */
 class KeelRunProfileState(

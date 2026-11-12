@@ -99,25 +99,40 @@ static uint32_t pump_timeout(const KeelPluginState *state) {
     return delta >= KEEL_WAIT_FOREVER ? KEEL_WAIT_SLICE_MS : (uint32_t)delta;
 }
 
+/*
+ * 泵线程的轮询粒度。
+ *
+ * [keel_plugin_set_wakeup] 可能在任何时刻被别的线程调用（协程续体、定时任务），
+ * 而 [keel_queue_pop] 只按进入时的 timeout 等待，不会重新读 `wake_at_ms`；
+ * 若此前没有定时任务，pop 会永久阻塞，外部线程设置的唤醒就永远不会被看到。
+ * 因此把等待切成小片，每次醒来都重新算一次超时。
+ */
+#define PUMP_POLL_MS 100u
+
 static KEEL_THREAD_RETURN pump_main(KEEL_THREAD_ARG arg) {
     KeelPluginState *state = (KeelPluginState *)arg;
     KeelEvent event;
 
     for (;;) {
-        KeelStatus status = keel_queue_pop(state->inbox, &event, pump_timeout(state));
+        uint32_t timeout = pump_timeout(state);
+        if (timeout > PUMP_POLL_MS) timeout = PUMP_POLL_MS;
+
+        KeelStatus status = keel_queue_pop(state->inbox, &event, timeout);
         if (status == KEEL_ERR_CLOSED) break;
 
         if (status == KEEL_ERR_TIMEOUT) {
-            /* 定时唤醒：投一个无载荷的 TIMER 事件，由 Kotlin 调度器跑到期任务 */
-            state->wake_at_ms = 0;
-            if (state->started && state->handlers.on_event) {
-                KeelEvent timer;
-                memset(&timer, 0, sizeof(timer));
-                timer.size = (uint32_t)sizeof(timer);
-                timer.kind = KEEL_EVENT_COMMAND;
-                timer.source = state->api.plugin_id;
-                timer.subject = KEEL_SUBJECT_TIMER;
-                state->handlers.on_event(&timer);
+            /* 只有真正到期才投 TIMER；仅仅是轮询醒来就直接重算 */
+            if (state->wake_at_ms && state->wake_at_ms <= keel_now_ms()) {
+                state->wake_at_ms = 0;
+                if (state->started && state->handlers.on_event) {
+                    KeelEvent timer;
+                    memset(&timer, 0, sizeof(timer));
+                    timer.size = (uint32_t)sizeof(timer);
+                    timer.kind = KEEL_EVENT_COMMAND;
+                    timer.source = state->api.plugin_id;
+                    timer.subject = KEEL_SUBJECT_TIMER;
+                    state->handlers.on_event(&timer);
+                }
             }
             continue;
         }
