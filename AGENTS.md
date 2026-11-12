@@ -169,7 +169,12 @@ gradlew -p keel-plugin-ksp publish
     - `ctx.logger`（`PluginLogger`）仍然可用，但新代码优先用 `Log`，才能拿到调用点。
     - Host 侧 `HostLogSink` 与插件侧 `NativePluginLogger` 都是 `LogSink` 实现。
     - 输出为 `HH:mm:ss 级别 模块 来源 : 消息`；模块列默认 15，Host 默认 `Host`，
-      插件默认用 manifest `name`，需要自定义时传 `tag = "Loader"` 等。
+      插件默认取 manifest 的 `logTag`（留空回落 `name`、再 `id`），
+      需要自定义时传 `tag = "Loader"` 等。
+    - 插件名与日志模块名可以不同：`name` 写 `A's Something Plugin`，
+      `logTag` 可写 `A's Some`；`color` 按 `logTag` 登记。
+      模块列按**终端显示宽度**补齐（CJK 等宽字符算 2 列、组合符 0 列），
+      中文标签不会破坏后续列的对齐。
     - 来源列默认 40，超出时保留类名，包段从右往左逐级加长直到用满预算，
       仍放不下才从左丢段。
     - 终端支持 ANSI 时配色：整段时间默认色；TRACE 亮灰、DEBUG 浅蓝、INFO 绿、
@@ -249,7 +254,7 @@ keel-plugin-<id>/
   settings.gradle.kts                          # 独立构建；按需 includeBuild 依赖的 Gradle 插件
   build.gradle.kts                             # plugins { id("moe.lolosia.keel.plugin") } + keelPlugin { target(...) }
   src/commonMain/kotlin/.../XxxPlugin.kt       # 实现（@KeelPluginMain）
-  src/commonMain/resources/plugin.json         # 部署清单（id / version / entry / lib / resources / requires / color）
+  src/commonMain/resources/plugin.json         # 部署清单（id / name / logTag / version / entry / lib / resources / requires / color）
 ```
 
 - **目标形态**：代理、分发器、CBOR 编解码、服务注册、`plugin.json`、Maven 发布配置由 Gradle 插件 + KSP 生成，

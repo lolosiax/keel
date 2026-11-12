@@ -8,7 +8,7 @@ import moe.lolosia.keel.api.log.*
  *
  * 输出格式：`HH:mm:ss 级别 模块 来源 : 消息`。
  *
- * 模块列为 Host / 插件名 / 自定义 tag，按 [Log.moduleWidth] 补齐；
+ * 模块列为 Host / 插件日志名 / 自定义 tag，按 [Log.moduleWidth] 补齐；
  * 来源列为 `短类名:行号`，按 [Log.displayNameWidth] 缩短并补齐；
  * 没有调用点（未改写）时来源列显示 `-`。
  *

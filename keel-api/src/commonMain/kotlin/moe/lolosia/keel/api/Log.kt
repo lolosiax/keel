@@ -12,7 +12,7 @@ import moe.lolosia.keel.api.log.*
  */
 object Log {
 
-    /** 模块列宽度（Host / 插件名 / 自定义 tag）；默认 15。 */
+    /** 模块列宽度（Host / 插件日志名 / 自定义 tag）；默认 15。 */
     var moduleWidth: Int = 15
         private set
 

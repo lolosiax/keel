@@ -35,6 +35,7 @@ internal object HostPlugins {
 
         val id: String get() = loaded.manifest.id
         val displayName: String get() = loaded.manifest.name.ifBlank { id }
+        val logName: String get() = loaded.manifest.logName
         val enabled: Boolean get() = runtime != null
     }
 
@@ -334,7 +335,7 @@ internal object HostPlugins {
         // 配置文件名与存储命名空间都取自 manifest id；必须在 onLoad 之前登记
         HostPluginIds.register(entry.pluginId, manifest.id)
         return try {
-            PluginNames.register(entry.pluginId, entry.displayName)
+            PluginNames.register(entry.pluginId, entry.logName)
             // 每次启用分配新的资源目录：已加载的 DLL 留在旧目录里，不会被覆盖
             PluginResources.beginLoad(entry.pluginId, entry.loaded)
             val runtime = startPlugin(entry.loaded, entry.pluginId)
@@ -376,8 +377,9 @@ internal object HostPlugins {
     private fun logPackage(loaded: LoadedPlugin) {
         val manifest = loaded.manifest
         val displayName = manifest.name.ifBlank { manifest.id }
+        val logName = manifest.logName
         manifest.color?.let { hex ->
-            if (!ModuleColors.register(displayName, hex)) {
+            if (!ModuleColors.register(logName, hex)) {
                 Log.warn("invalid color '$hex' for ${manifest.id}", tag = "Loader")
             }
         }

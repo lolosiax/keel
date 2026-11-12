@@ -29,8 +29,8 @@ object LogLineFormatter {
             "$message\n${StackTraceFormat.throwable(cause, printedAt)}"
         }
         val levelText = level.name.padEnd(5)
-        val moduleText = module.padEnd(moduleWidth)
-        val sourceText = source.padEnd(sourceWidth)
+        val moduleText = TextWidth.padEnd(module, moduleWidth)
+        val sourceText = TextWidth.padEnd(source, sourceWidth)
 
         return if (!color) {
             buildString {
@@ -49,7 +49,7 @@ object LogLineFormatter {
                 // HTTP 中间件自带来源（IP:端口）；其余沿用类名 cyan + 行号 faint
                 if (sourceAnsi != null) {
                     append(sourceAnsi)
-                    append(" ".repeat((sourceWidth - source.length).coerceAtLeast(0)))
+                    append(" ".repeat((sourceWidth - TextWidth.of(source)).coerceAtLeast(0)))
                 } else if (source == "-") {
                     append(Ansi.wrap(Ansi.FAINT, "-"))
                     append(" ".repeat((sourceWidth - 1).coerceAtLeast(0)))
@@ -59,7 +59,7 @@ object LogLineFormatter {
                     val line = if (colon > 0) source.substring(colon) else ""
                     append(Ansi.wrap(Ansi.LOGGER, name))
                     if (line.isNotEmpty()) append(Ansi.wrap(Ansi.FAINT, line))
-                    append(" ".repeat((sourceWidth - source.length).coerceAtLeast(0)))
+                    append(" ".repeat((sourceWidth - TextWidth.of(source)).coerceAtLeast(0)))
                 }
 
                 append(" : ").append(text)
