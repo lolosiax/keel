@@ -1,3 +1,5 @@
+import moe.lolosia.keel.gradle.classpath.KeelStripTask
+import org.gradle.api.Action
 import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
@@ -56,31 +58,72 @@ kotlin {
 }
 
 // ——— 预编译 launcher 发行包 ———
-// `moe.lolosia.keel.plugin` 的单 exe 产出按 target 解析这里的 debug 包，
-// 把 keel-bundle.zip 注入 launcher 副本；release Host 修复前只发布 debug。
+// `moe.lolosia.keel.plugin` 的单 exe 产出按 target / buildType 解析这里的包：
+// DEBUG → keel-launcher-dev-<target>，RELEASE → keel-launcher-<target>。
 val launcherTargets = listOf("mingwX64", "linuxArm64", "linuxX64")
 
-val launcherPackages = launcherTargets.associateWith { target ->
+fun registerLauncherPackage(target: String, release: Boolean): TaskProvider<Zip> {
     val suffix = target.replaceFirstChar { it.uppercaseChar() }
-    tasks.register<Zip>("keelLauncherPackage$suffix") {
+    val kind = if (release) "release" else "debug"
+    val taskName = "keelLauncherPackage" + (if (release) "Release" else "") + suffix
+    val fileName = if (target.startsWith("mingw")) "keel.exe" else "keel"
+
+    // strip 任务要在 Zip 的配置块之外注册（Gradle 9 不允许嵌套 register）
+    val stripTask = if (release) {
+        tasks.register(
+            "keelLauncherStrip$suffix",
+            KeelStripTask::class.java,
+            Action<KeelStripTask> {
+                group = "keel"
+                description = "去掉 $target release launcher 的符号表"
+                dependsOn("link${kind.replaceFirstChar { it.uppercaseChar() }}Executable$suffix")
+                inputFile.set(layout.buildDirectory.file("bin/$target/releaseExecutable/$fileName"))
+                this.target.set(target)
+                outputDirectory.set(layout.buildDirectory.dir("generated/keel/launcher-strip/$target"))
+            },
+        )
+    } else {
+        null
+    }
+
+    return tasks.register(taskName, Zip::class.java) {
         group = "keel"
-        description = "打包 $target 的 debug launcher，供单 exe 注入"
-        dependsOn("linkDebugExecutable$suffix")
-        from(layout.buildDirectory.dir("bin/$target/debugExecutable")) { include("keel*") }
-        archiveFileName.set("keel-launcher-dev-$target.zip")
+        description = "打包 $target 的 $kind launcher，供单 exe 注入"
+        dependsOn("link${kind.replaceFirstChar { it.uppercaseChar() }}Executable$suffix")
+        if (stripTask != null) {
+            // K/N 的 release 产物仍带符号表；打包前 strip，注入后不会留下失效指针
+            dependsOn(stripTask)
+            from(stripTask.flatMap { it.outputDirectory }) { include("keel*") }
+        } else {
+            from(layout.buildDirectory.dir("bin/$target/debugExecutable")) { include("keel*") }
+        }
+        archiveFileName.set(
+            if (release) "keel-launcher-$target.zip" else "keel-launcher-dev-$target.zip"
+        )
         destinationDirectory.set(layout.buildDirectory.dir("keel"))
         isPreserveFileTimestamps = false
         isReproducibleFileOrder = true
     }
 }
 
+val launcherPackages = launcherTargets.associateWith { target ->
+    registerLauncherPackage(target, release = false)
+}
+val launcherReleasePackages = launcherTargets.associateWith { target ->
+    registerLauncherPackage(target, release = true)
+}
+
 publishing {
     publications {
-        launcherPackages.forEach { (target, packageTask) ->
+        launcherTargets.forEach { target ->
             val suffix = target.replaceFirstChar { it.uppercaseChar() }
             create<MavenPublication>("launcher$suffix") {
                 artifactId = "keel-launcher-dev-$target"
-                artifact(packageTask)
+                artifact(launcherPackages.getValue(target))
+            }
+            create<MavenPublication>("launcherRelease$suffix") {
+                artifactId = "keel-launcher-$target"
+                artifact(launcherReleasePackages.getValue(target))
             }
         }
     }

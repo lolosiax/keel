@@ -26,7 +26,7 @@ import java.util.zip.ZipFile
 import javax.inject.Inject
 
 /**
- * 把 `keel-bundle.zip` 注入预编译 launcher，产出单文件。
+ * 把 `keel-bundle`（zip 或 `KELB` zstd 容器）注入预编译 launcher，产出单文件。
  *
  * - Windows：生成 `.rc` → `windres -O res` → `UpdateResource` 注入 PE；
  * - Linux：launcher + bundle + 32 字节 footer（`KEELBNDL`）。
@@ -51,6 +51,16 @@ abstract class KeelExecutableTask : DefaultTask() {
     /** `true` = 控制台子系统，`false` = GUI 子系统；只影响 Windows 目标。 */
     @get:Input
     abstract val console: Property<Boolean>
+
+    /**
+     * 注入前是否 strip launcher。
+     *
+     * `UpdateResourceW` 会丢掉文件尾部的 COFF 符号 / 字符串表却保留旧指针，
+     * 之后 `strip` / `objdump` 会报 `bad string table size`；先 strip 就不会留下失效指针。
+     * release 出包时打开；debug 保留 DWARF 供 Host 调试。
+     */
+    @get:Input
+    abstract val stripLauncher: Property<Boolean>
 
     @get:Input
     abstract val version: Property<String>
@@ -127,6 +137,7 @@ abstract class KeelExecutableTask : DefaultTask() {
         val dir = temporaryDir.resolve("win").apply { mkdirs() }
         val exe = dir.resolve("app.exe")
         launcher.copyTo(exe, overwrite = true)
+        if (stripLauncher.get()) strip(exe)
 
         val iconPath = icon.orNull?.takeIf { it.isNotBlank() }?.let { File(it) }
         val iconFile = dir.resolve("app.ico")
@@ -136,7 +147,7 @@ abstract class KeelExecutableTask : DefaultTask() {
             KeelWindowsResources.extractDefaultIcon(iconFile)
         }
 
-        bundle.get().asFile.copyTo(dir.resolve("keel-bundle.zip"), overwrite = true)
+        bundle.get().asFile.copyTo(dir.resolve("keel-bundle.bin"), overwrite = true)
 
         val rc = dir.resolve("app.rc")
         rc.writeText(
@@ -145,7 +156,7 @@ abstract class KeelExecutableTask : DefaultTask() {
                     KeelEmbeddedResource(
                         id = "IDR_KEEL_BUNDLE",
                         type = "KEELBUNDLE",
-                        file = "keel-bundle.zip",
+                        file = "keel-bundle.bin",
                     )
                 ),
                 icon = "app.ico",
@@ -178,8 +189,45 @@ abstract class KeelExecutableTask : DefaultTask() {
         }
 
         KeelWindowsResourceInjector.inject(exe, res)
+        // 注入会丢掉尾部的符号 / 字符串表；指针留着就是脏数据，工具链会报 bad string table
+        clearCoffSymbols(exe)
         patchSubsystem(exe, console.get())
         exe.copyTo(output, overwrite = true)
+    }
+
+    /** 用 K/N 自带的 mingw strip 去掉符号表；导出表（`.def`）不受影响。 */
+    private fun strip(exe: File) {
+        val binDir = KeelWindowsResources.konanMingwBinDir()
+        execOperations.exec {
+            it.commandLine(
+                File(binDir, "strip.exe").absolutePath,
+                "--strip-unneeded",
+                exe.absolutePath,
+            )
+            it.environment(
+                "PATH",
+                "${binDir.absolutePath}${File.pathSeparator}${System.getenv("PATH").orEmpty()}",
+            )
+        }
+    }
+
+    /**
+     * 清零 COFF 符号表指针。
+     *
+     * `UpdateResourceW` 重写 PE 时会丢弃文件尾的符号表与字符串表，但不会改
+     * `PointerToSymbolTable` / `NumberOfSymbols`；不清理的话 `strip` / `objdump`
+     * 会读到资源数据并报 `bad string table size`，运行期崩溃符号解析也会静默失败。
+     */
+    private fun clearCoffSymbols(exe: File) {
+        val bytes = exe.readBytes()
+        if (bytes.size < 0x40) return
+        val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        val peOffset = buffer.getInt(0x3C)
+        if (peOffset <= 0 || peOffset + 20 > bytes.size) return
+        if (buffer.getInt(peOffset) != 0x00004550) return
+        buffer.putInt(peOffset + 12, 0)
+        buffer.putInt(peOffset + 16, 0)
+        exe.writeBytes(bytes)
     }
 
     /**

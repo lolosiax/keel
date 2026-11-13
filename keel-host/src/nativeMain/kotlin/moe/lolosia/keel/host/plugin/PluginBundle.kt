@@ -3,10 +3,11 @@ package moe.lolosia.keel.host.plugin
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.classpath.Classpath
 import moe.lolosia.keel.classpath.PrefixedClasspath
-import moe.lolosia.keel.classpath.openEmbeddedPluginBundle
+import moe.lolosia.keel.classpath.ZipClasspath
+import moe.lolosia.keel.classpath.readEmbeddedPluginBundleBytes
 
 /**
- * 可执行文件内嵌的插件 bundle（`keel-bundle.zip`）。
+ * 可执行文件内嵌的插件 bundle（`KELB` zstd 容器或旧版 zip）。
  *
  * 构建期由 `moe.lolosia.keel.bundle` 摊平产出：
  * ```
@@ -72,10 +73,12 @@ class PluginBundle private constructor(
         /**
          * 从可执行文件读取内嵌 bundle。
          *
+         * 优先按 `KELB`（zstd）容器解析，旧产物 / `deflate` 模式仍是内存 zip。
          * 没有内嵌、或 trailer / 资源损坏时返回 null（Linux footer 在打开时已校验 CRC）。
          */
         fun openEmbedded(executablePath: String): PluginBundle? {
-            val classpath = openEmbeddedPluginBundle(executablePath) ?: return null
+            val bytes = readEmbeddedPluginBundleBytes(executablePath) ?: return null
+            val classpath = BundleArchiveClasspath.open(bytes) ?: ZipClasspath.open(bytes)
             return open(classpath, executablePath)
         }
 

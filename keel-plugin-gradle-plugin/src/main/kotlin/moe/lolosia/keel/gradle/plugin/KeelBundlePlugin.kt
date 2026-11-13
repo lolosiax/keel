@@ -27,6 +27,8 @@ class KeelBundlePlugin : Plugin<Project> {
             if (!keelPlugin.enabled) return@afterEvaluate
             val executable = keelPlugin.executable
             if (!executable.enabled) return@afterEvaluate
+            // 命令行属性优先于工程里写死的值（CI 用 -Pkeel.buildType=RELEASE 出包）
+            (project.findProperty("keel.buildType") as String?)?.let { executable.buildType = it }
 
             // launcher 按 keel 框架版本解析，exe 的版本资源用工程自己的 version
             val keelVersion = keelPlugin.keelVersion ?: project.version.toString()
@@ -44,7 +46,19 @@ class KeelBundlePlugin : Plugin<Project> {
                 )
             }
 
-            val ownPackage = project.tasks.named("keelPackage", Zip::class.java)
+            // release 出包用 keelPackageRelease（release sharedLib、已 strip），调试仍用 keelPackage
+            val ownPackage = project.tasks.named(executable.packageTaskName(), Zip::class.java)
+            val projectPackages = executable.projectInputs.map { other ->
+                try {
+                    other.tasks.named(executable.packageTaskName(), Zip::class.java)
+                } catch (e: Exception) {
+                    throw GradleException(
+                        "keelPlugin.executable.include(project) 需要目标工程应用 moe.lolosia.keel.plugin：" +
+                            "${other.path} 没有 ${executable.packageTaskName()} 任务",
+                        e,
+                    )
+                }
+            }
             val coordinateConfig = project.configurations.create("keelBundleCoordinates") { config ->
                 config.isCanBeConsumed = false
                 config.isCanBeResolved = true
@@ -60,6 +74,7 @@ class KeelBundlePlugin : Plugin<Project> {
                 executable.inputs,
                 coordinateConfig,
             )
+            bundleInputs.from(projectPackages.map { it.flatMap { pkg -> pkg.archiveFile } })
 
             val executableTasks = targets.map { target ->
                 val suffix = target.name.replaceFirstChar { it.uppercaseChar() }
@@ -69,12 +84,14 @@ class KeelBundlePlugin : Plugin<Project> {
                     KeelBundleTask::class.java,
                 ) { task ->
                     task.group = "keel"
-                    task.description = "把插件与依赖摊平成 ${target.name} 的 keel-bundle.zip"
+                    task.description = "把插件与依赖摊平成 ${target.name} 的 keel-bundle（${executable.compression}）"
                     task.packages.from(bundleInputs)
                     task.target.set(target.name)
+                    task.compression.set(executable.compression)
+                    task.compressionLevel.set(executable.compressionLevel)
                     task.outputFile.set(
                         project.layout.buildDirectory.file(
-                            "generated/keel/bundle/${target.name}/keel-bundle.zip"
+                            "generated/keel/bundle/${target.name}/keel-bundle.bin"
                         )
                     )
                 }
@@ -112,6 +129,8 @@ class KeelBundlePlugin : Plugin<Project> {
                     task.target.set(target.name)
                     task.appName.set(executable.name)
                     task.console.set(executable.console)
+                    // release 出包先在注入前 strip，避免 UpdateResource 留下失效的 COFF 指针
+                    task.stripLauncher.set(executable.isRelease())
                     task.version.set(appVersion)
                     task.productName.set(
                         project.provider {

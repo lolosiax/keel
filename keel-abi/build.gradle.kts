@@ -130,7 +130,12 @@ val objectTasks = compiledTargets.associateWith { target ->
         val outDir = abiBuildDir.map { it.dir("$target/obj").asFile }
         val sources = cppDir.asFile.listFiles { file -> file.extension == "c" }.orEmpty()
 
-        inputs.files(sources.toList() + cppDir.file("keel_abi.h").asFile + cppDir.file("keel_platform.h").asFile)
+        inputs.files(
+            sources.toList() +
+                cppDir.file("keel_abi.h").asFile +
+                cppDir.file("keel_platform.h").asFile +
+                cppDir.file("keel_zstd.h").asFile
+        )
         outputs.dir(outDir)
         workingDir = outDir.get()
 
@@ -183,6 +188,8 @@ val keelAbiPackage by tasks.registering(Zip::class) {
         from(abiBuildDir.map { it.file("$target/libkeel_abi.a") }) { into("lib/$target") }
     }
     from(cppDir.file("keel_abi.h")) { into("include") }
+    // bundle 的 zstd 解压声明；实现（zstddeclib.c）已随静态库编入
+    from(cppDir.file("keel_zstd.h")) { into("include") }
 }
 
 tasks.named("assemble") { dependsOn(keelAbiPackage) }

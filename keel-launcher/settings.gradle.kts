@@ -12,6 +12,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 本地单独构建 launcher 时消费已经 publishToMavenLocal 的 keel-host / keel-api
+        mavenLocal()
         // Ktor 的 native 工件只在 Central 全量同步，镜像可能缺 variant
         mavenCentral()
         maven("https://maven.aliyun.com/repository/public")

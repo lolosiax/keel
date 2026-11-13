@@ -315,18 +315,28 @@ keelPlugin {
         name = "myapp"                                   // 默认 project.name；Windows 自动补 .exe
         console = true                                   // false = 桌面应用（Windows GUI 子系统）
         include(file("libs/keel-database-mariadb-0.1.0.keel"))
-        include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖 keelPackage
+        include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖对应的打包任务
         launcher = null                                  // 可选：本地 launcher，便于调试
-        buildType = "DEBUG"                              // 取哪份预编译 launcher
+        buildType = "RELEASE"                            // DEBUG = keelPackage + launcher-dev；RELEASE = keelPackageRelease + launcher
+        compression = "zstd"                             // bundle 容器：zstd（默认）/ deflate
+        compressionLevel = 19                            // zstd 级别
         windows { productName = "My App"; icon = "app.ico" }   // 与 keelClasspath.windows {} 同形
     }
 }
 ```
 
+- **debug / release 拆成两个打包任务**：`keelPackage`（debug，供 `keelRun` / 调试）与
+  `keelPackageRelease`（release sharedLib + strip，供单 exe 与发布）。`executable.buildType = "RELEASE"`
+  时本工程与 `include(project)` 都走 release 任务，launcher 也解析 `keel-launcher-<target>`；
+  CI 可用 `-Pkeel.buildType=RELEASE` 覆盖。IDEA 的 `keelPrepareRun` 仍固定 debug，断点不受影响。
 - 注入方式：Windows 写 PE 资源（`.rc` → `windres` → JNA `UpdateResource`，资源 `IDR_KEEL_BUNDLE` /
   `KEELBUNDLE`），Linux 在文件尾追加 32 字节 trailer（`offset` / `size` / `format` / `crc32` / `KEELBNDL`）。
-  两处格式与 `KeelExecutableTask` 里的常量必须一致。
-- 运行期语义：bundle 只在内存 zip 里打开，`.keel` 与 `resources/` **不落盘**；
+  两处格式与 `KeelExecutableTask` 里的常量必须一致。`UpdateResource` 会丢掉尾部 COFF 符号表却保留旧指针，
+  所以 release 在注入前先 `strip`，注入后再清零 `PointerToSymbolTable` / `NumberOfSymbols`。
+- bundle 容器：默认 `zstd`，单帧 + 索引（`KELB`：magic / version / format / indexLength / rawSize / frameSize），
+  跨文件共享压缩窗口；`deflate` 退回普通 zip。两种都由 Host 侧 `BundleArchiveClasspath` 打开，
+  **`.keel` 自身的 zip 压缩方式不变**。
+- 运行期语义：bundle 只在内存里打开，`.keel` 与 `resources/` **不落盘**；
   只有插件 / 能力包的动态库物化到 `$root/.cache/<id>/<version>/`。
 - 同 id 以磁盘 `plugins/` 优先：磁盘 manifest 可解析即「认领」该 id，加载失败也不回退内嵌版本。
   运行时 `install` 不能覆盖已加载的内嵌插件（K/N 无法卸载），会保留文件并要求重启。
@@ -393,8 +403,8 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
   仍需在板子上做一次 `linuxArm64` 运行时验证（`dlopen` / `dlsym` / 事件泵）。
 - 单 exe 内嵌（Windows PE 资源 / Linux trailer）已在 `mingwX64` 上端到端跑通；
   `linuxArm64` / `linuxX64` 的 launcher 工件与 trailer 读取仍需在对应平台验证。
-- release Host 的 HTTP `ACCESS_VIOLATION` 修复后，才补 `keel-launcher-<target>` 的 release 工件
-  （当前单 exe 只解析 `keel-launcher-dev-<target>`）。
+- release launcher 工件 `keel-launcher-<target>` 已发布；release Host 的 HTTP 插件响应路径
+  仍需在真实路由上做一次冒烟（历史 `ACCESS_VIOLATION` 见 `doc/任务记忆.md`）。
 
 ## 11. 文件地图
 
@@ -413,7 +423,7 @@ keel-classpath/src/nativeMain/…/classpath/
   package.kt                          工厂函数（`classpathFromZipFile` / `classpathFromDirectory`）
   ZipInflate.kt                       共享 raw deflate
   EmbeddedClasspath.kt / EmbeddedClasspathImage.kt   读取内嵌 `classpath.zip`
-  EmbeddedPluginBundle.kt                           单 exe 内嵌 `keel-bundle.zip`（expect + mingw PE 资源 / linux trailer）
+  EmbeddedPluginBundle.kt                           单 exe 内嵌 bundle 的原始字节读取（expect + mingw PE 资源 / linux trailer）
   RandomAccessFile.kt                 平台随机读（expect）
 keel-classpath/src/{linux,mingwX64}Main/…/classpath/  RandomAccessFile / EmbeddedPluginBundle actual
 keel-classpath-full/src/commonMain/…/classpath/full/
@@ -482,6 +492,8 @@ keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs
 keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
 keel-abi/src/nativeCpp/
   keel_abi.h                          唯一 ABI 布局来源（不透明句柄 + KEEL_CINTEROP 占位分支）
+  keel_zstd.h                         bundle 解压的最小声明面（实现见 zstddeclib.c）
+  zstddeclib.c                        zstd 单文件解码器（v1.5.6，随静态库编入；插件不引用则不链接）
   keel_platform.h                     线程 / 同步原语（不导出、不进 Kotlin）
   keel_queue.c / keel_event.c / keel_plugin.c / keel_console.c
 keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（@Controller / @GET → KeelPluginRoutes）
@@ -490,6 +502,10 @@ keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-p
   src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
 keel-plugin-gradle-plugin/src/main/…/gradle/plugin/
   KeelBundlePlugin / KeelBundleTask / KeelExecutableTask / KeelExecutableExtension / KeelWindowsResourceInjector   单 exe 产出
+keel-classpath-gradle-plugin/src/main/…/gradle/classpath/
+  KeelStripTask.kt                    release 二进制打包前 strip（导出表不变）
+keel-host/src/nativeMain/…/host/plugin/
+  BundleArchiveClasspath.kt           `KELB`（zstd 单帧 + 索引）内嵌 bundle 读取
 keel-logger-compiler-plugin/src/main/…/logger/
   KeelLoggerRegistrar / KeelLoggerCliProcessor / KeelLoggerIrExtension / LogSiteTransformer / LogSiteResolver / SourcePathIndex
   META-INF/services/                    CompilerPluginRegistrar + CommandLineProcessor

@@ -2,6 +2,7 @@ package moe.lolosia.keel.gradle.plugin
 
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import moe.lolosia.keel.gradle.classpath.KeelStripTask
 import moe.lolosia.keel.gradle.logger.KeelLoggerGradlePlugin
 import org.gradle.api.Action
 import org.gradle.api.Plugin
@@ -9,6 +10,7 @@ import org.gradle.api.Project
 import org.gradle.api.file.CopySpec
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.bundling.Zip
+import org.gradle.api.tasks.TaskProvider
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.SharedLibrary
@@ -76,33 +78,50 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
             }
         }
 
-        val packageTask = project.tasks.register("keelPackage", Zip::class.java) { task ->
-            task.group = "keel"
-            task.description = "把插件打成 .keel（plugin.json + lib/<target> + resources/）"
-            task.archiveFileName.set(
-                project.provider {
-                    extension.packageName ?: "${project.name}-${project.version}.keel"
-                }
-            )
-            task.destinationDirectory.set(project.layout.buildDirectory.dir("keel"))
-            task.isPreserveFileTimestamps = false
-            task.isReproducibleFileOrder = true
-            task.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        /**
+         * 注册一个打包任务。
+         *
+         * `keelPackage` 供 `keelRun` / 本地调试（默认 DEBUG）；
+         * `keelPackageRelease` 供单 exe bundle 与发布（release sharedLib + strip）。
+         */
+        fun registerPackage(name: String, description: String): TaskProvider<Zip> {
+            // 两个任务共用目录：release 包加后缀，避免同一次构建里互相覆盖
+            val suffix = if (name.endsWith("Release")) "-release" else ""
+            return project.tasks.register(name, Zip::class.java) { task ->
+                task.group = "keel"
+                task.description = description
+                task.archiveFileName.set(
+                    project.provider {
+                        val base = extension.packageName ?: "${project.name}-${project.version}.keel"
+                        if (suffix.isEmpty()) base else base.removeSuffix(".keel") + "$suffix.keel"
+                    }
+                )
+                task.destinationDirectory.set(project.layout.buildDirectory.dir("keel"))
+                task.isPreserveFileTimestamps = false
+                task.isReproducibleFileOrder = true
+                task.duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-            task.dependsOn(processManifest)
-            task.from(processedManifest, Action<CopySpec> { it.into("") })
+                task.dependsOn(processManifest)
+                task.from(processedManifest, Action<CopySpec> { it.into("") })
 
-            task.from(project.file("src/commonMain/resources"), Action<CopySpec> {
-                it.into("resources")
-                it.exclude("plugin.json")
-            })
-            task.from(project.file("src/nativeMain/resources"), Action<CopySpec> {
-                it.into("resources")
-            })
-            task.from(extension.resources.map { project.file(it) }, Action<CopySpec> {
-                it.into("resources")
-            })
+                task.from(project.file("src/commonMain/resources"), Action<CopySpec> {
+                    it.into("resources")
+                    it.exclude("plugin.json")
+                })
+                task.from(project.file("src/nativeMain/resources"), Action<CopySpec> {
+                    it.into("resources")
+                })
+                task.from(extension.resources.map { project.file(it) }, Action<CopySpec> {
+                    it.into("resources")
+                })
+            }
         }
+
+        val packageTask = registerPackage("keelPackage", "把插件打成 .keel（调试构建，供 keelRun）")
+        val releasePackageTask = registerPackage(
+            "keelPackageRelease",
+            "把插件打成 .keel（release 构建 + strip，供单 exe / 发布）",
+        )
 
         // 单 exe 产出（默认关闭）：与 .keel 打包互不影响，显式开启后额外注入 launcher
         project.pluginManager.apply("moe.lolosia.keel.bundle")
@@ -144,6 +163,8 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
 
             project.afterEvaluate {
                 if (!extension.enabled) return@afterEvaluate
+                // 命令行属性优先于工程里写死的值
+                (project.findProperty("keel.buildType") as String?)?.let { extension.buildType = it }
 
                 val kotlin = project.extensions.getByType(KotlinMultiplatformExtension::class.java)
                 val selected = extension.targets.ifEmpty { listOf(hostTargetName()) }
@@ -152,15 +173,47 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                     if (target.name !in selected) return@configureEach
 
                     target.binaries.withType(SharedLibrary::class.java).configureEach { binary ->
-                        if (!binary.buildType.name.equals(extension.buildType, ignoreCase = true)) {
-                            return@configureEach
+                        val isRelease = binary.buildType.name.equals("RELEASE", ignoreCase = true)
+                        val packageFor = when {
+                            isRelease -> releasePackageTask
+                            binary.buildType.name.equals(extension.buildType, ignoreCase = true) -> packageTask
+                            else -> return@configureEach
                         }
-                        packageTask.configure { task ->
-                            task.dependsOn(binary.linkTaskProvider)
-                            task.from(
-                                binary.linkTaskProvider.flatMap { it.outputFile },
-                                Action<CopySpec> { it.into("lib/${target.name}") },
-                            )
+                        if (isRelease) {
+                            // release 产物仍带 COFF / ELF 符号表，打包前显式 strip
+                            val suffix = target.name.replaceFirstChar { it.uppercaseChar() } +
+                                binary.name.replaceFirstChar { it.uppercaseChar() }
+                            val stripTask = project.tasks.register(
+                                "keelStrip$suffix",
+                                KeelStripTask::class.java,
+                            ) { strip ->
+                                strip.group = "keel"
+                                strip.description = "去掉 ${target.name} release sharedLib 的符号表"
+                                strip.inputFile.set(
+                                    project.layout.file(binary.linkTaskProvider.flatMap { it.outputFile })
+                                )
+                                strip.target.set(target.name)
+                                strip.outputDirectory.set(
+                                    project.layout.buildDirectory.dir(
+                                        "generated/keel/strip/${target.name}/${binary.name}"
+                                    )
+                                )
+                            }
+                            packageFor.configure { task ->
+                                task.dependsOn(stripTask)
+                                task.from(
+                                    stripTask.flatMap { it.outputDirectory },
+                                    Action<CopySpec> { it.into("lib/${target.name}") },
+                                )
+                            }
+                        } else {
+                            packageFor.configure { task ->
+                                task.dependsOn(binary.linkTaskProvider)
+                                task.from(
+                                    binary.linkTaskProvider.flatMap { it.outputFile },
+                                    Action<CopySpec> { it.into("lib/${target.name}") },
+                                )
+                            }
                         }
                     }
                 }

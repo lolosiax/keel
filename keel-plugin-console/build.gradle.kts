@@ -19,7 +19,8 @@ publishing {
     publications {
         create<MavenPublication>("keel") {
             artifactId = "keel-plugin-console"
-            artifact(tasks.named("keelPackage")) { extension = "keel" }
+            // 发布件是 release（strip 过）：消费方拿到的单 exe 不应再带调试信息
+            artifact(tasks.named("keelPackageRelease")) { extension = "keel" }
         }
     }
 }
