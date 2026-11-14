@@ -22,6 +22,7 @@ import moe.lolosia.keel.abi.c.KEEL_OK
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_HTTP
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.error.KeelRemoteException
@@ -226,6 +227,8 @@ internal object HostHttp {
     }
 
     private suspend fun dispatch(call: ApplicationCall) {
+        // 这一层是 suspend，影子栈看不到；用调用点标注一帧，调试器才能把「谁在等插件」拼全
+        val trace = intArrayOf(Debug.bridgeId(Log.site()))
         val remote = remoteInfoOf(call)
         val path = call.request.path()
         val method = call.request.httpMethod.value
@@ -324,7 +327,13 @@ internal object HostHttp {
         // 而不是泵唤醒后调度器留下的那一串无意义帧
         val callSite = Throwable()
 
-        val reply = HostPump.request(match.pluginId, KEEL_SUBJECT_HTTP.toULong(), payload, 30_000)
+        val reply = HostPump.request(
+            match.pluginId,
+            KEEL_SUBJECT_HTTP.toULong(),
+            payload,
+            30_000,
+            trace,
+        )
         if (reply != null && reply.status != KEEL_OK.toInt()) {
             val error = remoteError(match.pluginId, reply, callSite)
             // 自己记录并返回 JSON，不再把异常抛给 Ktor（避免它再打一遍 Unhandled）

@@ -55,4 +55,7 @@ object HostSubjects {
 
     /** 通知：把窗口里输入的一行送进 Host 的 stdin 接收器；载荷是 UTF-8 整行。 */
     const val CONSOLE_INPUT: Long = 0x1010L
+
+    /** 请求：本插件的 manifest id（调试位置表按它对齐）；载荷为空，应答是 UTF-8 明文。 */
+    const val DEBUG_MODULE: Long = 0x1011L
 }

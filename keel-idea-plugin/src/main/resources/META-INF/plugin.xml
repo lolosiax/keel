@@ -12,5 +12,8 @@
         <configurationType implementation="moe.lolosia.keel.idea.run.KeelRunConfigurationType"/>
         <runConfigurationProducer implementation="moe.lolosia.keel.idea.run.KeelRunConfigurationProducer"/>
         <postStartupActivity implementation="moe.lolosia.keel.idea.run.KeelProjectStartupActivity"/>
+        <!-- Debug executor：虫子按钮据此判断有没有可用的调试器 -->
+        <programRunner implementation="moe.lolosia.keel.idea.debug.KeelDebugRunner"/>
+        <xdebugger.breakpointType implementation="moe.lolosia.keel.idea.debug.KeelLineBreakpointType"/>
     </extensions>
 </idea-plugin>

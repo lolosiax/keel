@@ -11,6 +11,7 @@ import kotlinx.serialization.json.buildJsonObject
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.*
 import moe.lolosia.keel.api.auth.*
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.api.error.*
 import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.messaging.*
@@ -74,6 +75,8 @@ object PluginWorker {
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
         Log.installHistory(PluginLogSource)
+        // 调试会话里本 image 也要有一条通道：模块名用 manifest id，与位置表首行对齐
+        attachDebugAgent()
         WorkerScheduler.reset()
         WorkerScope.reset()
         val metadata = PluginMetadata(
@@ -138,6 +141,21 @@ object PluginWorker {
         WorkerScheduler.reset()
         WorkerScope.reset()
     }
+
+    /**
+     * 调试会话里接上本 image 的通道。
+     *
+     * 模块名要问 Host（manifest id 才是位置表首行的值），所以这里走一次普通 Host 请求；
+     * 不在调试会话时只读一个环境变量，没有额外开销。
+     */
+    private fun attachDebugAgent() {
+        val port = Debug.requestedPort() ?: return
+        val module = runCatching {
+            callHost(HostSubjects.DEBUG_MODULE.toULong(), ByteArray(0)).decodeToString()
+        }.getOrNull() ?: return
+        runCatching { Debug.attach(port, module) }
+            .onFailure { Log.warn("调试通道接入失败：${it.message}") }
+    }
 }
 
 /** 已经告警过的事件类型；只在 Worker 线程访问。 */
@@ -165,6 +183,23 @@ private fun dispatch(event: CPointer<KeelEvent>?) {
 }
 
 internal fun dispatchEvent(e: KeelEvent) {
+    // 调试会话：每个事件进来时顺手处理控制帧，空闲时只是一次原子读
+    Debug.poll()
+
+    // 事件边界：再往上都是 keel-api 自己的代码（没有插桩），用调用点标一帧，
+    // 调试器的栈才能显示「谁在服务这个事件」
+    val bridge = Debug.enterBridge(Log.site())
+    // 命中时把这个事件的 correlation 带出去，IDE 用它找等待方（跨 image 拼栈）
+    val previous = Debug.serving(e.correlation.toLong())
+    try {
+        dispatchEventBody(e)
+    } finally {
+        Debug.serving(previous)
+        Debug.exitBridge(bridge)
+    }
+}
+
+private fun dispatchEventBody(e: KeelEvent) {
     val kind = e.kind.toInt()
     when (kind) {
         KEEL_EVENT_SHUTDOWN.toInt() -> PluginWorker.disable()

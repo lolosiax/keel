@@ -3,6 +3,7 @@ package moe.lolosia.keel.host.plugin
 import kotlinx.cinterop.*
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.host.registerCrashModule
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
@@ -184,7 +185,9 @@ internal fun startPlugin(
 /** 等这次启动对应的 `COMPLETE`；期间其它插件的事件直接丢弃。 */
 private fun awaitComplete(manifest: KeelPackageManifest, correlation: ULong, timeoutMs: UInt) {
     val mark = TimeSource.Monotonic.markNow()
-    val timeout = timeoutMs.toLong().milliseconds
+    // 调试会话里 onLoad / onEnable 可能在断点上停很久：放宽启动等待，
+    // 否则 Host 会把「正在单步」误判成启动失败并开始拆插件
+    val timeout = Debug.debugTimeout(timeoutMs.toLong().milliseconds)
     while (true) {
         val remaining = timeout - mark.elapsedNow()
         if (remaining <= 0.milliseconds) break
@@ -199,10 +202,14 @@ private fun awaitComplete(manifest: KeelPackageManifest, correlation: ULong, tim
         }
         if (HostPump.handleAsync(event)) continue
     }
-    throw IllegalStateException("${manifest.id} 启动超时（${timeoutMs}ms 内没有 COMPLETE）")
+    throw IllegalStateException(
+        "${manifest.id} 启动超时（${timeout.inWholeMilliseconds}ms 内没有 COMPLETE）",
+    )
 }
 
-private var correlationCounter = 0uL
+@OptIn(kotlin.concurrent.atomics.ExperimentalAtomicApi::class)
+private val correlationCounter = kotlin.concurrent.atomics.AtomicLong(0)
 
-/** Host 发起请求时使用的 correlation 源；启动握手与 ping 共用。 */
-internal fun nextCorrelation(): ULong = ++correlationCounter
+/** Host 发起请求时使用的 correlation 源；启动握手、HTTP 转发与 ping 共用，可跨线程调用。 */
+@OptIn(kotlin.concurrent.atomics.ExperimentalAtomicApi::class)
+internal fun nextCorrelation(): ULong = correlationCounter.addAndFetch(1).toULong()

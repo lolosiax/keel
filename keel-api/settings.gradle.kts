@@ -1,4 +1,6 @@
 pluginManagement {
+    // 日志改写插件同样要作用于本模块：`Log.site()` 在 keel-api 内部也要能拿到调用点
+    includeBuild("../keel-logger-gradle-plugin")
     repositories {
         maven("https://maven.aliyun.com/repository/public/")
         maven("https://maven.aliyun.com/repository/gradle-plugin")
@@ -9,6 +11,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 编译器插件工件：本地开发先跑 publishAllToMavenLocal
+        mavenLocal()
         maven("https://maven.aliyun.com/repository/public")
         mavenCentral()
         // 自建 Maven（地址来自 ../local.properties 的 keel.repo；不入库）

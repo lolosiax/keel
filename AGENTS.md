@@ -388,6 +388,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
 | [doc/log-design.md](doc/log-design.md) | **日志归档与订阅**：环形缓冲与容量核算、文本 / 结构化两种视图、插件 Flow 订阅与背压、控制台 / 桌面应用切换 |
 | [doc/console-design.md](doc/console-design.md) | **控制台窗口插件**：子进程 helper + 双向管道帧协议、TTY 语义保留、Messenger 补全、日志 Flow 回放与背压 |
+| [doc/debug-design.md](doc/debug-design.md) | **调试支持（讨论稿）**：原生 LLDB 路线与自建 XDebugger 调试器的取舍、IR 插桩 + C agent + 协议的必要部件、语义边界与最小切片 |
 | [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接（冷启动先读这里）**：现状速览、设计决策、下一步、坑索引。只读本文，不要全量读 |
 | [doc/记忆/实现现状.md](doc/记忆/实现现状.md) | **逐模块实现现状**（原任务记忆 §3；编号不变）+ 关键编译命令 |
 | [doc/记忆/验证记录.md](doc/记忆/验证记录.md) | **历史冒烟快照**（原任务记忆 §4）；归档材料，平时不用读 |

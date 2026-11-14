@@ -7,6 +7,7 @@ import kotlinx.cinterop.*
 import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.error.KeelRemoteException
 import moe.lolosia.keel.api.host.HostRequestException
@@ -45,7 +46,7 @@ internal fun callHost(
     val correlation = ++hostCounter
     sendToHost(subject, payload, correlation)
 
-    val deadline = TimeSource.Monotonic.markNow() + timeout
+    val deadline = TimeSource.Monotonic.markNow() + Debug.debugTimeout(timeout)
     val event = nativeHeap.alloc<KeelEvent>()
     try {
         while (true) {

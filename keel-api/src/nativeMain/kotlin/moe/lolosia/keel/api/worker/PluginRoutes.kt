@@ -4,7 +4,9 @@ import kotlinx.cinterop.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.lolosia.keel.abi.c.*
+import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.PluginContext
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -67,10 +69,16 @@ internal object PluginRoutes : Routes {
         pathParameters: Map<String, String>,
         user: UserSnapshot?,
     ): HttpResponse {
-        val entry = entries.firstOrNull { it.descriptor.routeId == routeId }
-            ?: return HttpResponse(status = 404, body = ResponseBody.Text("route not found: $routeId"))
-        val context = RequestContextImpl(plugin, request, pathParameters, user)
-        return entry.handler(context)
+        // 路由分发是 keel-api 的边界（没有插桩），标一帧把控制器接在它下面
+        val bridge = Debug.enterBridge(Log.site())
+        try {
+            val entry = entries.firstOrNull { it.descriptor.routeId == routeId }
+                ?: return HttpResponse(status = 404, body = ResponseBody.Text("route not found: $routeId"))
+            val context = RequestContextImpl(plugin, request, pathParameters, user)
+            return entry.handler(context)
+        } finally {
+            Debug.exitBridge(bridge)
+        }
     }
 
     /** 把插件响应压成跨 ABI 的一次性响应。 */

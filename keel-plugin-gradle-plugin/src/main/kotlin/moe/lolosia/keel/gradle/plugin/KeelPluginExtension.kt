@@ -44,6 +44,14 @@ open class KeelPluginExtension(private val project: Project) {
      */
     var runHostExecutable: String? = null
 
+    /**
+     * 本地 Host 的位置表目录（`*.keel-debug`）。
+     *
+     * 用 [runHostExecutable] 指向本地 debug Host 时必须一起配，否则 IDE 里
+     * Host 源码上的断点因为没有 `locationId` 映射而不会命中。
+     */
+    var runHostDebugDir: String? = null
+
     /** `keelRun` 的 HTTP 端口；命令行 `-Pkeel.run.port=` 优先。 */
     var runPort: Int = 7191
 

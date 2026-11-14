@@ -3,7 +3,9 @@ package moe.lolosia.keel.host
 import kotlinx.cinterop.toKString
 import moe.lolosia.keel.abi.c.KEEL_SUBJECT_PING
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.classpath.EmptyClasspath
+import moe.lolosia.keel.host.build.BuildInfo
 import moe.lolosia.keel.host.classpath.HostClasspath
 import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.plugin.HostPlugins
@@ -75,6 +77,10 @@ private fun startHost(
     val dir = pluginsDir.trimEnd('/', '\\')
     val cache = cacheDir?.trimEnd('/', '\\') ?: "$dir/.cache"
 
+    // 调试会话：IDE 通过 KEEL_DEBUG_PORT 告诉我们要连的端口。
+    // 只做 bind + listen，accept 放在事件循环里非阻塞地做。
+    attachDebugAgent()
+
     // 尽早接管 Ctrl+C，启动阶段的中断也走优雅停机
     HostBootstrap.installShutdownHook()
 
@@ -123,6 +129,16 @@ private fun resolveHttpPort(explicit: Int?, bundled: Boolean): Int? {
     getenv("KEEL_HTTP_PORT")?.toKString()?.trim()?.toIntOrNull()?.let { return it }
     HostConfigs.serverPort()?.let { return it }
     return if (bundled) DEFAULT_HTTP_PORT else null
+}
+
+/**
+ * `KEEL_DEBUG_PORT` 存在时把本 Host 接上 IDE 的调试通道。
+ *
+ * 模块 id 取 Gradle 的工程名（位置表首行也是它），buildId 取启动横幅里的同一份。
+ */
+private fun attachDebugAgent() {
+    val port = Debug.requestedPort() ?: return
+    Debug.attach(port, "keel-host", BuildInfo.BUILD_ID)
 }
 
 /** 单文件发行版的工作根：`KEEL_HOME` → exe 目录 → 用户缓存目录。 */

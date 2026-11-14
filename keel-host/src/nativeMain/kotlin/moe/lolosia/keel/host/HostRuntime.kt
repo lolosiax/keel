@@ -4,6 +4,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.keel_shutdown_requested
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.host.console.ConsolePrompt
 import moe.lolosia.keel.host.console.HostConsole
 import moe.lolosia.keel.host.plugin.HostPlugins
@@ -40,6 +41,8 @@ internal object HostRuntime {
                     break
                 }
                 HostConsole.poll()
+                // 调试通道要靠这轮循环推进：接 IDE、收断点表、清掉挂起的命令
+                Debug.poll()
                 HostPump.serve()
             }
             // 先关提示符：之后的停机日志不该再补 `> `，屏幕底部也不该留一个空提示

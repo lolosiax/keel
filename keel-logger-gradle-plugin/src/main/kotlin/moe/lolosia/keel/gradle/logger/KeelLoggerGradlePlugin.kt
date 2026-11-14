@@ -45,6 +45,19 @@ class KeelLoggerGradlePlugin : KotlinCompilerPluginSupportPlugin {
                 add(SubpluginOption("exceptionTrace", (extension?.exceptionTrace?.get() ?: true).toString()))
                 add(SubpluginOption("workspaceRoot", workspaceRoot))
                 roots.forEach { add(SubpluginOption("sourceRoot", it)) }
+
+                // 调试位置表：文件名带上工程与目标，避免同一运行目录里 Host 与插件互相覆盖
+                if (extension?.debug?.get() != false) {
+                    val directory = extension?.debugOutput?.orNull?.asFile
+                        ?: project.layout.buildDirectory.dir("keel-debug").get().asFile
+                    val name = "${project.name}-${kotlinCompilation.target.name}-${kotlinCompilation.name}.keel-debug"
+                    add(SubpluginOption("debug", "true"))
+                    add(SubpluginOption("debugOutput", directory.resolve(name).absolutePath))
+                    add(SubpluginOption("debugModule", extension?.debugModule?.getOrNull() ?: project.name))
+                    add(SubpluginOption("debugBuildId", project.version.toString()))
+                } else {
+                    add(SubpluginOption("debug", "false"))
+                }
             }
         }
     }

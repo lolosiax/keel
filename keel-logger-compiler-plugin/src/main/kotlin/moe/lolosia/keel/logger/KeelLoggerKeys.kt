@@ -12,4 +12,12 @@ internal object KeelLoggerKeys {
     val SOURCE_ROOTS = CompilerConfigurationKey<List<String>>("keel-logger sourceRoots")
 
     val EXCEPTION_TRACE = CompilerConfigurationKey<Boolean>("keel-logger exceptionTrace")
+
+    val DEBUG = CompilerConfigurationKey<Boolean>("keel-logger debug")
+
+    val DEBUG_OUTPUT = CompilerConfigurationKey<String>("keel-logger debugOutput")
+
+    val DEBUG_MODULE = CompilerConfigurationKey<String>("keel-logger debugModule")
+
+    val DEBUG_BUILD_ID = CompilerConfigurationKey<String>("keel-logger debugBuildId")
 }

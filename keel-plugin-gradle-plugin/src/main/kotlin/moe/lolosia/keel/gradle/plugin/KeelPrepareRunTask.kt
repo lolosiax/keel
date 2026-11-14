@@ -34,6 +34,12 @@ abstract class KeelPrepareRunTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val extraArtifacts: ConfigurableFileCollection
 
+    /** 位置表（`*.keel-debug`）：本插件与显式配置的本地 Host。 */
+    @get:InputFiles
+    @get:Optional
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    abstract val debugFiles: ConfigurableFileCollection
+
     /** `dev/config/plugins/<id>.yaml`。 */
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -52,6 +58,10 @@ abstract class KeelPrepareRunTask : DefaultTask() {
     /** 插件目录；`.keel` 与配置模板都放这里。 */
     @get:OutputDirectory
     abstract val pluginsDirectory: DirectoryProperty
+
+    /** 调试位置表目录；IDE 从这里读「文件 + 行 → locationId」。 */
+    @get:OutputDirectory
+    abstract val debugDirectory: DirectoryProperty
 
     @get:Inject
     abstract val fs: FileSystemOperations
@@ -78,5 +88,11 @@ abstract class KeelPrepareRunTask : DefaultTask() {
                 it.into(root)
             }
         }
+
+        // 位置表与 `.keel` 分开存放：它只在调试会话里有意义，也不参与包校验
+        val debug = debugDirectory.get().asFile
+        fs.delete { it.delete(debug) }
+        debug.mkdirs()
+        debugFiles.files.forEach { it.copyTo(debug.resolve(it.name), overwrite = true) }
     }
 }

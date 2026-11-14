@@ -7,10 +7,12 @@ import com.intellij.execution.configurations.RunConfiguration
 import com.intellij.execution.configurations.RunProfileState
 import com.intellij.execution.configurations.RuntimeConfigurationError
 import com.intellij.execution.configurations.RuntimeConfigurationWarning
+import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemBeforeRunTask
 import com.intellij.openapi.options.SettingsEditor
 import com.intellij.openapi.project.Project
+import moe.lolosia.keel.idea.debug.KeelDebugProfileState
 import org.jetbrains.plugins.gradle.execution.GradleBeforeRunTaskProvider
 import org.jetbrains.plugins.gradle.util.GradleConstants
 import java.io.File
@@ -98,7 +100,11 @@ class KeelRunConfiguration(project: Project, factory: ConfigurationFactory, name
 
     override fun getState(executor: Executor, environment: ExecutionEnvironment): RunProfileState {
         ensureBuildTask()
-        return KeelRunProfileState(environment, this)
+        return if (executor.id == DefaultDebugExecutor.EXECUTOR_ID) {
+            KeelDebugProfileState(environment, this)
+        } else {
+            KeelRunProfileState(environment, this)
+        }
     }
 
     override fun checkConfiguration() {

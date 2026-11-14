@@ -1,7 +1,23 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    // 本模块自己也要被日志插件处理：`Log.site()` 在 keel-api 内部才有调用点
+    id("moe.lolosia.keel.logger")
     `maven-publish`
+}
+
+/**
+ * 只做日志改写（为了 `Log.site()`），不做调试插桩：
+ *
+ * - `Debug` 自己的检查点若被插进去会自递归；
+ * - api 的 `locationId` 属于 api 自己的位置表，而运行期是按「上报模块」的表解析的，
+ *   跨 image（同一个 keel-api 被 Host 和每个插件各链一份）解析不到。
+ *
+ * 桥接层需要的帧改用 `Debug.enterBridge(Log.site())` 记「命名帧」：名字 / 文件 / 行随帧自带。
+ */
+keelLogger {
+    debug = false
+    exceptionTrace = false
 }
 
 group = "moe.lolosia.keel"

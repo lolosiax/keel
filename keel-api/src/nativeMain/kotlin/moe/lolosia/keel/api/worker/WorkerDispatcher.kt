@@ -2,6 +2,7 @@ package moe.lolosia.keel.api.worker
 
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.*
+import moe.lolosia.keel.api.debug.Debug
 
 /**
  * 把协程调度回插件 Worker 线程。
@@ -16,7 +17,12 @@ import kotlinx.coroutines.*
 internal object WorkerDispatcher : CoroutineDispatcher(), Delay {
 
     override fun dispatch(context: CoroutineContext, block: Runnable) {
-        WorkerScheduler.dispatch { block.run() }
+        // 调试帧：续体投递时还运行在创建者栈上，此刻按 Job 建表就是 creation stack
+        val job = context[Job]
+        val frames = if (job == null) null else Debug.framesForCoroutine(job)
+        WorkerScheduler.dispatch {
+            Debug.runWithCoroutineFrames(frames) { block.run() }
+        }
     }
 
     override fun scheduleResumeAfterDelay(

@@ -12,6 +12,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import moe.lolosia.keel.abi.c.*
 import moe.lolosia.keel.api.Log
+import moe.lolosia.keel.api.debug.Debug
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.error.KeelErrorEntry
 import moe.lolosia.keel.api.error.KeelErrorPayload
@@ -39,6 +40,16 @@ private const val SERVICE_TIMEOUT_MS = 5000L
 
 /** 业务 subject 从 0x1000 开始；协议 subject 仍由各自的处理器消费。 */
 private const val BUSINESS_SUBJECT_MIN = 0x1000uL
+
+/**
+ * 调试会话期间把等待上限放宽成 [Debug.debugTimeout]。
+ *
+ * 断点停住的是对端的执行线程，它本来就不可能回包；按原超时判成「无响应」
+ * 会让上游任务白白失败，而这类失败在调试时是纯噪音。调用方显式写的
+ * `withTimeout` 不受影响：那属于它自己的语义。
+ */
+private fun debugTimeoutMs(baseMs: Long): Long =
+    Debug.debugTimeout(baseMs.milliseconds).inWholeMilliseconds
 
 /** 一次 Host → 插件的在途请求；[reply] 由泵线程完成。 */
 internal class HostRequest(
@@ -121,12 +132,18 @@ internal object HostPump {
         subject: ULong,
         payload: ByteArray? = null,
         timeoutMs: Long = 2000,
+        trace: IntArray? = null,
     ): HostEvent? {
-        val request = HostRequest(pluginId, subject, payload, timeoutMs)
+        // 调试期间对端可能停在断点上：放宽超时，否则会被误判成「插件无响应」
+        val effectiveMs = debugTimeoutMs(timeoutMs)
+        val request = HostRequest(pluginId, subject, payload, effectiveMs)
+        // correlation 在这里先定下来：它要随 WAITING 快照一起给 IDE，用于跨 image 拼栈
+        request.correlation = nextCorrelation()
+        Debug.requestStart(request.correlation.toLong(), Log.site(), trace)
         incoming.send(request)
         // 泵线程可能正阻塞在 200ms 的 pop 里；投一条 WAKE 让它立刻处理新请求
         wakeHostPump()
-        return withTimeoutOrNull(timeoutMs) { request.reply.await() }
+        return withTimeoutOrNull(effectiveMs) { request.reply.await() }
     }
 
     /**
@@ -297,7 +314,7 @@ internal object HostPump {
             callerId = event.source,
             callerCorrelation = event.correlation,
             providerId = provider,
-            deadlineMs = nowMs() + SERVICE_TIMEOUT_MS,
+            deadlineMs = nowMs() + debugTimeoutMs(SERVICE_TIMEOUT_MS),
             subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
         )
     }
@@ -359,7 +376,7 @@ internal object HostPump {
             callerId = event.source,
             callerCorrelation = event.correlation,
             providerId = target.pluginId,
-            deadlineMs = nowMs() + SERVICE_TIMEOUT_MS,
+            deadlineMs = nowMs() + debugTimeoutMs(SERVICE_TIMEOUT_MS),
             subject = KEEL_SUBJECT_MESSAGE.toULong(),
         )
     }
@@ -610,6 +627,11 @@ internal object HostPump {
 
             HostSubjects.MESSAGE_POST -> routeMessagePost(source, payload)
 
+            HostSubjects.DEBUG_MODULE ->
+                (HostPluginIds.nameOf(source)
+                    ?: throw IllegalStateException("插件 $source 尚未登记 manifest id"))
+                    .encodeToByteArray()
+
             HostSubjects.CONSOLE_INPUT -> {
                 // 与真实 stdin 完全同构：一行一条，空行直接丢弃
                 val line = payload?.decodeToString().orEmpty().trimEnd('\r', '\n')
@@ -693,7 +715,8 @@ internal object HostPump {
     }
 
     private fun start(request: HostRequest) {
-        val correlation = nextCorrelation()
+        // correlation 可能已经在 request() 里定好（要用于调试拼栈），这里只补漏
+        val correlation = if (request.correlation != 0uL) request.correlation else nextCorrelation()
         request.correlation = correlation
         request.deadlineMs = nowMs() + request.timeoutMs
 
@@ -750,29 +773,36 @@ internal object HostPump {
         payload: ByteArray? = null,
         timeoutMs: UInt = 2000u,
     ): HostEvent? {
-        val correlation = nextCorrelation()
-        if (!pushToPlugin(
-                pluginId = pluginId,
-                kind = KEEL_EVENT_COMMAND.toInt(),
-                subject = subject,
-                correlation = correlation,
-                payload = payload,
-            )
-        ) {
-            return null
-        }
+        val bridge = Debug.enterBridge(Log.site())
+        try {
+            val correlation = nextCorrelation()
+            // 这里是真的阻塞等待：把本线程的栈快照发给 IDE，插件命中时接在下面
+            Debug.requestStart(correlation.toLong(), null)
+            if (!pushToPlugin(
+                    pluginId = pluginId,
+                    kind = KEEL_EVENT_COMMAND.toInt(),
+                    subject = subject,
+                    correlation = correlation,
+                    payload = payload,
+                )
+            ) {
+                return null
+            }
 
-        val mark = TimeSource.Monotonic.markNow()
-        val timeout = timeoutMs.toLong().milliseconds
-        while (true) {
-            val remaining = timeout - mark.elapsedNow()
-            if (remaining <= 0.milliseconds) return null
+            val mark = TimeSource.Monotonic.markNow()
+            val timeout = debugTimeoutMs(timeoutMs.toLong()).milliseconds
+            while (true) {
+                val remaining = timeout - mark.elapsedNow()
+                if (remaining <= 0.milliseconds) return null
 
-            val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: return null
-            // 先认自己的回包，再交给通用处理（否则会被 handleAsync 当成其它请求的回包吞掉）
-            if (event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation) return event
-            if (handleAsync(event)) continue
-            warnOnce("kind=${event.kind}->${event.target}", "请求期间收到无关事件")
+                val event = popHostEvent(remaining.inWholeMilliseconds.toUInt()) ?: return null
+                // 先认自己的回包，再交给通用处理（否则会被 handleAsync 当成其它请求的回包吞掉）
+                if (event.kind == KEEL_EVENT_COMPLETE.toInt() && event.correlation == correlation) return event
+                if (handleAsync(event)) continue
+                warnOnce("kind=${event.kind}->${event.target}", "请求期间收到无关事件")
+            }
+        } finally {
+            Debug.exitBridge(bridge)
         }
     }
 

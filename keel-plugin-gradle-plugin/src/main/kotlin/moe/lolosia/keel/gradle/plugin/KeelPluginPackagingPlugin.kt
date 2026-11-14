@@ -3,6 +3,7 @@ package moe.lolosia.keel.gradle.plugin
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import moe.lolosia.keel.gradle.classpath.KeelStripTask
+import moe.lolosia.keel.gradle.logger.KeelLoggerExtension
 import moe.lolosia.keel.gradle.logger.KeelLoggerGradlePlugin
 import org.gradle.api.Action
 import org.gradle.api.Plugin
@@ -41,6 +42,12 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
 
         val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java, project)
         val manifest = project.file(extension.manifest)
+
+        // 位置表首行必须与运行期 HELLO 的模块名一致：插件运行期只拿得到 manifest id，
+        // 所以编译期的 debugModule 也用它，而不是 Gradle 工程名。
+        project.extensions.configure(KeelLoggerExtension::class.java) { logger ->
+            logger.debugModule.set(readManifestId(manifest) ?: project.name)
+        }
 
         // 构建期把 git sha / 提交时间合并进 plugin.json；不改仓库里的源文件
         val processedManifest = project.layout.buildDirectory.file("generated/keel/plugin.json")
@@ -288,6 +295,21 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                 task.extraArtifacts.from(runConfiguration)
                 task.runDirectory.set(runWorkDir)
                 task.pluginsDirectory.set(runWorkDir.resolve("plugins"))
+                task.debugDirectory.set(runWorkDir.resolve("debug"))
+                // 本插件自己的位置表；debug 关闭时目录为空，任务照常通过
+                task.debugFiles.from(
+                    project.fileTree(project.layout.buildDirectory.dir("keel-debug")) {
+                        it.include("*.keel-debug")
+                    }
+                )
+                // 本地 Host 的位置表：调试 Host 源码时 IDE 需要它来反查 locationId
+                val hostDebugDir = (project.findProperty("keel.run.host.debug") as String?)
+                    ?: extension.runHostDebugDir
+                hostDebugDir?.let { path ->
+                    task.debugFiles.from(
+                        project.fileTree(project.file(path)) { it.include("*.keel-debug") }
+                    )
+                }
                 task.configTemplates.from(
                     project.fileTree("dev/config/plugins") { it.include("*.yaml") }
                 )
@@ -320,6 +342,16 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         if (targetName.isEmpty()) return null
         val kotlin = project.extensions.findByType(KotlinMultiplatformExtension::class.java) ?: return null
         return kotlin.targets.findByName(targetName) as? KotlinNativeTarget
+    }
+
+    /** 读取 `plugin.json` 的 `id`；文件缺失 / 格式不对时返回 null。 */
+    private fun readManifestId(manifest: java.io.File): String? {
+        if (!manifest.isFile) return null
+        return runCatching {
+            @Suppress("UNCHECKED_CAST")
+            val json = JsonSlurper().parse(manifest) as Map<String, Any?>
+            (json["id"] as? String)?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
     /** 读取 `plugin.json` 的 `requires`；文件缺失 / 格式不对时按空列表处理。 */
