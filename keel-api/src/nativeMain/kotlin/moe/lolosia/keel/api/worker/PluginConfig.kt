@@ -30,7 +30,9 @@ internal class PluginConfig(
     private var document: JsonElement? = null
 
     override fun <T> read(serializer: KSerializer<T>, path: String): T {
-        val node = resolve(document ?: fetchDocument(), path)
+        // 首次读取时把整棵文档留在本地快照里，之后读取零往返；刷新只走 `reload` / `write`
+        val snapshot = document ?: fetchDocument().also { document = it }
+        val node = resolve(snapshot, path)
         if (node == null) {
             if (serializer.descriptor.isNullable) {
                 @Suppress("UNCHECKED_CAST")
