@@ -8,13 +8,13 @@ import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import org.gradle.work.DisableCachingByDefault
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -37,7 +37,7 @@ import java.util.zip.ZipOutputStream
  * 容器由 [compression] 决定：`zstd`（默认，单帧 + 索引）或 `deflate`（zip）。
  * `zstd` 的布局见 Host 侧 `BundleArchiveClasspath`，两边的 magic / 版本 / 字段必须一致。
  */
-@DisableCachingByDefault(because = "输入都在本工程内，重复解压 .keel 的收益不足以做可复用缓存")
+@CacheableTask
 abstract class KeelBundleTask : DefaultTask() {
 
     @get:InputFiles
@@ -80,7 +80,8 @@ abstract class KeelBundleTask : DefaultTask() {
         val plugins = mutableListOf<Map<String, Any?>>()
         val entries = sortedMapOf<String, ByteArray>()
 
-        packages.files.filter { it.isFile }.sortedBy { it.absolutePath }.forEach { file ->
+        // 按文件名排序（而不是绝对路径），保证不同机器上的 bundle 布局一致、可复用缓存
+        packages.files.filter { it.isFile }.sortedBy { it.name }.forEach { file ->
             ZipFile(file).use { source ->
                 val manifestEntry = source.getEntry("plugin.json")
                     ?: throw GradleException("$file 缺少 plugin.json")

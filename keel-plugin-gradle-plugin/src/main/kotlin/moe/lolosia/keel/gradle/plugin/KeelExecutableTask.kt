@@ -7,6 +7,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.CacheableTask
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
@@ -15,7 +16,6 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
-import org.gradle.work.DisableCachingByDefault
 import org.gradle.process.ExecOperations
 import java.io.File
 import java.io.FileOutputStream
@@ -31,7 +31,7 @@ import javax.inject.Inject
  * - Windows：生成 `.rc` → `windres -O res` → `UpdateResource` 注入 PE；
  * - Linux：launcher + bundle + 32 字节 footer（`KEELBNDL`）。
  */
-@DisableCachingByDefault(because = "产物是注入过资源的可执行文件，绑定当前宿主工具链")
+@CacheableTask
 abstract class KeelExecutableTask : DefaultTask() {
 
     @get:InputFile
@@ -77,9 +77,14 @@ abstract class KeelExecutableTask : DefaultTask() {
     @get:Input
     abstract val copyright: Property<String>
 
-    @get:Input
+    @get:InputFile
     @get:Optional
-    abstract val icon: Property<String>
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val icon: RegularFileProperty
+
+    /** 输出文件名会写进 VERSIONINFO 的 `OriginalFilename`，必须参与缓存 key。 */
+    @get:Input
+    abstract val executableName: Property<String>
 
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
@@ -139,7 +144,7 @@ abstract class KeelExecutableTask : DefaultTask() {
         launcher.copyTo(exe, overwrite = true)
         if (stripLauncher.get()) strip(exe)
 
-        val iconPath = icon.orNull?.takeIf { it.isNotBlank() }?.let { File(it) }
+        val iconPath = icon.orNull?.asFile
         val iconFile = dir.resolve("app.ico")
         if (iconPath != null) {
             iconPath.copyTo(iconFile, overwrite = true)
@@ -166,7 +171,7 @@ abstract class KeelExecutableTask : DefaultTask() {
                 companyName = companyName.get(),
                 copyright = copyright.get(),
                 internalName = appName.get(),
-                executableName = output.name,
+                executableName = executableName.get(),
             ),
             Charsets.UTF_8,
         )

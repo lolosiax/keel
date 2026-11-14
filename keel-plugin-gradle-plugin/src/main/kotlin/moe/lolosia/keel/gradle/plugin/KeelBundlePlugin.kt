@@ -147,8 +147,11 @@ class KeelBundlePlugin : Plugin<Project> {
                     task.companyName.set(executable.windows.companyName)
                     task.copyright.set(executable.windows.copyright)
                     executable.windows.icon.takeIf { it.isNotBlank() }?.let { path ->
-                        task.icon.set(project.file(path).absolutePath)
+                        task.icon.set(project.file(path))
                     }
+                    task.executableName.set(
+                        executable.name + if (isWindows) ".exe" else ""
+                    )
                     task.outputFile.set(
                         project.layout.buildDirectory.file(
                             "keel/${target.name}/${executable.name}" +

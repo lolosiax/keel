@@ -192,6 +192,8 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                                 strip.inputFile.set(
                                     project.layout.file(binary.linkTaskProvider.flatMap { it.outputFile })
                                 )
+                                // layout.file(provider) 不带任务依赖；干净构建时必须显式依赖 link
+                                strip.dependsOn(binary.linkTaskProvider)
                                 strip.target.set(target.name)
                                 strip.outputDirectory.set(
                                     project.layout.buildDirectory.dir(
