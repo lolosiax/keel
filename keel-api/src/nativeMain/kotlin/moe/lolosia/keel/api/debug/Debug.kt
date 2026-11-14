@@ -430,7 +430,7 @@ object Debug {
             }
             sent = sendFrame(
                 SUSPENDED,
-                "$locationId\t$stopSeq\t$moduleId\t$reason\t${callers()}\t$servingCorrelation",
+                "$locationId\t$stopSeq\t$moduleId\t$reason\t${callers()}\t$servingCorrelation\t${creationCallers()}",
             )
         }
         if (!sent) {
@@ -445,7 +445,7 @@ object Debug {
     }
 
     /**
-     * 当前线程的完整影子栈（由内到外）。
+     * 当前执行的帧（由内到外），不含创建者栈。
      *
      * 不剔除栈顶：`suspend` 函数没有 `enter` 帧，栈顶可能是它的调用者，
      * 剔除会白白丢一帧；重复的那一层（当前函数自己的 `enter`）由 IDE 按
@@ -453,10 +453,20 @@ object Debug {
      */
     private fun callers(): String {
         val stack = currentStack()
-        val depth = stack.depth
-        if (depth == 0) return ""
+        return joinFrames(stack, stack.creationBoundary(), stack.depth)
+    }
+
+    /** 创建者栈（由内到外）：这条协程是在哪条栈上被创建出来的。线程栈为空。 */
+    private fun creationCallers(): String {
+        val stack = currentStack()
+        return joinFrames(stack, 0, stack.creationBoundary())
+    }
+
+    /** `ids[from, to)` 由内到外拼成 `a,b,c`。 */
+    private fun joinFrames(stack: FrameStack, from: Int, to: Int): String {
+        if (to <= from) return ""
         return buildString {
-            for (index in depth - 1 downTo 0) {
+            for (index in to - 1 downTo from) {
                 if (isNotEmpty()) append(',')
                 append(stack.ids[index])
             }

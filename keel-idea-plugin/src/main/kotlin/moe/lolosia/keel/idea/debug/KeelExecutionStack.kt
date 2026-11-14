@@ -11,7 +11,7 @@ import com.intellij.xdebugger.frame.XStackFrame
  */
 class KeelExecutionStack(
     displayName: String,
-    private val frames: List<KeelStackFrame>,
+    private val frames: List<XStackFrame>,
 ) : XExecutionStack(displayName) {
 
     override fun getTopFrame(): XStackFrame? = frames.firstOrNull()

@@ -184,13 +184,13 @@ Debug executor 走另一条 ProfileState。
 | **M2 多 image** | IDE 监听、每个 image 一条通道、按模块下发断点 | ✅ |
 | **M3 栈帧 + 变量** | 影子栈多层调用链、参数 / `this` 快照（`VALUES`） | ✅ |
 | **M3.5 跨 image 拼栈** | `correlation` + `WAITING`，不真停等待方 | ✅ |
-| **M4 协程栈** | 按 `Job` 记账的帧表、creation stack、`suspend` 插桩 | 🟡 M4.1 / M4.2，M4.3 待做 |
+| **M4 协程栈** | 按 `Job` 记账的帧表、creation stack、`suspend` 插桩 | ✅ |
 | **M5 调试感知超时** | 调试期间放宽 API 层自己的等待上限 | ✅ |
 | **M6 API 桥接帧** | keel-api 应用日志插件，`Log.site()` 记命名帧 | ✅ |
 | **M7 单步** | `RESUME step:over\|into\|out`，按影子栈深度判定 | ✅ |
 
-剩下的：M4.3（creation stack 渲染成分隔帧）、异常断点、变量展开 / 局部变量、
-`KEEL_DEBUG_HOST` 远程、Host 侧 Ktor 协程的帧表包装。
+剩下的：异常断点、变量展开 / 局部变量、`KEEL_DEBUG_HOST` 远程、
+Host 侧 Ktor 协程的帧表包装。
 
 ### 5.4 每个里程碑的改动
 
@@ -316,6 +316,18 @@ IR: enter(id) / exit(id)  ── 写进「当前协程的」FrameStack
 未覆盖：Host 侧 Ktor 协程跑在别人的调度器上，没有这个包装，仍按线程栈处理；
 `withContext` 换调度器后同样暂时退回线程栈。
 
+**M4.3 已落地（创建者栈分段显示）**
+
+- 运行期：`FrameStack.creationDepth` 记住建表时的深度（线程栈为 0）。`SUSPENDED` 的
+  `callers` 只给 `[creationDepth, depth)` 这一段（协程自己的帧），新增第 7 个字段
+  `creation` 给 `[0, creationDepth)`（创建者栈），两段都由内到外。
+- IDE：`KeelExecutionStack` 的帧列表改成 `List<XStackFrame>`，在两段之间插一条
+  `KeelSeparatorFrame("协程创建栈（Coroutine creation stack）")`，渲染效果与 IDEA 自带的
+  协程视图一致；分隔行不可跳转、没有源码位置。
+
+实测：协程命中 `current=351`、`creation=353,335,163`
+（`lambda ← checkScope ← onEnable ← keelPluginWorkerMain`）；线程栈命中 `creation` 为空。
+
 **M5（调试感知超时）**
 
 断点停住的是**对端**的执行线程，它本来就不可能回包。若 API 层照原超时判定「无响应」，
@@ -391,7 +403,7 @@ IR: enter(id) / exit(id)  ── 写进「当前协程的」FrameStack
 | agent → IDE | `HELLO` | `moduleId  buildId  arch`（arch 固定 `native`） |
 | IDE → agent | `BREAKPOINTS` | `version  locationId,locationId,...`（整表替换，只含当前模块的 id） |
 | agent → IDE | `VALUES` | `locationId  count  name  value  name  value...`（命中瞬间的参数快照，先于 `SUSPENDED`） |
-| agent → IDE | `SUSPENDED` | `locationId  threadId  module  reason  callers  correlation`（`callers` = 由内到外的 `enter` 行 id） |
+| agent → IDE | `SUSPENDED` | `locationId  threadId  module  reason  callers  correlation  creation`（`callers` = 当前帧、由内到外；`creation` = 协程创建栈，线程栈为空） |
 | agent → IDE | `NAMES` | `locationId  owner  file  line`（运行期注册的命名帧，id 为负） |
 | agent → IDE | `WAITING` | `correlation  module  callers`（等待方快照，用于跨 image 拼栈） |
 | agent → IDE | `STACK` | `threadId  count` + `count` 行 `locationId  depth`（M3 暂未使用，栈随 `SUSPENDED` 走） |

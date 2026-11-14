@@ -290,6 +290,13 @@ class KeelDebugProcess(
             }
             .map { KeelStackLocation(module, it.file, it.line, it.owner, it.function) }
 
+        // 协程创建栈：运行期已经把「当前帧」与「创建者栈」切开了，这里分段显示
+        val creation = fields.getOrNull(6).orEmpty()
+            .split(',')
+            .mapNotNull { it.trim().toIntOrNull() }
+            .mapNotNull { symbols.location(module, it) }
+            .map { KeelStackLocation(module, it.file, it.line, it.owner, it.function) }
+
         // 跨 image：发起这次请求的线程此刻正阻塞等回包，把它的栈接在下面
         val correlation = fields.getOrNull(5)?.toLongOrNull() ?: 0L
         val waiting = if (correlation > 0L) {
@@ -303,18 +310,18 @@ class KeelDebugProcess(
 
         ApplicationManager.getApplication().invokeLater {
             if (closed) return@invokeLater
-            val locations = buildList {
-                add(top)
-                addAll(callers)
-                if (!waiting.isNullOrEmpty()) addAll(waiting)
-            }
-            val frames = locations.mapIndexed { index, location ->
-                KeelStackFrame(
-                    project = project,
-                    location = location,
-                    values = if (index == 0) values else emptyList(),
-                    showModule = location.module != module,
-                )
+            val frames = buildList {
+                add(KeelStackFrame(project, top, values, showModule = top.module != module))
+                callers.forEach { add(KeelStackFrame(project, it)) }
+                if (creation.isNotEmpty()) {
+                    add(KeelSeparatorFrame(CREATION_LABEL))
+                    creation.forEach {
+                        add(KeelStackFrame(project, it, showModule = it.module != module))
+                    }
+                }
+                waiting?.forEach {
+                    add(KeelStackFrame(project, it, showModule = it.module != module))
+                }
             }
             val stack = KeelExecutionStack("${module} · thread $threadId", frames)
             val context = KeelSuspendContext(listOf(stack))
@@ -447,6 +454,9 @@ class KeelDebugProcess(
     private companion object {
         /** 位置表 `kind` 列的取值；`enter` 是函数入口帧。 */
         const val KIND_ENTER = "enter"
+
+        /** 当前协程帧与创建者栈之间的分隔行。 */
+        const val CREATION_LABEL = "协程创建栈（Coroutine creation stack）"
 
         /** 等待方快照的保留上限；只是给「当前挂起」找父栈用，不需要长期留存。 */
         const val MAX_WAITERS = 512
