@@ -8,7 +8,7 @@ import moe.lolosia.keel.api.log.*
  * Host 日志出口。
  *
  * 每条日志先归档成 [LogRecord]，再从同一条记录渲染控制台行与文件行：
- * 于是 Console、`work/log` 下的日志文件与插件通过 [Log.history] 拿到的文本逐字节一致。
+ * 于是 Console、`<dataRoot>/logs` 下的日志文件与插件通过 [Log.history] 拿到的文本逐字节一致。
  *
  * 模块列为 Host / 插件日志名 / 自定义 tag，按 [Log.moduleWidth] 补齐；
  * 来源列为 `短类名:行号`，按 [Log.displayNameWidth] 缩短并补齐；

@@ -202,7 +202,10 @@ pluginId -> PluginClasspathEntry(
   旧目录不覆盖（Windows 上已加载的 DLL 不能覆盖，改名又会破坏 import 表），由下次 Host 启动时清理。
 - `PluginContext.materialize(path)`：把 `resources/` 下的文件或目录前缀写到 `cacheDir`，
   返回平台本地分隔符的绝对路径；拒绝 `..`、前导分隔符与盘符；同名同大小不重写。
-- `cacheRoot` 不可写时回退到用户缓存目录（`%LOCALAPPDATA%\keel\cache` / `$XDG_CACHE_HOME/keel`）。
+- `cacheRoot` 不可写时回退到用户缓存目录（Windows `%LOCALAPPDATA%\<app-id>`、Linux `$XDG_CACHE_HOME/<app-id>`），
+  也可用 `KEEL_CACHE_HOME` 显式指定。
+- 跨重启保留的数据（数据库文件、上传内容）不放 `cacheDir`，用 `PluginContext.dataDir`
+  （`<dataRoot>/data/<manifest-id>/`），见 `HostSubjects.DATA_DIR`。
 - Host 侧实现在 `keel-host` 的 `PluginResources`，分发入口是 `HostSubjects.CACHE_DIR` / `MATERIALIZE`；
   物化在事件泵线程同步执行，单个文件一次读入内存后落盘，不经事件载荷传输。
 

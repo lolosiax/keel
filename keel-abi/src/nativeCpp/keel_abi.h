@@ -509,7 +509,13 @@ void keel_logfile_close(KeelLogFile *file);
  */
 uint64_t keel_watchdog_spawn(void);
 
-/* @param log_dir 日志根目录（`work/log`）；beacon 落在其下的 `crash/`。 */
+/*
+ * 指定日志 / 崩溃目录；看门狗子进程通过环境变量继承同一位置。
+ * 未设置时看门狗回退到 `<cwd>/logs`。
+ */
+void keel_watchdog_set_log_dir(const char *dir);
+
+/* @param log_dir 日志根目录（`<dataRoot>/logs`）；beacon 落在其下的 `crash/`。 */
 void keel_crash_install(const char *log_dir, const char *build_id);
 
 /* 登记一个已加载模块，供崩溃归因；path 是动态库文件路径。 */

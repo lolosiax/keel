@@ -27,6 +27,43 @@ actual fun hasEmbeddedPluginBundle(executablePath: String): Boolean {
     }
 }
 
+actual fun embeddedUserDataDefault(executablePath: String): Boolean {
+    val file = try {
+        RandomAccessFile(executablePath)
+    } catch (_: Throwable) {
+        return false
+    }
+    try {
+        if (file.size < FOOTER_SIZE) return false
+        val footer = file.readAt(file.size - FOOTER_SIZE, FOOTER_SIZE)
+        if (footer.decodeToString(24, 32) != FOOTER_MAGIC) return false
+        return (u32(footer, 16) ushr 16) == USERDATA_BIT
+    } finally {
+        file.close()
+    }
+}
+
+actual fun embeddedAppId(executablePath: String): String? {
+    val file = try {
+        RandomAccessFile(executablePath)
+    } catch (_: Throwable) {
+        return null
+    }
+    try {
+        val trailerStart = file.size - FOOTER_SIZE - APPID_TRAILER_SIZE
+        if (trailerStart < 0) return null
+        val trailer = file.readAt(trailerStart, APPID_TRAILER_SIZE)
+        if (trailer.decodeToString(0, 8) != APPID_MAGIC) return null
+        val length = u32(trailer, 8)
+        if (length <= 0 || length > MAX_APPID_BYTES) return null
+        val start = trailerStart - length
+        if (start < 0) return null
+        return file.readAt(start, length.toInt()).decodeToString().trim().ifEmpty { null }
+    } finally {
+        file.close()
+    }
+}
+
 internal actual fun readEmbeddedPluginBundle(executablePath: String): ByteArray? {
     val file = try {
         RandomAccessFile(executablePath)
@@ -40,7 +77,7 @@ internal actual fun readEmbeddedPluginBundle(executablePath: String): ByteArray?
 
         val offset = u64(footer, 0)
         val size = u64(footer, 8)
-        val format = u32(footer, 16)
+        val format = u32(footer, 16) and 0xFFFF
         val crc = u32(footer, 20)
         if (format != FORMAT_VERSION) return null
         if (offset < 0 || size <= 0 || size > Int.MAX_VALUE) return null
@@ -89,3 +126,11 @@ private val CRC_TABLE = LongArray(256) { index ->
 private const val FOOTER_SIZE = 32
 private const val FORMAT_VERSION = 1L
 private const val FOOTER_MAGIC = "KEELBNDL"
+
+/** footer 的 `format` 高 16 位：1 = 默认使用用户目录（USERDATA）。 */
+private const val USERDATA_BIT = 1L
+
+/** 紧贴 footer 之前的 app id 索引：`magic(8) + length(u32) + reserved(u32)`。 */
+private const val APPID_TRAILER_SIZE = 16
+private const val APPID_MAGIC = "KEELAPP!"
+private const val MAX_APPID_BYTES = 255L

@@ -24,7 +24,7 @@ interface KeelServer {
     val config: Config
 
     /**
-     * 按插件命名空间隔离的存储（`<workDir>/plugins/<id>/`）。
+     * 按插件命名空间隔离的存储（`<dataRoot>/data/<id>/`）。
      *
      * 与主线配置一样经反向请求交给 Host 读写，插件不直接碰工作目录。
      */

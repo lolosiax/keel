@@ -3,6 +3,22 @@ package moe.lolosia.keel.classpath
 /** 是否存在内嵌的插件 bundle；只检查资源 / footer，不读取整包。 */
 expect fun hasEmbeddedPluginBundle(executablePath: String): Boolean
 
+/**
+ * 单 exe 构建时写入的默认目录模式是否为 USERDATA。
+ *
+ * Windows 读 PE 资源 `IDR_KEEL_LAYOUT` / `KEELAYOUT`，Linux 读文件尾 footer 的高 16 位；
+ * 没有标记（旧产物）时返回 false，按 `PROGRAM` 模式处理。
+ */
+expect fun embeddedUserDataDefault(executablePath: String): Boolean
+
+/**
+ * 单 exe 构建时写入的应用 id，用作 `%LOCALAPPDATA%\<appId>` 的目录名。
+ *
+ * 与产物文件名解耦：改名 / 多语言产物不会带着数据目录跑。没有标记时返回 null，
+ * 由调用方退回可执行文件名。
+ */
+expect fun embeddedAppId(executablePath: String): String?
+
 /** 读取可执行文件内嵌的 `keel-bundle.zip`；没有时返回 null。 */
 internal expect fun readEmbeddedPluginBundle(executablePath: String): ByteArray?
 

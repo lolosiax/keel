@@ -28,7 +28,10 @@ import javax.inject.Inject
  * build/keel-run/
  *   host/keel-host[.exe]            # Maven 解析出的 Host 包解压结果
  *   plugins/<id>.keel               # 本插件 + 能力包
- *   plugins/.cache/config/plugins/  # HostConfigs 的 workDir 是 cacheDir
+ *   config/plugins/                 # HostConfigs 的 dataRoot 是运行目录（启动 cwd）
+ *   data/                           # 插件持久化数据（keelPrepareRun 不清理）
+ *   logs/                           # 文件日志与崩溃报告（keelPrepareRun 不清理）
+ *   .cache/                         # 可清的动态库 / 资源目录
  *   davroot/ ...                    # dev/data 复制过来的运行期文件
  * ```
  */

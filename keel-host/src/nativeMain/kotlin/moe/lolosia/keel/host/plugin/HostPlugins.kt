@@ -56,17 +56,17 @@ internal object HostPlugins {
     /** 启动阶段记录下的失败次数，供 Loader 汇总打印。 */
     val startFailures: Int get() = failedStarts
 
-    fun init(host: HostClasspath, cacheDir: String, pluginsDir: String) {
+    fun init(host: HostClasspath, dataDir: String, cacheDir: String, pluginsDir: String) {
         classpath = host
         directory = pluginsDir
         loader = PluginLoader(host, cacheDir)
         HostCapabilities.init(cacheDir)
-        HostConfigs.init(cacheDir)
+        HostConfigs.init(dataDir)
         // 配置就绪后调整归档容量；没有配置项时沿用默认值
         HostConfigs.logArchiveLimits()?.let { (records, bytes) ->
             LogArchive.configure(records, bytes)
         }
-        HostStorage.init(cacheDir)
+        HostStorage.init(dataDir)
         PluginResources.init(cacheDir)
     }
 

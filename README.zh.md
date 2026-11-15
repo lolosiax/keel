@@ -220,7 +220,7 @@ gradlew buildAll
     --serve
 ```
 
-`--plugins` 指向包含 `.keel` 的目录，缓存目录默认为该目录下的 `.cache`。宿主会打印启动横幅、插件加载结果、健康检查结果与 HTTP 监听地址。停止时在控制台输入 `stop`，或按 `Ctrl+C` 触发优雅停机。
+`--plugins` 指向包含 `.keel` 的目录；数据目录默认为启动工作目录（`config/`、`data/`、`logs/`），缓存目录默认为其中的 `.cache`。宿主会打印启动横幅、插件加载结果、健康检查结果与 HTTP 监听地址。停止时在控制台输入 `stop`，或按 `Ctrl+C` 触发优雅停机。
 
 ### 冒烟验证
 
@@ -601,7 +601,22 @@ keelLogger {
 | `--inspect <路径>` | 检查单个 `.keel` 的清单与资源 |
 | `--watchdog` | 内部看门狗进程入口，通常由宿主自动拉起 |
 
-`--plugins` 的第二个位置参数是缓存目录。缺省值为 `<插件目录>/.cache`，动态库按 `<id>/<version>/` 存放。
+`--plugins` 的第二个位置参数是缓存目录，缺省值为 `<数据目录>/.cache`，动态库按 `<id>/<version>/` 存放。
+
+### 运行期目录
+
+| 目录 | 内容 |
+| --- | --- |
+| `dataRoot` | `application.yaml`、`config/plugins/<id>.yaml`、插件存储 `<dataRoot>/data/<id>/`、按日日志 `<dataRoot>/logs/` |
+| `cacheRoot` | 物化的动态库与每次加载独占的资源目录；可以整体删除 |
+
+两者默认都落在程序目录：`--plugins` 模式取启动工作目录（`keelRun` 是 `build/keel-run`），
+单文件模式取可执行文件所在目录。桌面应用可以在构建期设
+`dataMode = KeelDataMode.USERDATA`（`import moe.lolosia.keel.gradle.plugin.KeelDataMode`），
+把用户目录写成默认值，不依赖用户配置环境变量；目录名取 `appId`（默认工程名，与产物文件名无关）。
+用 `KEEL_DATA_HOME` / `KEEL_CACHE_HOME` 可以分别重定向，
+`KEEL_HOME` 仍是 `KEEL_DATA_HOME` 的别名。程序目录不可写时回退到按 app id 隔离的用户目录
+（Windows `%LOCALAPPDATA%\<app-id>`，Linux `$XDG_DATA_HOME/<app-id>` 与对应的缓存根）。
 
 ## 构建任务
 
@@ -653,12 +668,16 @@ keel.password=<password>
   keel-host
   plugins/
     hello-0.1.0.keel
-  work/
+  config/
+    plugins/
+  data/
+  logs/
+  .cache/
 ```
 
 以 `--http=<端口> --plugins <目录> --serve` 常驻。宿主不依赖 JVM，也不要求目标机安装 Kotlin 运行时。停止时发送中断信号或在控制台输入 `stop`，宿主会先停止 HTTP，再逐个停用插件。
 
-systemd 单元可以直接以宿主可执行文件作为 `ExecStart`，工作目录指向部署目录；容器部署时挂载宿主、插件目录与端口即可。启动失败、插件加载失败与请求错误都会写入日志文件，日志按日切分在工作目录的 `work/log` 下。
+systemd 单元可以直接以宿主可执行文件作为 `ExecStart`，工作目录指向部署目录；容器部署时挂载宿主、插件目录与端口即可。启动失败、插件加载失败与请求错误都会写入日志文件，日志按日切分在数据目录的 `logs/` 下。
 
 ## 目录结构
 

@@ -608,6 +608,15 @@ void keel_crash_install(const char *log_dir, const char *build_id) {
 /* 看门狗                                                              */
 /* ------------------------------------------------------------------ */
 
+void keel_watchdog_set_log_dir(const char *dir) {
+    if (!dir || !dir[0]) return;
+#ifdef _WIN32
+    _putenv_s("KEEL_LOG_DIR", dir);
+#else
+    setenv("KEEL_LOG_DIR", dir, 1);
+#endif
+}
+
 uint64_t keel_watchdog_spawn(void) {
 #ifdef _WIN32
     wchar_t exe[KEEL_PATH_MAX];
@@ -1911,11 +1920,16 @@ int keel_watchdog_watch(uint64_t parent_pid) {
     char cwd[KEEL_PATH_MAX];
     char log_dir[KEEL_PATH_MAX];
     char beacon[KEEL_PATH_MAX];
+    const char *configured = getenv("KEEL_LOG_DIR");
     KeelCrashRecord rec;
 
     if (!parent_pid) return 0;
-    if (keel_cwd(cwd, sizeof cwd) != 0) return 0;
-    snprintf(log_dir, sizeof log_dir, "%s/work/log", cwd);
+    if (configured && configured[0]) {
+        snprintf(log_dir, sizeof log_dir, "%s", configured);
+    } else {
+        if (keel_cwd(cwd, sizeof cwd) != 0) return 0;
+        snprintf(log_dir, sizeof log_dir, "%s/logs", cwd);
+    }
     snprintf(beacon, sizeof beacon, "%s/crash/watchdog-%llu.bin", log_dir,
              (unsigned long long)parent_pid);
 

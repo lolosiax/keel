@@ -29,6 +29,34 @@ open class KeelExecutableExtension(private val project: Project) {
     var name: String = project.name
 
     /**
+     * 单 exe 启动时的默认目录模式。
+     *
+     * - [KeelDataMode.PROGRAM]（默认）：数据写在可执行文件所在目录，适合 Web 式部署；
+     * - [KeelDataMode.USERDATA]：数据写在按 app id 隔离的用户目录，适合桌面应用
+     *   （Windows `%LOCALAPPDATA%\<name>`，Linux `$XDG_DATA_HOME/<name>`）。
+     *
+     * 只影响单 exe 的内嵌运行期默认值；运行期仍可用 `KEEL_DATA_HOME` /
+     * `KEEL_CACHE_HOME` 覆盖。`.keel` 与 `--plugins` 模式不受影响。
+     *
+     * ```kotlin
+     * import moe.lolosia.keel.gradle.plugin.KeelDataMode
+     *
+     * keelPlugin {
+     *     executable { dataMode = KeelDataMode.USERDATA }
+     * }
+     * ```
+     */
+    var dataMode: KeelDataMode = KeelDataMode.PROGRAM
+
+    /**
+     * 用户目录下的应用 id，决定 `%LOCALAPPDATA%\<appId>`（Linux `$XDG_DATA_HOME/<appId>`）。
+     *
+     * 默认取工程名，与产物文件名解耦：exe 改名 / 多语言产物 / 带版本号的产物名都不会
+     * 改变数据目录。不能为空，不能包含 `\ / : * ? " < > |`，建议只用字母、数字、`-`、`_`、`.`。
+     */
+    var appId: String = project.name
+
+    /**
      * 取哪个构建类型的产物：`DEBUG` / `RELEASE`。
      *
      * `RELEASE` 时本工程用 `keelPackageRelease`（release sharedLib、已 strip），
@@ -81,6 +109,9 @@ open class KeelExecutableExtension(private val project: Project) {
     internal fun coordinates(): List<String> = coordinates.toList()
 
     internal fun isRelease(): Boolean = !buildType.equals("DEBUG", ignoreCase = true)
+
+    /** 是否按 USERDATA 模式出包。 */
+    internal fun usesUserData(): Boolean = dataMode == KeelDataMode.USERDATA
 
     /** 本工程与 `include(Project)` 使用的打包任务：release 走 `keelPackageRelease`。 */
     internal fun packageTaskName(): String = if (isRelease()) "keelPackageRelease" else "keelPackage"

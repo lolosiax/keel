@@ -220,7 +220,7 @@ gradlew buildAll
     --serve
 ```
 
-`--plugins` points to a directory containing `.keel` files. The cache directory defaults to `.cache` inside that directory. The host prints the startup banner, plugin load results, health-check results, and the HTTP listen address. Type `stop` in the console or press `Ctrl+C` to trigger a graceful shutdown.
+`--plugins` points to a directory containing `.keel` files. The data directory defaults to the working directory (`config/`, `data/`, `logs/`), and the cache directory defaults to `.cache` inside it. The host prints the startup banner, plugin load results, health-check results, and the HTTP listen address. Type `stop` in the console or press `Ctrl+C` to trigger a graceful shutdown.
 
 ### Smoke test
 
@@ -601,7 +601,16 @@ keelLogger {
 | `--inspect <path>` | Inspect the manifest and resources of one `.keel` package |
 | `--watchdog` | Internal watchdog entry. The host normally spawns it automatically. |
 
-The second positional argument after `--plugins` is the cache directory. It defaults to `<plugin dir>/.cache`. Native libraries are stored under `<id>/<version>/`.
+The second positional argument after `--plugins` is the cache directory. It defaults to `<data dir>/.cache`; native libraries are stored under `<id>/<version>/`.
+
+### Runtime directories
+
+| Directory | Contents |
+| --- | --- |
+| `dataRoot` | `application.yaml`, `config/plugins/<id>.yaml`, plugin storage `<dataRoot>/data/<id>/`, daily logs `<dataRoot>/logs/` |
+| `cacheRoot` | Materialized native libraries and per-load resource directories; safe to delete |
+
+Both default to the program directory: the working directory in `--plugins` mode (for `keelRun` this is `build/keel-run`), or the executable directory in single-file mode. Desktop apps can bake the user-directory default into the executable with `dataMode = KeelDataMode.USERDATA` (import `moe.lolosia.keel.gradle.plugin.KeelDataMode`); the directory name comes from `appId` (defaults to the project name, independent of the output file name). Override them independently with `KEEL_DATA_HOME` and `KEEL_CACHE_HOME`; `KEEL_HOME` remains an alias for `KEEL_DATA_HOME`. If the program directory is not writable, the host falls back to a per-app user directory (`%LOCALAPPDATA%\<appId>` on Windows, `$XDG_DATA_HOME/<appId>` on Linux for data, and the matching cache root).
 
 ## Build Tasks
 
@@ -653,12 +662,16 @@ The runtime needs only the host executable and a plugin directory:
   keel-host
   plugins/
     hello-0.1.0.keel
-  work/
+  config/
+    plugins/
+  data/
+  logs/
+  .cache/
 ```
 
 Run with `--http=<port> --plugins <dir> --serve` for a resident service. The host does not require a JVM or a Kotlin runtime on the target machine. To stop it, send an interrupt signal or type `stop` in the console. The host stops HTTP first and then disables each plugin.
 
-A systemd unit can use the host executable as `ExecStart` with the deployment directory as its working directory. Container deployments mount the host, the plugin directory, and the exposed port. Startup failures, plugin load failures, and request errors are written to daily log files under `work/log` in the working directory.
+A systemd unit can use the host executable as `ExecStart` with the deployment directory as its working directory. Container deployments mount the host, the plugin directory, and the exposed port. Startup failures, plugin load failures, and request errors are written to daily log files under `logs/` in the data directory.
 
 ## Repository Layout
 

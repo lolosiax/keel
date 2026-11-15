@@ -3,9 +3,10 @@ package moe.lolosia.keel.host
 /**
  * 拉起同一可执行文件的 `--watchdog` 子进程（工作目录不变）。
  *
+ * @param logDir 文件日志目录；通过环境变量传给看门狗，作为 beacon 与报告的根
  * @return 子进程 id；0 表示拉起失败
  */
-internal expect fun startWatchdog(): ULong
+internal expect fun startWatchdog(logDir: String?): ULong
 
 /**
  * 安装崩溃处理器：致命信号 / 异常时冻结进程，等看门狗转储现场。

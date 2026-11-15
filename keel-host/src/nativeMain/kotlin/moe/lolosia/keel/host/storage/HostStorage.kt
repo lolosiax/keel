@@ -4,12 +4,14 @@ import moe.lolosia.keel.host.plugin.HostPluginIds
 import moe.lolosia.keel.host.plugin.PluginFs
 import moe.lolosia.keel.host.plugin.fileSizeOrNull
 import moe.lolosia.keel.host.plugin.mkdirs
+import moe.lolosia.keel.host.plugin.nativePath
 
 /**
  * 按插件命名空间隔离的文件存储。
  *
- * 根目录 `<workDir>/plugins/<manifest-id>/`；插件只提供相对路径，Host 负责
- * 拒绝 `..`、绝对路径与带盘符的段。所有调用都在事件泵线程上串行完成。
+ * 根目录 `<dataRoot>/data/<manifest-id>/`，与 `ctx.dataDir` 是同一个位置；
+ * 插件只提供相对路径，Host 负责拒绝 `..`、绝对路径与带盘符的段。
+ * 所有调用都在事件泵线程上串行完成。
  */
 internal object HostStorage {
 
@@ -20,6 +22,18 @@ internal object HostStorage {
 
     fun init(dir: String) {
         root = dir.trimEnd('/', '\\').ifEmpty { "." }
+    }
+
+    /**
+     * 插件的持久化数据目录，不存在时创建。
+     *
+     * @return 当前平台分隔符的绝对路径；插件未登记命名空间时返回 null
+     */
+    fun dataDir(pluginId: ULong): String? {
+        val name = HostPluginIds.nameOf(pluginId) ?: return null
+        val dir = "$root/data/$name"
+        mkdirs(dir)
+        return nativePath(dir)
     }
 
     fun read(pluginId: ULong, path: String): ByteArray? {
@@ -46,6 +60,6 @@ internal object HostStorage {
             segments.isNotEmpty() &&
                 segments.none { it.isEmpty() || it == "." || it == ".." || it.contains(':') }
         ) { "非法存储路径：$path" }
-        return "$root/plugins/$name/$clean"
+        return "$root/data/$name/$clean"
     }
 }

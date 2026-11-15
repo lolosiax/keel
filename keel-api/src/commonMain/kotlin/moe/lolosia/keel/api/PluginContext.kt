@@ -66,6 +66,18 @@ interface PluginContext {
     val cacheDir: String
 
     /**
+     * 本插件独占的持久化数据目录，绝对路径。
+     *
+     * 位置是 `<dataRoot>/data/<id>/`：跨重启、跨版本保持同一目录，用于数据库文件、
+     * 上传内容、需要长期保留的索引等。目录由 Host 创建；Host 的 `dataRoot` 默认落在
+     * 程序目录（Web 部署的常规做法），也可以用 `KEEL_DATA_HOME` 重定向到用户目录。
+     *
+     * 与 [cacheDir] 的区别只在于生命周期：这里的内容不会被 Host 回收，
+     * 需要清理时由插件自己删除。
+     */
+    val dataDir: String
+
+    /**
      * 把本插件 `.keel` 里的资源物化到 [cacheDir]，返回绝对路径。
      *
      * - [path] 是包内相对路径（如 `native/x.dll`、`web`），不接受 `..`、前导分隔符或盘符；

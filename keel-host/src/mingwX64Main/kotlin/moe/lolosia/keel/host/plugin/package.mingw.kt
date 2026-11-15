@@ -22,8 +22,11 @@ internal actual fun mkdirs(path: String) {
 internal actual fun nativePath(path: String): String = path.replace('/', '\\')
 
 @OptIn(ExperimentalForeignApi::class)
-internal actual fun userCacheRoot(): String? {
+internal actual fun userDataRoot(appId: String): String? {
     val base = getenv("LOCALAPPDATA")?.toKString()
         ?: getenv("USERPROFILE")?.toKString()?.let { "$it/AppData/Local" }
-    return base?.let { "$it/keel/cache" }
+    return base?.let { "$it/$appId" }
 }
+
+internal actual fun userCacheRoot(appId: String): String? =
+    userDataRoot(appId)?.let { "$it/cache" }

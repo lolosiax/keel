@@ -11,7 +11,7 @@ import moe.lolosia.keel.host.plugin.mkdirs
 /**
  * Host 侧配置文件注册表。
  *
- * 目录布局（相对 Host 的工作目录，即启动参数的缓存目录）：
+ * 目录布局（相对 Host 的持久化根 `dataRoot`）：
  * ```
  * application.yaml
  * config/plugins/<plugin-id>.yaml

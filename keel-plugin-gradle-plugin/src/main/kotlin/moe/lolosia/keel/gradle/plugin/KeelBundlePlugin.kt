@@ -29,6 +29,26 @@ class KeelBundlePlugin : Plugin<Project> {
             if (!executable.enabled) return@afterEvaluate
             // 命令行属性优先于工程里写死的值（CI 用 -Pkeel.buildType=RELEASE 出包）
             (project.findProperty("keel.buildType") as String?)?.let { executable.buildType = it }
+            (project.findProperty("keel.dataMode") as String?)?.let { raw ->
+                executable.dataMode = KeelDataMode.entries
+                    .firstOrNull { it.name.equals(raw.trim(), ignoreCase = true) }
+                    ?: throw GradleException(
+                        "keel.dataMode 只支持 ${KeelDataMode.entries.joinToString(" / ")}，当前：$raw"
+                    )
+            }
+            // appId 是会拼进用户目录名的单段路径，出包前就拒绝非法字符
+            val appId = executable.appId.trim()
+            if (appId.isEmpty() || appId == "." || appId == "..") {
+                throw GradleException("keelPlugin.executable.appId 不能为空或 . / ..")
+            }
+            if (appId.any { it == '\\' || it == '/' || it in "*?\"<>|:" }) {
+                throw GradleException(
+                    "keelPlugin.executable.appId 不能包含路径分隔符或 Windows 保留字符：$appId"
+                )
+            }
+            if (appId.toByteArray(Charsets.UTF_8).size > 255) {
+                throw GradleException("keelPlugin.executable.appId 过长（UTF-8 上限 255 字节）：$appId")
+            }
 
             // launcher 按 keel 框架版本解析，exe 的版本资源用工程自己的 version
             val keelVersion = keelPlugin.keelVersion ?: project.version.toString()
@@ -128,7 +148,9 @@ class KeelBundlePlugin : Plugin<Project> {
                     task.launcherArtifacts.from(launcherFiles)
                     task.target.set(target.name)
                     task.appName.set(executable.name)
+                    task.appId.set(executable.appId.trim())
                     task.console.set(executable.console)
+                    task.userData.set(executable.usesUserData())
                     // release 出包先在注入前 strip，避免 UpdateResource 留下失效的 COFF 指针
                     task.stripLauncher.set(executable.isRelease())
                     task.version.set(appVersion)

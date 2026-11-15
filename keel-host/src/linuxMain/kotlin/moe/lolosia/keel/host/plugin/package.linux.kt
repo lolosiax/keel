@@ -18,8 +18,15 @@ internal actual fun mkdirs(path: String) {
 internal actual fun nativePath(path: String): String = path
 
 @OptIn(ExperimentalForeignApi::class)
-internal actual fun userCacheRoot(): String? {
+internal actual fun userDataRoot(appId: String): String? {
+    val base = getenv("XDG_DATA_HOME")?.toKString()
+        ?: getenv("HOME")?.toKString()?.let { "$it/.local/share" }
+    return base?.let { "$it/$appId" }
+}
+
+@OptIn(ExperimentalForeignApi::class)
+internal actual fun userCacheRoot(appId: String): String? {
     val base = getenv("XDG_CACHE_HOME")?.toKString()
         ?: getenv("HOME")?.toKString()?.let { "$it/.cache" }
-    return base?.let { "$it/keel" }
+    return base?.let { "$it/$appId" }
 }

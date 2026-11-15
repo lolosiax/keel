@@ -95,7 +95,17 @@ object PluginWorker {
             Log.error("插件缓存目录分配失败", cause = e)
             return KEEL_ERR_FAILED
         }
-        val context = PluginContextImpl(metadata, logger, cacheDir)
+        // 持久化目录同样在 onLoad 之前拿到：它跨重启稳定，插件可以立即建库 / 建索引
+        val dataDir = try {
+            ServiceWire.decode(
+                DataDirReply.serializer(),
+                callHost(HostSubjects.DATA_DIR.toULong(), ByteArray(0)),
+            ).path
+        } catch (e: Throwable) {
+            Log.error("插件数据目录分配失败", cause = e)
+            return KEEL_ERR_FAILED
+        }
+        val context = PluginContextImpl(metadata, logger, cacheDir, dataDir)
         PluginWorker.pluginContext = context
 
         return try {

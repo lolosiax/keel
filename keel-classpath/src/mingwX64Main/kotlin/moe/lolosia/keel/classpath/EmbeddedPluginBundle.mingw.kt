@@ -32,5 +32,28 @@ internal actual fun readEmbeddedPluginBundle(executablePath: String): ByteArray?
     return pointer.reinterpret<ByteVar>().readBytes(size.toInt())
 }
 
+@Suppress("UNUSED_PARAMETER")
+actual fun embeddedUserDataDefault(executablePath: String): Boolean =
+    readResourceText(LAYOUT_RESOURCE_NAME, LAYOUT_RESOURCE_TYPE)
+        ?.equals("USERDATA", ignoreCase = true) == true
+
+@Suppress("UNUSED_PARAMETER")
+actual fun embeddedAppId(executablePath: String): String? =
+    readResourceText(APPID_RESOURCE_NAME, APPID_RESOURCE_TYPE)?.trim()?.takeIf { it.isNotEmpty() }
+
+/** PE 资源按 UTF-8 文本读取；资源不存在或为空时返回 null。 */
+private fun readResourceText(name: String, type: String): String? {
+    val hRes = FindResourceW(null, name, type) ?: return null
+    val size = SizeofResource(null, hRes)
+    if (size == 0u) return null
+    val hGlobal = LoadResource(null, hRes) ?: return null
+    val pointer = LockResource(hGlobal) ?: return null
+    return pointer.reinterpret<ByteVar>().readBytes(size.toInt()).decodeToString()
+}
+
 private const val RESOURCE_NAME = "IDR_KEEL_BUNDLE"
 private const val RESOURCE_TYPE = "KEELBUNDLE"
+private const val LAYOUT_RESOURCE_NAME = "IDR_KEEL_LAYOUT"
+private const val LAYOUT_RESOURCE_TYPE = "KEELAYOUT"
+private const val APPID_RESOURCE_NAME = "IDR_KEEL_APPID"
+private const val APPID_RESOURCE_TYPE = "KEELAPPID"

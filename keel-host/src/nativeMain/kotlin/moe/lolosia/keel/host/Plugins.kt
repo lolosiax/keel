@@ -11,9 +11,7 @@ import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.plugin.HostPlugins
 import moe.lolosia.keel.host.plugin.HostPump
 import moe.lolosia.keel.host.plugin.PluginBundle
-import moe.lolosia.keel.host.plugin.PluginFs
 import moe.lolosia.keel.host.plugin.mkdirs
-import moe.lolosia.keel.host.plugin.userCacheRoot
 import platform.posix.getenv
 
 /**
@@ -29,18 +27,26 @@ internal actual fun loadPluginsFromCli(
     serveMillis: Long?,
     httpPort: Int?,
 ) {
-    startHost(pluginsDir, cacheDir, bundle = null, serveMillis = serveMillis, httpPort = httpPort)
+    startHost(
+        pluginsDir = pluginsDir,
+        dirs = resolveHostDirs(pluginsDir, cacheDir),
+        bundle = null,
+        serveMillis = serveMillis,
+        httpPort = httpPort,
+    )
 }
 
-/** 当前可执行文件是否内嵌了插件 bundle。 */
+/**
+ * 当前可执行文件是否内嵌了插件 bundle。
+ */
 internal actual fun hasEmbeddedPluginBundle(): Boolean =
     moe.lolosia.keel.classpath.hasEmbeddedPluginBundle(executablePath())
 
 /**
  * 加载可执行文件内嵌的 bundle 并交给运行期。
  *
- * 工作目录优先级：`KEEL_HOME` → exe 所在目录 → 用户缓存目录；
- * 外部 `plugins/` 始终参与扫描，可覆盖同 id 的内嵌包。
+ * `dataRoot` 默认是可执行文件所在目录（`KEEL_DATA_HOME` / `KEEL_HOME` 可重定向），
+ * 不可写时回退到用户目录；外部 `plugins/` 始终参与扫描，可覆盖同 id 的内嵌包。
  */
 internal actual fun runEmbeddedPlugins(serveMillis: Long?, httpPort: Int?) {
     val executable = executablePath()
@@ -49,12 +55,13 @@ internal actual fun runEmbeddedPlugins(serveMillis: Long?, httpPort: Int?) {
         Log.warn("可执行文件里没有可用的内嵌 bundle：$executable", tag = "Loader")
         return
     }
-    val root = workRoot(executable)
+    val dirs = resolveHostDirs(pluginsDir = null, cacheDir = null)
+    val pluginsDir = "${dirs.dataRoot}/plugins"
     // 外部覆盖目录可能还不存在：先建出来，免得扫描出一条「目录不存在」的假失败
-    mkdirs("$root/plugins")
+    mkdirs(pluginsDir)
     startHost(
-        pluginsDir = "$root/plugins",
-        cacheDir = "$root/.cache",
+        pluginsDir = pluginsDir,
+        dirs = dirs,
         bundle = bundle,
         serveMillis = serveMillis,
         httpPort = httpPort,
@@ -69,13 +76,12 @@ internal actual fun runEmbeddedPlugins(serveMillis: Long?, httpPort: Int?) {
  */
 private fun startHost(
     pluginsDir: String,
-    cacheDir: String?,
+    dirs: HostDirs,
     bundle: PluginBundle?,
     serveMillis: Long?,
     httpPort: Int?,
 ) {
     val dir = pluginsDir.trimEnd('/', '\\')
-    val cache = cacheDir?.trimEnd('/', '\\') ?: "$dir/.cache"
 
     // 调试会话：IDE 通过 KEEL_DEBUG_PORT 告诉我们要连的端口。
     // 只做 bind + listen，accept 放在事件循环里非阻塞地做。
@@ -85,11 +91,12 @@ private fun startHost(
     HostBootstrap.installShutdownHook()
 
     val host = HostClasspath(EmptyClasspath)
-    HostPlugins.init(host, cache, dir)
+    HostPlugins.init(host, dirs.dataRoot, dirs.cacheRoot, dir)
     val result = HostPlugins.loadAll(bundle)
 
+    Log.info("data: ${dirs.dataRoot}", tag = "Loader")
+    Log.info("cache: ${dirs.cacheRoot}", tag = "Loader")
     Log.info("plugins: $dir", tag = "Loader")
-    Log.info("cache: $cache", tag = "Loader")
     Log.info("loaded ${result.loaded.size} plugin(s)", tag = "Loader")
 
     // 最小请求 / 应答回路：确认每个插件都能收到事件并按 correlation 回包
@@ -139,35 +146,6 @@ private fun resolveHttpPort(explicit: Int?, bundled: Boolean): Int? {
 private fun attachDebugAgent() {
     val port = Debug.requestedPort() ?: return
     Debug.attach(port, "keel-host", BuildInfo.BUILD_ID)
-}
-
-/** 单文件发行版的工作根：`KEEL_HOME` → exe 目录 → 用户缓存目录。 */
-private fun workRoot(executable: String): String {
-    getenv("KEEL_HOME")?.toKString()?.trim()?.takeIf { it.isNotEmpty() }?.let { home ->
-        return home.trimEnd('/', '\\')
-    }
-    val dir = executable.replace('\\', '/').substringBeforeLast('/', ".")
-    if (writable(dir)) return dir
-
-    val fallback = userCacheRoot()?.trimEnd('/', '\\')
-    if (fallback != null && writable(fallback)) {
-        Log.warn("安装目录不可写（$dir），工作目录改用 $fallback", tag = "Loader")
-        return fallback
-    }
-    Log.error("没有可写的工作目录，工作根退回当前目录", tag = "Loader")
-    return "."
-}
-
-/** 建目录并写一个探测文件；不可写时返回 false。 */
-private fun writable(dir: String): Boolean {
-    mkdirs(dir)
-    val probe = "$dir/.keel-write-test"
-    return try {
-        PluginFs.writeBytes(probe, ByteArray(0))
-        PluginFs.delete(probe)
-    } catch (_: Throwable) {
-        false
-    }
 }
 
 /** 内嵌 bundle 模式默认端口。 */

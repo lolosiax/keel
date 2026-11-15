@@ -9,7 +9,7 @@
 
 ## 1. 不变量
 
-1. **Host 是唯一渲染方**。`PLAIN` / `ANSI` 文本由 Host 生成，保证与 Console、`work/log/*.log` 完全一致。
+1. **Host 是唯一渲染方**。`PLAIN` / `ANSI` 文本由 Host 生成，保证与 Console、`<dataRoot>/logs/*.log` 完全一致。
 2. **每条日志只存一份结构化数据**。文本按需渲染，不在缓冲区里存三份。
 3. **RAW 是记录对象本身，不是 message 文本**。`LogRecord` 保留渲染前的全部字段；`message` 原样保存，Host 不解析、不加前缀、不转义、不截断。
 4. **错误同时带结构与文本**。`LogError.chain` 供读详情，`LogError.text` 是完整渲染结果，供没有渲染能力的下游直接使用。
@@ -438,4 +438,4 @@ PE 子系统 patch + 运行期 attach/alloc + `keelRun` 默认控制台。
    不含对象头与数组开销；若要求「严格不超 30 MB」，需要把记录编码成 `ByteArray` 存储，读取时解码，代价明显，暂不采用。
 3. **结构化 message**：暂无 `Log.info(obj)` 这类重载；需要结构化载荷时由调用方先序列化成字符串
    （RAW 会原样返回），等有明确需求再加 `payload` 字段。
-4. **日志文件格式**：`work/log/*.log` 目前写渲染后的纯文本；是否需要同时写 JSONL（便于离线分析）另议。
+4. **日志文件格式**：`<dataRoot>/logs/*.log` 目前写渲染后的纯文本；是否需要同时写 JSONL（便于离线分析）另议。

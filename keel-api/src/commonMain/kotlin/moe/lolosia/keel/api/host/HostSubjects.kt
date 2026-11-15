@@ -58,4 +58,7 @@ object HostSubjects {
 
     /** 请求：本插件的 manifest id（调试位置表按它对齐）；载荷为空，应答是 UTF-8 明文。 */
     const val DEBUG_MODULE: Long = 0x1011L
+
+    /** 请求：本插件的持久化数据目录；载荷为空，应答见 [DataDirReply]。 */
+    const val DATA_DIR: Long = 0x1012L
 }

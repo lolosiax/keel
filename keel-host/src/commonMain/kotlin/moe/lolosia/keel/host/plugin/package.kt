@@ -12,5 +12,8 @@ internal expect fun removeDirectory(path: String): Boolean
 /** 把内部使用的 `/` 分隔路径转成当前平台的本地分隔符。 */
 internal expect fun nativePath(path: String): String
 
-/** 用户级可写缓存目录；给只读安装目录兜底，取不到时返回 null。 */
-internal expect fun userCacheRoot(): String?
+/** 用户级可写数据目录（`<userData>/<app-id>`）；取不到环境变量时返回 null。 */
+internal expect fun userDataRoot(appId: String): String?
+
+/** 用户级可写缓存目录（`<userCache>/<app-id>`）；取不到环境变量时返回 null。 */
+internal expect fun userCacheRoot(appId: String): String?

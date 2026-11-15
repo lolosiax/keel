@@ -638,7 +638,7 @@ interface PluginStorage {
 ```
 
 - 挂在 `ctx.server.storage`（`KeelServer` 新增一个成员）；
-- 根目录 `<workDir>/plugins/<pluginId>/`；`path` 是相对路径，拒绝 `..`、绝对路径与空段；
+- 根目录 `<dataRoot>/data/<pluginId>/`；`path` 是相对路径，拒绝 `..`、绝对路径与空段；
 - 跨运行时同样走**反向请求**（`KEEL_SUBJECT_STORAGE`，操作 = read / write / delete）；
   不复用 C ABI：Host 的实现是 Kotlin，插件 Worker 不能同步调进来；
 - 单对象上限默认 8 MB；v1 不提供目录列举（头像不需要）；
@@ -988,7 +988,7 @@ Host 启动
   只装 demo 时报「缺少依赖 hello（插件未启用）」；
 - 第 9 项（`PluginStorage`）已完成：`KeelServer.storage`（`ctx.server.storage`）提供
   read / write / delete，经 `HostSubjects.STORAGE` 反向请求交给 Host；根目录
-  `<workDir>/plugins/<manifest-id>/`，拒绝 `..` / 绝对路径 / 带盘符段，单对象上限 8 MB，
+  `<dataRoot>/data/<manifest-id>/`，拒绝 `..` / 绝对路径 / 带盘符段，单对象上限 8 MB，
   插件停用 / 卸载不删数据。冒烟：hello 启动期写入并读回 `check/hello.txt`，
   越界路径 `../escape` 被 Host 拒绝；
 - **M1 九项全部完成**，下一阶段是 M2（rbac 与 biz 落地）。

@@ -2,14 +2,18 @@ package moe.lolosia.keel.host
 
 import moe.lolosia.keel.abi.c.keel_crash_install
 import moe.lolosia.keel.abi.c.keel_crash_register_module
+import moe.lolosia.keel.abi.c.keel_watchdog_set_log_dir
 import moe.lolosia.keel.abi.c.keel_watchdog_spawn
 import moe.lolosia.keel.abi.c.keel_watchdog_watch
 import moe.lolosia.keel.host.build.BuildInfo
 
-actual fun startWatchdog(): ULong = keel_watchdog_spawn()
+actual fun startWatchdog(logDir: String?): ULong {
+    keel_watchdog_set_log_dir(logDir)
+    return keel_watchdog_spawn()
+}
 
 actual fun installCrashHandler(logDir: String?) {
-    val dir = logDir ?: "${currentWorkingDirectory()}/work/log"
+    val dir = logDir ?: "${currentWorkingDirectory()}/logs"
     keel_crash_install(dir, BuildInfo.BUILD_ID)
 }
 

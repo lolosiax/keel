@@ -15,6 +15,21 @@ internal expect fun printStartupBanner()
 internal expect fun inspectKeelPackage(path: String)
 
 /**
+ * 解析本次启动的 [HostDirs]。
+ *
+ * `dataRoot`：`KEEL_DATA_HOME`（兼容旧的 `KEEL_HOME`）→ 程序目录 → 用户数据目录
+ * `<userData>/<app-id>`；`cacheRoot`：`KEEL_CACHE_HOME` → `--plugins` 的缓存位置参数
+ * → `<dataRoot>/.cache` → 用户缓存目录 `<userCache>/<app-id>`。
+ *
+ * 程序目录在 `--plugins` 模式下是启动工作目录（`keelRun` 的 `build/keel-run`），
+ * 在单文件模式下是可执行文件所在目录。
+ *
+ * @param pluginsDir `--plugins` 的插件目录；null 表示单文件 bundle 模式
+ * @param cacheDir `--plugins` 的第二个位置参数；null 表示按默认规则推导
+ */
+internal expect fun resolveHostDirs(pluginsDir: String?, cacheDir: String?): HostDirs
+
+/**
  * `--plugins <dir> [cacheDir] [--once] [--http=<port>] [--serve-ms=<n>]`：
  * 扫描目录下的 `.keel`，校验后解出动态库并启动插件。
  *
@@ -57,7 +72,8 @@ fun main(args: Array<String>) {
         return
     }
 
-    val logDir = startLogFile()
+    val dirs = resolveHostDirs(pluginsDirArgument(args), cacheDirArgument(args))
+    val logDir = startLogFile(dirs.dataRoot)
     // 桌面应用可能需要附着 / 新建控制台；必须在安装日志出口之前
     prepareConsole(args)
     installHostLogging()
@@ -66,7 +82,7 @@ fun main(args: Array<String>) {
     if (args.firstOrNull() != "--inspect") {
         // 横幅先于看门狗、插件加载等日志
         printStartupBanner()
-        val watchdog = startWatchdog()
+        val watchdog = startWatchdog(logDir)
         if (watchdog != 0uL) {
             Log.debug("watchdog started (pid=$watchdog)", tag = "Bootstrap")
         } else {
@@ -141,6 +157,19 @@ fun main(args: Array<String>) {
                 "      [--once] [--http=<端口>] [--serve-ms=<毫秒>]"
         )
     }
+}
+
+/** `--plugins <dir>` 的目录参数；没有该子命令时返回 null（单文件模式）。 */
+private fun pluginsDirArgument(args: Array<String>): String? {
+    val index = args.indexOf("--plugins")
+    return if (index >= 0) args.getOrNull(index + 1) else null
+}
+
+/** `--plugins <dir> [cacheDir]` 的可选缓存位置参数；命令行选项都以 `--` 开头。 */
+private fun cacheDirArgument(args: Array<String>): String? {
+    val index = args.indexOf("--plugins")
+    if (index < 0) return null
+    return args.drop(index + 2).firstOrNull { !it.startsWith("--") }
 }
 
 /** 常驻 / HTTP 相关命令行选项；`--plugins` 与内嵌 bundle 共用同一套解析。 */

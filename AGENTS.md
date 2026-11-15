@@ -297,8 +297,9 @@ keel-plugin-<id>/
   只声明权限的业务插件不依赖 rbac 工件；需要管理角色 / 规则时才依赖 `keel-plugin-rbac-api`。
   见 [doc/authz-design.md](doc/authz-design.md)。
 - 资源（模板、静态文件、配置默认值）放 `src/commonMain/resources`，由 `moe.lolosia.keel.classpath` 打包后在运行期读取。
-- 插件不写 Host 的工作目录：临时文件与日志写 `ctx.cacheDir`（每次加载独占、下次启动回收）；
-  `LoadLibrary` / WebView 这类需要**真实文件**的资源用 `ctx.materialize("native/x.dll")` 物化到该目录。
+- 插件不写 Host 的工作目录：临时文件与日志写 `ctx.cacheDir`（每次加载独占、下次启动回收），
+  需要跨重启保留的数据写 `ctx.dataDir`（`<dataRoot>/data/<id>/`，Host 不回收）；
+  `LoadLibrary` / WebView 这类需要**真实文件**的资源用 `ctx.materialize("native/x.dll")` 物化到缓存目录。
   小文本仍走 `ctx.classpath`。两者都是反向请求，只能在 Worker 线程调用。
 
 ### 6.1 单 exe 产出（`keelPlugin.executable`）
@@ -313,7 +314,9 @@ keelPlugin {
     executable {
         enabled = true                                   // 默认 false
         name = "myapp"                                   // 默认 project.name；Windows 自动补 .exe
+        appId = "myapp"                                  // 用户目录名，默认 project.name；与 exe 文件名解耦
         console = true                                   // false = 桌面应用（Windows GUI 子系统）
+        dataMode = KeelDataMode.PROGRAM                  // PROGRAM（默认）/ USERDATA（用户目录）
         include(file("libs/keel-database-mariadb-0.1.0.keel"))
         include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖对应的打包任务
         launcher = null                                  // 可选：本地 launcher，便于调试
@@ -337,10 +340,24 @@ keelPlugin {
   跨文件共享压缩窗口；`deflate` 退回普通 zip。两种都由 Host 侧 `BundleArchiveClasspath` 打开，
   **`.keel` 自身的 zip 压缩方式不变**。
 - 运行期语义：bundle 只在内存里打开，`.keel` 与 `resources/` **不落盘**；
-  只有插件 / 能力包的动态库物化到 `$root/.cache/<id>/<version>/`。
+  只有插件 / 能力包的动态库物化到 `$cacheRoot/<id>/<version>/`。
 - 同 id 以磁盘 `plugins/` 优先：磁盘 manifest 可解析即「认领」该 id，加载失败也不回退内嵌版本。
   运行时 `install` 不能覆盖已加载的内嵌插件（K/N 无法卸载），会保留文件并要求重启。
-- 工作根：`KEEL_HOME` → exe 所在目录 → 用户缓存目录；`plugins/` 与 `.cache/` 都在其下。
+- **目录**：`dataRoot`（稳定，可配置）放 `application.yaml`、`config/plugins/`、插件持久化数据
+  `data/<id>/` 与日志 `logs/`；`cacheRoot`（可整体删除）放物化动态库与每次加载的资源目录。
+  默认都落在程序目录：`--plugins` 模式取启动工作目录（`keelRun` 的 `build/keel-run`），
+  单文件模式取 exe 所在目录；`KEEL_DATA_HOME` / `KEEL_CACHE_HOME` 可分别重定向，
+  `KEEL_HOME` 仍作为 `KEEL_DATA_HOME` 的别名。程序目录不可写时回退到
+  `<用户数据目录>/<app-id>`（Windows `%LOCALAPPDATA%\<app-id>`，Linux `$XDG_DATA_HOME/<app-id>`）
+  与 `<用户缓存目录>/<app-id>`。
+- 桌面应用在构建期把 `keelPlugin.executable.dataMode` 设为 `KeelDataMode.USERDATA`，默认目录直接落到
+  `<用户数据目录>/<app-id>`，不依赖用户手配环境变量；该默认值写在 PE 资源
+  `IDR_KEEL_LAYOUT` / Linux footer 的 format 高位，运行期环境变量仍优先。
+  CI 可用 `-Pkeel.dataMode=USERDATA` 覆盖。
+- `<app-id>` 来自 `keelPlugin.executable.appId`（默认工程名），构建期写进 PE 资源
+  `IDR_KEEL_APPID` / Linux footer 前的 appid trailer；**不要**用产物文件名推导 ——
+  exe 改名、带版本号的产物名都不应改变用户数据目录。没有该标记的旧产物才回退到 exe 文件名。
+- `plugins/` 与 `.cache/` 在 `dataRoot` 相邻位置，不再共用同一个根。
 - HTTP 端口：`--http` > `KEEL_HTTP_PORT` > `application.yaml` 的 `server.port` > 7191（仅 bundle 模式默认开）。
 - `.keel` 与 bundle 都按 `lib/<target>/` 裁剪，只带当前目标的动态库。
 
@@ -451,7 +468,7 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   event/       Event / EventBus / EventHandler / EventPriority / EventType / Subscription
   error/       KeelErrorPayload / KeelRemoteException / package.kt
   host/        HostLink / HostSubjects / InvalidateRequest / PermissionCatalogReply
-               CacheDirReply / MaterializeRequest / MaterializeReply
+               CacheDirReply / DataDirReply / MaterializeRequest / MaterializeReply
                ClasspathNames / ClasspathOp / ClasspathRequest / ClasspathReply
   messaging/   Message / Messenger
   service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceWire
@@ -468,6 +485,8 @@ keel-api/src/nativeMain/…/api/worker/
   WorkerScheduler / WorkerScope / WorkerDispatcher / ServiceCallerImpl
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
+keel-host/src/commonMain/…/host/HostDirs.kt           dataRoot / cacheRoot 模型
+keel-host/src/nativeMain/…/host/HostDirs.native.kt    目录解析（环境变量 / 程序目录 / 用户目录）
 keel-host/src/commonMain/…/host/HostLogSink.kt        Host 日志出口（本地时间戳 + 调用点模块列）
 keel-host/src/commonMain/…/host/                      LogArchive（expect）/ HostLogSource / Logging / LogWake / Console
 keel-host/src/nativeMain/…/host/                      LogArchive.native / LogHub / LogLocalSubscriptions.native

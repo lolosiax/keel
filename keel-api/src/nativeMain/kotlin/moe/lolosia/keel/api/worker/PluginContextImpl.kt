@@ -19,6 +19,7 @@ internal class PluginContextImpl(
     override val metadata: PluginMetadata,
     override val logger: PluginLogger,
     override val cacheDir: String,
+    override val dataDir: String,
 ) : PluginContext {
 
     override val server: KeelServer by lazy {

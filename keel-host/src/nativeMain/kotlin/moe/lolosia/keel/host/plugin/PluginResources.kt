@@ -29,30 +29,18 @@ internal object PluginResources {
     /** 数字 plugin id → 本次加载的目录。 */
     private val loaded = mutableMapOf<ULong, Load>()
 
-    /** `<cacheRoot>` 下不属于插件资源目录的保留子目录。 */
-    private val reserved = setOf("plugins", "config", "capabilities")
+    /** `<cacheRoot>` 下不属于插件资源目录的保留子目录（兼容把旧工作根当缓存根的部署）。 */
+    private val reserved = setOf("plugins", "config", "data", "logs", "capabilities")
 
     /**
      * 确定资源根并回收上次运行的加载目录。
      *
-     * [cacheRoot] 不可写（安装目录只读）时回退到用户缓存目录；两者都不可写时
-     * 只记错误，后续物化会以明确的 IO 错误失败。
+     * 缓存根由 `HostDirs` 提前选定并保证可写；这里不可写时只记错误，
+     * 后续物化会以明确的 IO 错误失败。
      */
     fun init(cacheRoot: String) {
         root = cacheRoot.trimEnd('/', '\\').ifEmpty { "." }
-        if (!writable(root)) {
-            val fallback = userCacheRoot()?.trimEnd('/', '\\')
-            root = if (fallback != null && writable(fallback)) {
-                Log.warn(
-                    "cache root 不可写（$cacheRoot），插件资源改用 ${nativePath(fallback)}",
-                    tag = "Loader",
-                )
-                fallback
-            } else {
-                Log.error("cache root 不可写：$cacheRoot", tag = "Loader")
-                root
-            }
-        }
+        if (!writable(root)) Log.error("cache root 不可写：$cacheRoot", tag = "Loader")
         cleanup()
     }
 

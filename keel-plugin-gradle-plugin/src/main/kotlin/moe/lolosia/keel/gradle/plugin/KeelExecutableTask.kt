@@ -53,6 +53,22 @@ abstract class KeelExecutableTask : DefaultTask() {
     abstract val console: Property<Boolean>
 
     /**
+     * 单 exe 启动时的默认目录模式是否为 USERDATA。
+     *
+     * Windows 写 PE 资源 `IDR_KEEL_LAYOUT` / `KEELAYOUT`，Linux 写 footer 的 format 高位；
+     * 运行期的 `KEEL_DATA_HOME` / `KEEL_CACHE_HOME` 仍可覆盖。
+     */
+    @get:Input
+    abstract val userData: Property<Boolean>
+
+    /**
+     * 用户目录下的应用 id（`%LOCALAPPDATA%\<appId>`）；由构建期写进产物，
+     * 运行期不随 exe 文件名变化。
+     */
+    @get:Input
+    abstract val appId: Property<String>
+
+    /**
      * 注入前是否 strip launcher。
      *
      * `UpdateResourceW` 会丢掉文件尾部的 COFF 符号 / 字符串表却保留旧指针，
@@ -153,6 +169,11 @@ abstract class KeelExecutableTask : DefaultTask() {
         }
 
         bundle.get().asFile.copyTo(dir.resolve("keel-bundle.bin"), overwrite = true)
+        dir.resolve("keel-layout.txt").writeText(
+            if (userData.get()) "USERDATA" else "PROGRAM",
+            Charsets.UTF_8,
+        )
+        dir.resolve("keel-appid.txt").writeText(appId.get(), Charsets.UTF_8)
 
         val rc = dir.resolve("app.rc")
         rc.writeText(
@@ -162,7 +183,17 @@ abstract class KeelExecutableTask : DefaultTask() {
                         id = "IDR_KEEL_BUNDLE",
                         type = "KEELBUNDLE",
                         file = "keel-bundle.bin",
-                    )
+                    ),
+                    KeelEmbeddedResource(
+                        id = "IDR_KEEL_LAYOUT",
+                        type = "KEELAYOUT",
+                        file = "keel-layout.txt",
+                    ),
+                    KeelEmbeddedResource(
+                        id = "IDR_KEEL_APPID",
+                        type = "KEELAPPID",
+                        file = "keel-appid.txt",
+                    ),
                 ),
                 icon = "app.ico",
                 version = version.get(),
@@ -265,14 +296,24 @@ abstract class KeelExecutableTask : DefaultTask() {
         val footer = ByteBuffer.allocate(FOOTER_SIZE).order(ByteOrder.LITTLE_ENDIAN).apply {
             putLong(launcherBytes.size.toLong())
             putLong(bundleBytes.size.toLong())
-            putInt(FORMAT_VERSION)
+            // 低 16 位是格式版本，高位是启动时的默认目录模式
+            putInt(FORMAT_VERSION or (if (userData.get()) USERDATA_BIT else 0))
             putInt(crc.toInt())
             put(FOOTER_MAGIC.toByteArray(Charsets.US_ASCII))
+        }.array()
+
+        val appIdBytes = appId.get().toByteArray(Charsets.UTF_8)
+        val appIdTrailer = ByteBuffer.allocate(APPID_TRAILER_SIZE).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put(APPID_MAGIC.toByteArray(Charsets.US_ASCII))
+            putInt(appIdBytes.size)
+            putInt(0)
         }.array()
 
         FileOutputStream(output).use { stream ->
             stream.write(launcherBytes)
             stream.write(bundleBytes)
+            stream.write(appIdBytes)
+            stream.write(appIdTrailer)
             stream.write(footer)
         }
     }
@@ -291,5 +332,12 @@ abstract class KeelExecutableTask : DefaultTask() {
         const val FOOTER_SIZE = 32
         const val FORMAT_VERSION = 1
         const val FOOTER_MAGIC = "KEELBNDL"
+
+        /** footer `format` 的高位：1 = 默认使用用户目录（与 Host 侧读取一致）。 */
+        const val USERDATA_BIT = 1 shl 16
+
+        /** 紧贴 footer 之前的 app id 索引：`magic(8) + length(u32) + reserved(u32)`。 */
+        const val APPID_TRAILER_SIZE = 16
+        const val APPID_MAGIC = "KEELAPP!"
     }
 }

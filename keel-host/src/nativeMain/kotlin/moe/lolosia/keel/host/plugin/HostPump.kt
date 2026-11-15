@@ -584,6 +584,14 @@ internal object HostPump {
                 ),
             )
 
+            HostSubjects.DATA_DIR -> ServiceWire.encode(
+                DataDirReply.serializer(),
+                DataDirReply(
+                    HostStorage.dataDir(source)
+                        ?: throw IllegalStateException("插件 $source 尚未登记数据命名空间")
+                ),
+            )
+
             HostSubjects.MATERIALIZE -> {
                 val request = decodePayload(MaterializeRequest.serializer(), payload, "资源物化")
                 ServiceWire.encode(

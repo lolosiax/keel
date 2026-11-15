@@ -40,7 +40,7 @@ abstract class KeelPrepareRunTask : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NAME_ONLY)
     abstract val debugFiles: ConfigurableFileCollection
 
-    /** `dev/config/plugins/<id>.yaml`。 */
+    /** `dev/config/plugins/<id>.yaml`；只在运行目录里不存在同名文件时播种。 */
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val configTemplates: ConfigurableFileCollection
@@ -70,16 +70,21 @@ abstract class KeelPrepareRunTask : DefaultTask() {
     fun prepare() {
         val root = runDirectory.get().asFile
         val plugins = pluginsDirectory.get().asFile
-        fs.delete { it.delete(plugins) }
         plugins.mkdirs()
+        // 只清理缓存与上一轮的包；config/、data/、logs/ 是运行目录里的持久数据，必须保留
+        fs.delete { it.delete(root.resolve(".cache")) }
+        plugins.listFiles { file -> file.isFile && file.name.endsWith(".keel") }
+            ?.forEach { it.delete() }
 
         pluginPackages.files.forEach { it.copyTo(plugins.resolve(it.name), overwrite = true) }
         extraArtifacts.files.forEach { it.copyTo(plugins.resolve(it.name), overwrite = true) }
 
-        if (!configTemplates.isEmpty) {
-            fs.copy {
-                it.from(configTemplates)
-                it.into(plugins.resolve(".cache/config/plugins"))
+        // 配置模板只做首次播种：已经存在的文件不覆盖，运行期写入的内容必须留下
+        configTemplates.files.forEach { template ->
+            val target = root.resolve("config/plugins/${template.name}")
+            if (!target.exists()) {
+                target.parentFile.mkdirs()
+                template.copyTo(target, overwrite = false)
             }
         }
         dataTemplate.orNull?.let { source ->
