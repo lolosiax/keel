@@ -15,6 +15,8 @@ internal object KeelLoggerKeys {
 
     val DEBUG = CompilerConfigurationKey<Boolean>("keel-logger debug")
 
+    val DEBUG_VALUES = CompilerConfigurationKey<Boolean>("keel-logger debugValues")
+
     val DEBUG_OUTPUT = CompilerConfigurationKey<String>("keel-logger debugOutput")
 
     val DEBUG_MODULE = CompilerConfigurationKey<String>("keel-logger debugModule")

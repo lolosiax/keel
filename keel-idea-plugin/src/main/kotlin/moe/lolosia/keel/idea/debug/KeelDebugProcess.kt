@@ -11,6 +11,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.xdebugger.XDebugProcess
 import com.intellij.xdebugger.XDebugSession
 import com.intellij.xdebugger.XDebuggerManager
@@ -25,6 +26,7 @@ import java.io.File
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
  * Keel 调试会话。
@@ -41,7 +43,7 @@ class KeelDebugProcess(
     private val processHandler: ProcessHandler,
     private val server: ServerSocket,
     debugDir: File,
-) : XDebugProcess(session) {
+) : XDebugProcess(session), KeelMemberSource {
 
     /** 一个接入的运行时 image（Host 或某个插件 dylib）。 */
     private class Channel(
@@ -74,8 +76,14 @@ class KeelDebugProcess(
     @Volatile private var suspendedModule: String? = null
     @Volatile private var closed = false
 
-    /** 当前挂起帧的参数快照；`VALUES` 总在 `SUSPENDED` 之前到，只有一条通道会挂起。 */
-    @Volatile private var pendingValues: List<Pair<String, String>> = emptyList()
+    /** 当前挂起帧的序号；运行期每次命中自增，用来丢弃过期的展开应答。 */
+    @Volatile private var currentStopSeq = 0
+
+    /** 当前挂起帧的变量快照；`FRAME_VALUES` 总在 `SUSPENDED` 之前到，只有一条通道会挂起。 */
+    @Volatile private var pendingValues: List<KeelValueSnapshot> = emptyList()
+
+    /** 已发出、还没收到应答的展开请求；键是运行期句柄。 */
+    private val memberRequests = ConcurrentHashMap<Int, (List<KeelValueSnapshot>) -> Unit>()
 
     /** 已经校验过的断点；只在 EDT 上读写，用来避免「校验 → 事件 → 再校验」自激。 */
     private val verified = HashSet<XLineBreakpoint<*>>()
@@ -114,6 +122,7 @@ class KeelDebugProcess(
         // 先发 RESUME：sendToSuspended 依赖 suspendedModule，清早了这个帧就发不出去
         sendToSuspended(KeelDebugWire.RESUME, "all")
         suspendedModule = null
+        clearMemberRequests()
         session.sessionResumed()
     }
 
@@ -126,6 +135,7 @@ class KeelDebugProcess(
     override fun stop() {
         if (closed) return
         closed = true
+        clearMemberRequests()
         Disposer.dispose(breakpointBus)
         channels.values.forEach { channel ->
             runCatching { channel.send(KeelDebugWire.DISCONNECT, "") }
@@ -140,6 +150,7 @@ class KeelDebugProcess(
     private fun step(mode: String) {
         sendToSuspended(KeelDebugWire.RESUME, "step:$mode")
         suspendedModule = null
+        clearMemberRequests()
         session.sessionResumed()
     }
 
@@ -202,7 +213,10 @@ class KeelDebugProcess(
         while (!closed) {
             val frame = runCatching { KeelDebugWire.read(channel.input) }.getOrNull() ?: return
             when (frame.type) {
+                KeelDebugWire.FRAME_VALUES -> pendingValues = parseFrameValues(frame.fields)
+                // 旧版编译器插件只发 VALUES（名字 + 字符串），照样能显示，只是不能展开
                 KeelDebugWire.VALUES -> pendingValues = parseValues(frame.fields)
+                KeelDebugWire.MEMBERS -> onMembers(frame.fields)
                 KeelDebugWire.NAMES -> onNamed(channel.moduleId, frame.fields)
                 KeelDebugWire.WAITING -> onWaiting(frame.fields)
                 KeelDebugWire.SUSPENDED -> onSuspended(channel.moduleId, frame.fields)
@@ -234,14 +248,86 @@ class KeelDebugProcess(
         waiters[correlation] = module to ids
     }
 
-    /** `locationId  count  name  value ...`；名字与值里的控制字符在运行期已转义。 */
-    private fun parseValues(fields: List<String>): List<Pair<String, String>> {
+    /** `locationId  count` 后跟每行 `name  type  preview  ref`；控制字符在运行期已转义。 */
+    private fun parseFrameValues(fields: List<String>): List<KeelValueSnapshot> {
+        val count = fields.getOrNull(1)?.toIntOrNull() ?: 0
+        val cells = fields.drop(2)
+        val values = ArrayList<KeelValueSnapshot>(count)
+        for (index in 0 until count) {
+            val base = index * 4
+            if (base + 3 >= cells.size) break
+            values += KeelValueSnapshot(
+                name = unescape(cells[base]),
+                type = unescape(cells[base + 1]),
+                preview = unescape(cells[base + 2]),
+                ref = cells[base + 3].toIntOrNull() ?: 0,
+            )
+        }
+        return values
+    }
+
+    /** 旧版 `locationId  count  name  value ...`：没有类型与句柄，值原样展示。 */
+    private fun parseValues(fields: List<String>): List<KeelValueSnapshot> {
         val cells = fields.drop(2)
         if (cells.isEmpty()) return emptyList()
-        return cells.chunked(2).mapNotNull { pair ->
-            val name = pair.getOrNull(0) ?: return@mapNotNull null
-            name to unescape(pair.getOrNull(1).orEmpty())
+        val values = ArrayList<KeelValueSnapshot>(cells.size / 2)
+        cells.chunked(2).forEach { pair ->
+            val name = pair.getOrNull(0) ?: return@forEach
+            values += KeelValueSnapshot(name, "", unescape(pair.getOrNull(1).orEmpty()), 0)
         }
+        return values
+    }
+
+    /** `ref  stopSeq  typeName  count` 后跟每行 `name  type  preview  childRef`。 */
+    private fun onMembers(fields: List<String>) {
+        val ref = fields.getOrNull(0)?.toIntOrNull() ?: return
+        val stopSeq = fields.getOrNull(1)?.toIntOrNull() ?: return
+        // 上一次命中的过期应答：句柄已经回收，直接丢掉
+        if (stopSeq != currentStopSeq) return
+        val count = fields.getOrNull(3)?.toIntOrNull() ?: 0
+        val cells = fields.drop(4)
+        val members = ArrayList<KeelValueSnapshot>(count)
+        for (index in 0 until count) {
+            val base = index * 4
+            if (base + 3 >= cells.size) break
+            members += KeelValueSnapshot(
+                name = unescape(cells[base]),
+                type = unescape(cells[base + 1]),
+                preview = unescape(cells[base + 2]),
+                ref = cells[base + 3].toIntOrNull() ?: 0,
+            )
+        }
+        val callback = memberRequests.remove(ref) ?: return
+        ApplicationManager.getApplication().invokeLater { callback(members) }
+    }
+
+    override fun requestMembers(ref: Int, callback: (List<KeelValueSnapshot>) -> Unit) {
+        val module = suspendedModule
+        val channel = module?.let { channels[it] }
+        if (channel == null) {
+            callback(emptyList())
+            return
+        }
+        memberRequests[ref] = callback
+        val sent = runCatching { channel.send(KeelDebugWire.GET_MEMBERS, ref.toString()) }.isSuccess
+        if (!sent) {
+            memberRequests.remove(ref)
+            callback(emptyList())
+            return
+        }
+        // 运行期只在停住时回包；超时兜底，避免变量树一直转圈
+        AppExecutorUtil.getAppScheduledExecutorService().schedule({
+            val pending = memberRequests.remove(ref) ?: return@schedule
+            ApplicationManager.getApplication().invokeLater { pending(emptyList()) }
+        }, MEMBER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+    }
+
+    /** 恢复 / 步进 / 新命中时丢弃未完成的展开请求，并让变量节点停止等待。 */
+    private fun clearMemberRequests() {
+        if (memberRequests.isEmpty()) return
+        val pending = ArrayList(memberRequests.values)
+        memberRequests.clear()
+        ApplicationManager.getApplication().invokeLater { pending.forEach { it(emptyList()) } }
     }
 
     private fun unescape(text: String): String {
@@ -267,12 +353,16 @@ class KeelDebugProcess(
         return builder.toString()
     }
 
-    /** `locationId  threadId  module  reason  callers  correlation`：位置表反查出整条栈。 */
+    /** `locationId  stopSeq  module  reason  callers  correlation  creation`：位置表反查出整条栈。 */
     private fun onSuspended(module: String, fields: List<String>) {
         val locationId = fields.getOrElse(0) { "0" }.toIntOrNull() ?: 0
+        val stopSeq = fields.getOrNull(1)?.toIntOrNull() ?: 0
         val threadId = fields.getOrElse(1) { "?" }
         val reason = fields.getOrElse(3) { "breakpoint" }
         val values = pendingValues.also { pendingValues = emptyList() }
+        // 新命中：旧句柄已经失效，未完成的展开请求按空结果收尾
+        currentStopSeq = stopSeq
+        clearMemberRequests()
 
         val entry = symbols.location(module, locationId)
         val top = if (entry != null) {
@@ -311,7 +401,7 @@ class KeelDebugProcess(
         ApplicationManager.getApplication().invokeLater {
             if (closed) return@invokeLater
             val frames = buildList {
-                add(KeelStackFrame(project, top, values, showModule = top.module != module))
+                add(KeelStackFrame(project, top, values, this@KeelDebugProcess, showModule = top.module != module))
                 callers.forEach { add(KeelStackFrame(project, it)) }
                 if (creation.isNotEmpty()) {
                     add(KeelSeparatorFrame(CREATION_LABEL))
@@ -460,5 +550,8 @@ class KeelDebugProcess(
 
         /** 等待方快照的保留上限；只是给「当前挂起」找父栈用，不需要长期留存。 */
         const val MAX_WAITERS = 512
+
+        /** 展开请求的等待上限；运行期只在停住时回包，超时就当空。 */
+        const val MEMBER_TIMEOUT_MS = 3_000L
     }
 }

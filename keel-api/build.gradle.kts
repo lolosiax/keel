@@ -17,6 +17,8 @@ plugins {
  */
 keelLogger {
     debug = false
+    // 类型展开实现要生成：keel-api 的模型（插件清单、日志记录等）在调试器里也要能展开
+    debugValues = true
     exceptionTrace = false
 }
 

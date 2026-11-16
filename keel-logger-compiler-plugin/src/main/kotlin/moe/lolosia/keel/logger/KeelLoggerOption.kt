@@ -15,6 +15,8 @@ internal object KeelLoggerOption {
 
     const val DEBUG = "debug"
 
+    const val DEBUG_VALUES = "debugValues"
+
     const val DEBUG_OUTPUT = "debugOutput"
 
     const val DEBUG_MODULE = "debugModule"

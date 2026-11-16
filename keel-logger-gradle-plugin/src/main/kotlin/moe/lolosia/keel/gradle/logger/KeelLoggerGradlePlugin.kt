@@ -43,6 +43,9 @@ class KeelLoggerGradlePlugin : KotlinCompilerPluginSupportPlugin {
             buildList {
                 add(SubpluginOption("enabled", "true"))
                 add(SubpluginOption("exceptionTrace", (extension?.exceptionTrace?.get() ?: true).toString()))
+                // 未单独配置时跟随 debug：正常模块两者一起开，keel-api 只开前者
+                val debugValues = extension?.debugValues?.orNull ?: (extension?.debug?.get() ?: true)
+                add(SubpluginOption("debugValues", debugValues.toString()))
                 add(SubpluginOption("workspaceRoot", workspaceRoot))
                 roots.forEach { add(SubpluginOption("sourceRoot", it)) }
 

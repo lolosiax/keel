@@ -12,10 +12,7 @@ import com.intellij.xdebugger.XDebuggerUtil
 import com.intellij.xdebugger.XSourcePosition
 import com.intellij.xdebugger.frame.XCompositeNode
 import com.intellij.xdebugger.frame.XStackFrame
-import com.intellij.xdebugger.frame.XValue
 import com.intellij.xdebugger.frame.XValueChildrenList
-import com.intellij.xdebugger.frame.XValueNode
-import com.intellij.xdebugger.frame.XValuePlace
 
 /**
  * 一个 Keel 栈帧。
@@ -23,13 +20,15 @@ import com.intellij.xdebugger.frame.XValuePlace
  * 文本与日志里的异常帧一致：`包.类.函数(File.kt:行)`；
  * 双击可跳到对应源码，因为 [getSourcePosition] 返回真实的 PSI 位置。
  *
- * 只有栈顶帧带变量快照：运行期在命中瞬间把参数与 `this` 的 `toString()` 抓下来，
- * 值不可展开、不可修改——Kotlin/Native 没有运行时反射。
+ * 只有栈顶帧带变量快照：运行期在命中瞬间抓下 `this` / 参数 / 当前闭包捕获的预览，
+ * 值可逐层展开（集合、Map、数组、`Throwable`、枚举，以及编译器生成 `DebugView` 的类）。
  */
 class KeelStackFrame(
     private val project: Project,
     private val location: KeelStackLocation,
-    private val values: List<Pair<String, String>> = emptyList(),
+    private val values: List<KeelValueSnapshot> = emptyList(),
+    /** 有变量时非空：子成员由它按需向运行期要。 */
+    private val memberSource: KeelMemberSource? = null,
     /** 跨 image 拼进来的帧：把模块名标出来，否则 Host 与插件的帧看起来像同一个栈。 */
     private val showModule: Boolean = false,
 ) : XStackFrame() {
@@ -58,7 +57,7 @@ class KeelStackFrame(
             return
         }
         val children = XValueChildrenList(values.size)
-        values.forEach { (name, value) -> children.add(name, SnapshotValue(value)) }
+        values.forEach { snapshot -> children.add(snapshot.name, KeelObjectValue(snapshot, memberSource)) }
         node.addChildren(children, true)
     }
 
@@ -73,17 +72,5 @@ class KeelStackFrame(
             .asSequence()
             .mapNotNull { it.virtualFile }
             .firstOrNull { it.path.replace('\\', '/').endsWith(suffix) }
-    }
-
-    /** 只读的字符串节点：没有类型、没有子节点。 */
-    private class SnapshotValue(private val text: String) : XValue() {
-        override fun computePresentation(node: XValueNode, place: XValuePlace) {
-            val shown = if (text.length > MAX_LENGTH) text.take(MAX_LENGTH) + "…" else text
-            node.setPresentation(null, null, shown, false)
-        }
-    }
-
-    private companion object {
-        const val MAX_LENGTH = 400
     }
 }

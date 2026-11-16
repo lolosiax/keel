@@ -20,6 +20,7 @@ internal class KeelLoggerRegistrar : CompilerPluginRegistrar() {
             sourceRoots = configuration.get(KeelLoggerKeys.SOURCE_ROOTS).orEmpty(),
             traceExceptions = configuration.get(KeelLoggerKeys.EXCEPTION_TRACE, true),
             debug = configuration.get(KeelLoggerKeys.DEBUG, false),
+            debugValues = configuration.get(KeelLoggerKeys.DEBUG_VALUES, false),
             debugOutput = configuration.get(KeelLoggerKeys.DEBUG_OUTPUT),
             debugModule = configuration.get(KeelLoggerKeys.DEBUG_MODULE) ?: "unknown",
             debugBuildId = configuration.get(KeelLoggerKeys.DEBUG_BUILD_ID) ?: "unknown",

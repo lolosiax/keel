@@ -8,6 +8,8 @@ internal class KeelLoggerConfig(
     val traceExceptions: Boolean,
     /** 是否插入调试检查点并写出位置表。 */
     val debug: Boolean,
+    /** 是否给类生成 `DebugView` 实现（调试器展开对象成员用）。 */
+    val debugValues: Boolean,
     /** 位置表输出路径（`<compilation>.keel-debug`）；为空表示不写。 */
     val debugOutput: String?,
     /** 位置表首行的模块 id，与运行期 `HELLO` 报的一致。 */
