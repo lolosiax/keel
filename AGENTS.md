@@ -397,6 +397,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/abi-design.md](doc/abi-design.md) | **C ABI 与线程模型**：事件泵、Worker、句柄 / 代理、回调、事件总线、调度器桥接、内存与版本规则 |
 | [doc/codegen-design.md](doc/codegen-design.md) | **零样板模块互访**：Gradle 插件 + KSP 生成客户端 / 分发器 / 访问器 / 回调 / plugin.json |
 | [doc/plugin-contract-discussion.md](doc/plugin-contract-discussion.md) | **插件契约形态讨论记录**（未定稿）：`-impl` 命名取舍、Gradle 多工件可行性、`@KeelExposed` 分期与待决问题 |
+| [doc/public-api-design.md](doc/public-api-design.md) | **`@PublicApi` 讨论稿**：impl + api 两模块下从注解生成 api 工件、跨插件继承的声明方基类影子（`super` / 裸字段 / override 集合）、`create` + `initialization` 远程构造、任何人可 `destroy` 与 Host 句柄表 |
 | [doc/config-design.md](doc/config-design.md) | **配置读写**：YAML + 注释保留、分层覆盖、插件配置隔离、原子落盘与变更通知 |
 | [doc/web-design.md](doc/web-design.md) | **Web 路由**：Host 单端口、插件路由注册、Context 快照、流式响应、中间件与鉴权 |
 | [doc/authz-design.md](doc/authz-design.md) | **权限边界**：core 只留 `@Permission` / `Authorizer` SPI，RBAC 实现归 `keel-plugin-rbac`，fail closed |
@@ -406,6 +407,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/log-design.md](doc/log-design.md) | **日志归档与订阅**：环形缓冲与容量核算、文本 / 结构化两种视图、插件 Flow 订阅与背压、控制台 / 桌面应用切换 |
 | [doc/console-design.md](doc/console-design.md) | **控制台窗口插件**：子进程 helper + 双向管道帧协议、TTY 语义保留、Messenger 补全、日志 Flow 回放与背压 |
 | [doc/debug-design.md](doc/debug-design.md) | **调试支持（讨论稿）**：原生 LLDB 路线与自建 XDebugger 调试器的取舍、IR 插桩 + C agent + 协议的必要部件、语义边界与最小切片 |
+| [doc/ui-design.md](doc/ui-design.md) | **桌面 UI 系统（keel-plugin-deck，讨论稿）**：控件级跨运行时不可行，对象级透传可收敛为「1 个句柄 + 快照 DTO」；RML 以 URL 交给 deck 解析；窗口由 helper 进程持有、帧循环与 Host 事件泵解耦 |
 | [doc/任务记忆.md](doc/任务记忆.md) | **长任务交接（冷启动先读这里）**：现状速览、设计决策、下一步、坑索引。只读本文，不要全量读 |
 | [doc/记忆/实现现状.md](doc/记忆/实现现状.md) | **逐模块实现现状**（原任务记忆 §3；编号不变）+ 关键编译命令 |
 | [doc/记忆/验证记录.md](doc/记忆/验证记录.md) | **历史冒烟快照**（原任务记忆 §4）；归档材料，平时不用读 |
