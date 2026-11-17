@@ -1,0 +1,17 @@
+{
+  "id": "animal",
+  "name": "Animal Plugin",
+  "logTag": "Animal",
+  "color": "#33AA55",
+  "version": "0.1.0",
+  "abiVersion": 1,
+  "entry": "keel_plugin_worker_main",
+  "provides": [],
+  "lib": {
+    "mingwX64": "lib/mingwX64/keel_plugin_animal.dll"
+  },
+  "resources": "resources/",
+  "requires": [],
+  "authors": ["lolosia"],
+  "description": "@PublicApi 声明方示例：Animal / Callable / AnimalPlugin"
+}

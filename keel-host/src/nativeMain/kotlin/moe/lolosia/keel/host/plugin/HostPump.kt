@@ -22,6 +22,7 @@ import moe.lolosia.keel.api.messaging.*
 import moe.lolosia.keel.api.service.ServiceCall
 import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
+import moe.lolosia.keel.api.share.*
 import moe.lolosia.keel.api.storage.*
 import moe.lolosia.keel.api.web.RouteRegistration
 import moe.lolosia.keel.host.HostLogSource
@@ -33,6 +34,7 @@ import moe.lolosia.keel.host.console.HostConsole
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
+import moe.lolosia.keel.host.shared.HostShared
 import moe.lolosia.keel.host.storage.HostStorage
 
 /** 插件间调用的 Host 侧兜底超时；调用方自己的 3s 超时通常先到。 */
@@ -408,6 +410,77 @@ internal object HostPump {
         return ByteArray(0)
     }
 
+    /**
+     * 共享对象调用：按句柄找到所有者 / 声明方，换一个 Host correlation 转发。
+     *
+     * 带基类体的类型先发声明方（影子），影子命中 override 时再带 `owner = true` 发回来；
+     * Host 把实例方上报的 override 集合填进载荷，接收方不需要额外查询。
+     */
+    private fun routeSharedCall(event: HostEvent) {
+        val call = try {
+            ServiceWire.decode(SharedCall.serializer(), event.payload ?: ByteArray(0))
+        } catch (error: Throwable) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "shared call payload cannot be decoded: ${error.message}",
+                HostSubjects.SHARED_CALL.toULong(),
+            )
+            return
+        }
+
+        val entry = HostShared.entry(call.handle)
+        if (entry == null) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "shared object closed: ${call.handle}",
+                HostSubjects.SHARED_CALL.toULong(),
+            )
+            return
+        }
+        if (call.typeId !in entry.types) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "type ${call.typeId} is not exported by handle ${call.handle}",
+                HostSubjects.SHARED_CALL.toULong(),
+            )
+            return
+        }
+
+        val target = HostShared.targetOf(entry, call)
+        val payload = ServiceWire.encode(
+            SharedCall.serializer(),
+            call.copy(overrides = entry.overrides.sorted()),
+        )
+        val correlation = nextCorrelation()
+        if (!pushToPlugin(
+                pluginId = target,
+                kind = KEEL_EVENT_COMMAND.toInt(),
+                subject = HostSubjects.SHARED_CALL.toULong(),
+                correlation = correlation,
+                payload = payload,
+                source = event.source,
+            )
+        ) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "shared object owner offline: handle=${call.handle}",
+                HostSubjects.SHARED_CALL.toULong(),
+            )
+            return
+        }
+        forwards[correlation] = Forward(
+            callerId = event.source,
+            callerCorrelation = event.correlation,
+            providerId = target,
+            deadlineMs = nowMs() + debugTimeoutMs(SERVICE_TIMEOUT_MS),
+            subject = HostSubjects.SHARED_CALL.toULong(),
+        )
+    }
+
     /** 把提供者的回包送回调用方；correlation 换回调用方当初发出去的值。 */
     private fun completeForward(forward: Forward, reply: HostEvent) {
         val pushed = pushToPlugin(
@@ -466,6 +539,11 @@ internal object HostPump {
         // 插件间请求不能立即回包：先转发，等提供方回 COMPLETE 再换 correlation 带回
         if (event.subject == HostSubjects.MESSAGE_REQUEST.toULong()) {
             routeMessageRequest(event)
+            return
+        }
+        // 共享对象调用同样要按句柄转发，不能在 Host 本地作答
+        if (event.subject == HostSubjects.SHARED_CALL.toULong()) {
+            routeSharedCall(event)
             return
         }
 
@@ -634,6 +712,25 @@ internal object HostPump {
             }
 
             HostSubjects.MESSAGE_POST -> routeMessagePost(source, payload)
+
+            HostSubjects.PUBLIC_API_DECLARE -> {
+                val request = decodePayload(PublicApiDeclareRequest.serializer(), payload, "共享类型声明")
+                HostShared.declare(source, request.types)
+                ByteArray(0)
+            }
+
+            HostSubjects.PUBLIC_API_REGISTER -> {
+                val request = decodePayload(SharedRegistration.serializer(), payload, "共享对象登记")
+                val handle = HostShared.register(source, request)
+                ServiceWire.encode(SharedHandleReply.serializer(), SharedHandleReply(handle))
+            }
+
+            HostSubjects.PUBLIC_API_SINGLETON -> {
+                val typeId = payload?.decodeToString() ?: throw IllegalArgumentException("单例查询缺少 typeId")
+                val handle = HostShared.singleton(typeId)
+                    ?: throw IllegalStateException("类型 $typeId 没有登记单例")
+                ServiceWire.encode(SharedHandleReply.serializer(), SharedHandleReply(handle))
+            }
 
             HostSubjects.DEBUG_MODULE ->
                 (HostPluginIds.nameOf(source)

@@ -16,6 +16,7 @@ import moe.lolosia.keel.api.error.*
 import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.messaging.*
 import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.api.share.*
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -111,6 +112,8 @@ object PluginWorker {
         return try {
             PluginRoutes.reset()
             PluginServices.reset()
+            PublicApiObjects.reset()
+            PublicApiBridge.install(PublicApiObjects)
             val instance = factory()
             // onLoad / onEnable 期间可能已经收到事件（例如服务回包），先登记实例
             plugin = instance
@@ -147,6 +150,7 @@ object PluginWorker {
         PluginCapabilities.databaseHandle = null
         PluginRoutes.reset()
         PluginServices.reset()
+        PublicApiObjects.reset()
         LogSubscriptions.reset()
         WorkerScheduler.reset()
         WorkerScope.reset()
@@ -220,6 +224,7 @@ private fun dispatchEventBody(e: KeelEvent) {
             KEEL_SUBJECT_HTTP.toULong() -> handleHttp(e)
             KEEL_SUBJECT_CONSOLE.toULong() -> PluginConsole.handle(e)
             KEEL_SUBJECT_SERVICE_CALL.toULong() -> handleServiceCall(e)
+            HostSubjects.SHARED_CALL.toULong() -> handleSharedCall(e)
             KEEL_SUBJECT_AUTHN.toULong() -> handleAuthn(e)
             KEEL_SUBJECT_AUTHZ.toULong() -> handleAuthz(e)
             KEEL_SUBJECT_LOG_WAKE.toULong() -> LogSubscriptions.signal(e.correlation.toLong())
@@ -363,6 +368,15 @@ private fun handleServiceCall(event: KeelEvent) {
     val call = ServiceWire.decodeCall(bytes ?: ByteArray(0))
     val reply = runBlocking {
         PluginServices.dispatch(call, event.source.toLong())
+    }
+    replyCompleteWithPayload(event, reply)
+}
+
+/** 处理 Host 转来的共享对象调用：解码信封 → 本地 / 声明方分发 → 回包。 */
+private fun handleSharedCall(event: KeelEvent) {
+    val call = ServiceWire.decode(SharedCall.serializer(), payloadOf(event))
+    val reply = runBlocking {
+        PublicApiObjects.dispatch(call, event.source.toLong())
     }
     replyCompleteWithPayload(event, reply)
 }

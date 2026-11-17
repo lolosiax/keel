@@ -14,6 +14,7 @@ import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
 import moe.lolosia.keel.host.service.HostServices
+import moe.lolosia.keel.host.shared.HostShared
 import moe.lolosia.keel.host.storage.HostStorage
 
 /**
@@ -358,6 +359,7 @@ internal object HostPlugins {
             HostRoutes.remove(entry.pluginId)
             HostPermissionCatalog.remove(entry.pluginId)
             HostServices.remove(entry.pluginId)
+        HostShared.removePlugin(entry.pluginId)
             HostAuth.release(entry.pluginId)
             HostConfigs.release(entry.pluginId)
             HostPluginIds.release(entry.pluginId)
@@ -374,6 +376,7 @@ internal object HostPlugins {
         HostRoutes.remove(entry.pluginId)
         HostPermissionCatalog.remove(entry.pluginId)
         HostServices.remove(entry.pluginId)
+        HostShared.removePlugin(entry.pluginId)
         HostAuth.release(entry.pluginId)
         HostConfigs.release(entry.pluginId)
         HostPluginIds.release(entry.pluginId)

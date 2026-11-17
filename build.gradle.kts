@@ -37,6 +37,7 @@ val publishableBuilds = listOf(
     "keel-database-mariadb",
     "keel-plugin-rbac-api",
     "keel-plugin-basic-biz-api",
+    "keel-plugin-animal-api",
 )
 
 tasks.register("publishAll") {

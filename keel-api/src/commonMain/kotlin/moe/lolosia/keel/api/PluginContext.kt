@@ -5,6 +5,7 @@ import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.api.share.*
 import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
 
@@ -40,6 +41,13 @@ interface PluginContext {
      * 本地回调表；生成的客户端用它把函数类型参数换成数字 id。
      */
     val callbacks: CallbackRegistry
+
+    /**
+     * `@PublicApi` 共享对象的入口：登记本地实例、查询单例、包装远端句柄。
+     *
+     * 只能在 Worker 线程调用；跨插件调用经 Host 路由，不跨运行时传递 Kotlin 对象。
+     */
+    val publicApi: PublicApiDirectory
 
     /**
      * 本插件的配置（`config/plugins/<id>.yaml`）；读取走本地快照，写入经 Host 落盘。

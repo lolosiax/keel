@@ -293,6 +293,9 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
                 task.dependsOn(packageTask, prepareHost)
                 task.pluginPackages.from(packageTask.flatMap { it.archiveFile })
                 task.extraArtifacts.from(runConfiguration)
+                task.extraPluginFiles.set(extension.runPluginFiles.map { project.file(it).absolutePath })
+                // 额外产物是 @Internal，改了对方包也必须重新拷贝
+                task.outputs.upToDateWhen { false }
                 task.runDirectory.set(runWorkDir)
                 task.pluginsDirectory.set(runWorkDir.resolve("plugins"))
                 task.debugDirectory.set(runWorkDir.resolve("debug"))

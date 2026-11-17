@@ -6,6 +6,7 @@ import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.service.*
+import moe.lolosia.keel.api.share.*
 import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
 
@@ -28,6 +29,7 @@ internal class PluginContextImpl(
     override val host: HostLink get() = HostLinkImpl
     override val modules: ModuleDirectory get() = PluginServices
     override val callbacks: CallbackRegistry get() = error("回调尚未实现")
+    override val publicApi: PublicApiDirectory get() = PublicApiObjects
     override val config: Config by lazy {
         PluginConfig(host, ConfigScope.PLUGIN)
     }

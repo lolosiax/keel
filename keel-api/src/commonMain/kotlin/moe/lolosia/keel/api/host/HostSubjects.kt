@@ -61,4 +61,16 @@ object HostSubjects {
 
     /** 请求：本插件的持久化数据目录；载荷为空，应答见 [DataDirReply]。 */
     const val DATA_DIR: Long = 0x1012L
+
+    /** 通知：声明方上报 `@PublicApi` 类型；载荷见 [PublicApiDeclareRequest]。 */
+    const val PUBLIC_API_DECLARE: Long = 0x1013L
+
+    /** 请求：登记一个共享对象；应答见 [SharedHandleReply]。 */
+    const val PUBLIC_API_REGISTER: Long = 0x1014L
+
+    /** 请求：按 typeId 查单例句柄；载荷是 UTF-8 的 typeId，应答见 [SharedHandleReply]。 */
+    const val PUBLIC_API_SINGLETON: Long = 0x1015L
+
+    /** 请求：共享对象方法调用；载荷见 [SharedCall]，Host 按句柄路由。 */
+    const val SHARED_CALL: Long = 0x1016L
 }

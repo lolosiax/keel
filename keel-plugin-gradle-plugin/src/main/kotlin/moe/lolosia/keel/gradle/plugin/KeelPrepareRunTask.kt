@@ -4,6 +4,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
+import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.Internal
@@ -33,6 +34,10 @@ abstract class KeelPrepareRunTask : DefaultTask() {
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val extraArtifacts: ConfigurableFileCollection
+
+    /** 本地 `.keel` 产物路径：不同独立构建之间联调用，文件必须已构建。 */
+    @get:Internal
+    abstract val extraPluginFiles: ListProperty<String>
 
     /** 位置表（`*.keel-debug`）：本插件与显式配置的本地 Host。 */
     @get:InputFiles
@@ -78,6 +83,11 @@ abstract class KeelPrepareRunTask : DefaultTask() {
 
         pluginPackages.files.forEach { it.copyTo(plugins.resolve(it.name), overwrite = true) }
         extraArtifacts.files.forEach { it.copyTo(plugins.resolve(it.name), overwrite = true) }
+        extraPluginFiles.get().forEach { path ->
+            val file = java.io.File(path)
+            check(file.isFile) { "缺少额外插件包：$file；请先构建对应的插件工程" }
+            file.copyTo(plugins.resolve(file.name), overwrite = true)
+        }
 
         // 配置模板只做首次播种：已经存在的文件不覆盖，运行期写入的内容必须留下
         configTemplates.files.forEach { template ->

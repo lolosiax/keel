@@ -1,0 +1,17 @@
+{
+  "id": "dog",
+  "name": "Dog Plugin",
+  "logTag": "Dog",
+  "color": "#3388DD",
+  "version": "0.1.0",
+  "abiVersion": 1,
+  "entry": "keel_plugin_worker_main",
+  "provides": [],
+  "lib": {
+    "mingwX64": "lib/mingwX64/keel_plugin_dog.dll"
+  },
+  "resources": "resources/",
+  "requires": ["animal"],
+  "authors": ["lolosia"],
+  "description": "@PublicApi 实例方示例：Dog 继承 Animal，SpawnAnimal 实现 Callable"
+}

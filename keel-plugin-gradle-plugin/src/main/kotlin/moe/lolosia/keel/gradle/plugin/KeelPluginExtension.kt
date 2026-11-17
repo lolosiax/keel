@@ -64,6 +64,14 @@ open class KeelPluginExtension(private val project: Project) {
     /** 额外塞进运行目录的 `.keel` 工件坐标（能力包 / 依赖插件）。 */
     val runPlugins: MutableList<String> = mutableListOf()
 
+    /**
+     * 额外塞进运行目录的本地 `.keel` 产物路径。
+     *
+     * 用于不同独立构建之间的联调：对方的包还没发布到 Maven，但已经构建出产物。
+     * 文件必须已存在；缺失时 `keelPrepareRun` 会报出需要先构建哪个工程。
+     */
+    val runPluginFiles: MutableList<String> = mutableListOf()
+
     /** `keelRun` 启动 Host 时注入的环境变量。 */
     val runEnvironment: MutableMap<String, String> = mutableMapOf()
 
@@ -89,6 +97,11 @@ open class KeelPluginExtension(private val project: Project) {
     /** 追加一个运行期 `.keel` 工件，例如 `moe.lolosia.keel:keel-database-mariadb:0.1.0-SNAPSHOT@keel`。 */
     fun runPlugin(coordinate: String) {
         runPlugins += coordinate
+    }
+
+    /** 追加一个本地 `.keel` 产物，例如 `../keel-plugin-dog/build/keel/mingwX64/keel-plugin-dog.keel`。 */
+    fun runPluginFile(path: String) {
+        runPluginFiles += path
     }
 
     fun runEnv(name: String, value: String) {
