@@ -331,6 +331,11 @@ internal class KeelPublicApiGenerator(
             channel.lock().use {
                 targets.forEach { model ->
                     val packageDir = java.io.File(root, model.packageName.replace('.', '/'))
+                    writeApiFile(
+                        packageDir,
+                        "${model.simpleName}.kt",
+                        renderApiMirror(model, directoryNeeds),
+                    )
                     val keyWritten = writeApiFile(
                         packageDir,
                         "${model.simpleName}Key.kt",
@@ -377,6 +382,89 @@ internal class KeelPublicApiGenerator(
             }
         }
         return needs
+    }
+
+    private fun renderApiMirror(
+        model: TypeModel,
+        directoryNeeds: Map<String, Boolean>,
+    ): String = buildString {
+        appendLine(API_HEADER)
+        appendLine("package ${model.packageName}")
+        appendLine()
+        appendLine("import moe.lolosia.keel.api.annotation.PublicApi")
+        if (model.singleton) appendLine("import moe.lolosia.keel.api.annotation.Singleton")
+        val methods = if (model.kind == Kind.CLASS) {
+            model.methods.filter { method ->
+                val sharedParam = method.params.any { it.wire is Wire.Shared }
+                val sharedResultNeedsDirectory =
+                    (method.result as? Wire.Shared)?.let { directoryNeeds[it.fqn] == true } == true
+                if (sharedParam || sharedResultNeedsDirectory) {
+                    logger.warn(
+                        "镜像方法需要 PublicApiDirectory，暂不支持，跳过：${model.fqn}.${method.name}",
+                        model.declaration,
+                    )
+                    false
+                } else {
+                    true
+                }
+            }
+        } else {
+            model.methods
+        }
+        if (model.kind == Kind.CLASS) {
+            val usesValue = methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
+            val usesShared = methods.any { it.result is Wire.Shared }
+            if (usesValue) appendLine("import kotlinx.serialization.builtins.serializer")
+            appendLine("import moe.lolosia.keel.api.service.ServiceWire")
+            appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
+            appendLine("import moe.lolosia.keel.api.share.SharedProxy")
+            if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
+        }
+        appendLine()
+        appendLine("/** `${model.fqn}` 在 api 工件里的镜像；对应 impl 的同名类型。 */")
+        appendLine("@PublicApi")
+        if (model.singleton) appendLine("@Singleton")
+        when (model.kind) {
+            Kind.CLASS -> {
+                appendLine("open class ${model.simpleName} : SharedProxy {")
+                appendLine()
+                appendLine("    /** Host 分配的句柄；由登记方在首次跨界登记后写入。 */")
+                appendLine("    override var sharedHandle: Long = 0L")
+                methods.forEach { method ->
+                    appendLine()
+                    appendLine(
+                        "    open fun ${method.name}(${signature(method.params)}): ${method.resultFqn} {"
+                    )
+                    append(mirrorBody(model, method, "        "))
+                    appendLine("    }")
+                }
+                appendLine("}")
+            }
+            else -> {
+                appendLine("interface ${model.simpleName} {")
+                methods.forEachIndexed { index, method ->
+                    if (index > 0) appendLine()
+                    appendLine(
+                        "    ${if (method.suspend) "suspend " else ""}fun " +
+                            "${method.name}(${signature(method.params)}): ${method.resultFqn}"
+                    )
+                }
+                appendLine("}")
+            }
+        }
+    }
+
+    /** 镜像类的基类桩：只走 `base.*`，绝不调虚方法。 */
+    private fun mirrorBody(model: TypeModel, method: Method, indent: String): String = buildString {
+        val call = apiBridgeCall(model, method, "sharedHandle", "base.${method.name}")
+        when (val result = method.result) {
+            Wire.Unit -> appendLine("$indent$call")
+            is Wire.Shared -> {
+                appendLine("${indent}val ref = ServiceWire.decode(SharedRef.serializer(), $call)")
+                appendLine("${indent}return ${result.proxy}(ref.handle)")
+            }
+            else -> appendLine("${indent}return ServiceWire.decode(${serializer(result)}, $call)")
+        }
     }
 
     private fun renderApiKey(model: TypeModel): String = buildString {
@@ -461,8 +549,13 @@ internal class KeelPublicApiGenerator(
             appendLine("}")
         }
 
-    private fun apiBridgeCall(model: TypeModel, method: Method, handle: String): String {
-        val args = mutableListOf(handle, "\"${escape(model.id)}\"", "\"${method.name}\"")
+    private fun apiBridgeCall(
+        model: TypeModel,
+        method: Method,
+        handle: String,
+        lineName: String = method.name,
+    ): String {
+        val args = mutableListOf(handle, "\"${escape(model.id)}\"", "\"${escape(lineName)}\"")
         method.params.firstOrNull()?.let { param ->
             args += when (val wire = param.wire) {
                 is Wire.Shared ->
