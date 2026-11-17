@@ -74,8 +74,18 @@ internal class KeelPublicApiGenerator(
             return
         }
 
-        val declarations = resolver.getSymbolsWithAnnotation(PUBLIC_API)
+        val declared = resolver.getSymbolsWithAnnotation(PUBLIC_API)
             .filterIsInstance<KSClassDeclaration>()
+            .filter {
+                it.classKind == ClassKind.CLASS ||
+                    it.classKind == ClassKind.INTERFACE ||
+                    it.classKind == ClassKind.OBJECT
+            }
+            .toList()
+
+        // @KeelPluginMain 语义上等价于 @PublicApi + @Singleton。
+        // KSP 不会传播元注解，这里显式把插件本体并入声明集合。
+        val declarations = (declared + main)
             .filter {
                 it.classKind == ClassKind.CLASS ||
                     it.classKind == ClassKind.INTERFACE ||

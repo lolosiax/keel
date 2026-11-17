@@ -11,6 +11,11 @@ package moe.lolosia.keel.api.annotation
  *
  * @property id 可选的稳定标识；留空时由类型全名推导
  */
-@Target(AnnotationTarget.CLASS, AnnotationTarget.FUNCTION, AnnotationTarget.PROPERTY)
+@Target(
+    AnnotationTarget.CLASS,
+    AnnotationTarget.ANNOTATION_CLASS,
+    AnnotationTarget.FUNCTION,
+    AnnotationTarget.PROPERTY,
+)
 @Retention(AnnotationRetention.BINARY)
 annotation class PublicApi(val id: String = "")
