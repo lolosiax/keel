@@ -188,9 +188,10 @@ Debug executor 走另一条 ProfileState。
 | **M5 调试感知超时** | 调试期间放宽 API 层自己的等待上限 | ✅ |
 | **M6 API 桥接帧** | keel-api 应用日志插件，`Log.site()` 记命名帧 | ✅ |
 | **M7 单步** | `RESUME step:over\|into\|out`，按影子栈深度判定 | ✅ |
+| **M8 变量展开** | `DebugView` + 句柄表：当前帧变量、类成员级联展开、List/Map/Set/Array、`Throwable`、枚举 | ✅ |
 
-剩下的：异常断点、变量展开 / 局部变量、`KEEL_DEBUG_HOST` 远程、
-Host 侧 Ktor 协程的帧表包装。
+剩下的：异常断点、`KEEL_DEBUG_HOST` 远程、Host 侧 Ktor 协程的帧表包装、
+上游栈帧的局部变量、跨闭包捕获（见 M8 的边界）。
 
 ### 5.4 每个里程碑的改动
 
@@ -393,6 +394,57 @@ IR: enter(id) / exit(id)  ── 写进「当前协程的」FrameStack
 实测：停在 `HelloController.config` 第一行（294），`step:over` 停在下一行（295），
 `reason=step`，再 Continue 请求正常结束。
 
+**M8（变量展开）**
+
+K/N 没有可用的运行时反射，M3 只能显示命中瞬间的 `toString()`。M8 用「编译期生成 + 运行期句柄表」
+把对象摊平：展开时不再依赖任何反射。
+
+- **接口**：`keel-api` 的 `moe.lolosia.keel.api.debug.DebugView`（`commonMain`，release 也编译）
+  定义五个方法：`keelDebugTypeName()`、`keelDebugMemberCount()`、`keelDebugMemberName(index)`、
+  `keelDebugMemberType(index)`、`keelDebugMember(index)`。
+- **生成**：`DebugTypeTransformer` 在 IR 里给「本模块源码定义的普通类与 `object`」追加
+  `DebugView` 父类型 + 五个方法。每个方法是一个 `when (index)`，成员顺序 = 字段声明顺序，
+  所以类里只多 5 个方法、不随成员数膨胀。生成函数 `startOffset = UNDEFINED_OFFSET`，
+  插桩 pass 因此不会给它们插检查点。
+- **跳过规则**：接口 / 枚举 / 注解 / value class / 伴生对象 / lambda / 匿名对象 /
+  `expect` / `external` / `moe.lolosia.keel.api.debug` 包内的类，以及已经（递归）实现
+  `DebugView` 的类。只取实例字段；委托字段与编译器合成字段（名字带 `$`）不展示。
+  子类会再生成一份自己的实现，父类字段仍然可见。
+- **开关**：`keelLogger { debugValues = true }`，未配置时跟随 `debug`。
+  `keel-api` 自己设 `debugValues = true, debug = false`：它的模型要能展开，但不能给
+  `Debug` / `DebugValues` 递归插桩（且 api 的 `locationId` 跨 image 解析不到）。
+- **运行期**：`DebugValues` 在命中时把一帧的「名字 / 声明类型 / 预览 / 句柄」登记进句柄表，
+  句柄只在下一次命中之前有效（命中、恢复、断开都清表）。IDE 展开时按需枚举**一层**：
+  内置适配器（`Throwable`、枚举、`Collection` / `List` / `Set`、`Map`、`Array`）在前，
+  `DebugView` 的实例成员在后；上限 4096 个句柄、每个对象 200 个子成员。
+- **当前闭包**：这个阶段 lambda 还是「局部函数」（`LOCAL_FUNCTION_FOR_LAMBDA`）。捕获值在
+  函数体里以 `IrGetValue` 直接引用外层声明，所以插桩时扫描函数体、把引用到的外层值以
+  `captured.xxx` 上报；后端的 lambda lowering 会把同一批引用改写成闭包字段。
+  只收源码里声明的局部变量与普通函数的参数；IR 临时量（`tmp0` 等）和**外层 lambda 的
+  参数**（inline 之后可能已经不存在）跳过。lambda 自己的参数照常按名字上报，不显示 `this`。
+- **协议**：新增 `GET_MEMBERS(11)`（IDE → agent，payload 是 `ref`）、
+  `FRAME_VALUES(12)`（`locationId  count` + 每行 `name type preview ref`）、
+  `MEMBERS(13)`（`ref  stopSeq  typeName  count` + 每行 `name type preview childRef`）。
+  `VALUES(8)` 仍被 IDE 接受，用来兼容旧编译器插件生成的运行时。
+
+**明确不做的边界**（后续要补的话从这里接着做）：
+
+1. **跨闭包捕获**：只列当前 lambda 直接引用、且能安全改写的捕获（源码局部变量与普通函数
+   参数）。外层 lambda 的参数在 inline 之后可能已消失，这一版跳过；更外层闭包的捕获也
+   没有顺着 `$outer` 链找。
+2. **上游栈帧的局部变量**：只有栈顶帧带快照，调用链上其它帧没有变量。
+3. 当前函数体内的局部 `val` / `var`（没有被闭包捕获的那些）、返回值、`when` / 循环里的
+   临时变量都没有插桩。
+4. 任意表达式求值、修改变量值。
+5. **继承字段**：生成的实现只列**本类声明**的字段；子类的实现会覆盖父类方法，所以父类字段
+   当前看不到。要合并继承链得处理泛型类型替换，留到后续。
+6. **只读 backing field**：计算属性（`val x get() = ...`）不调用 getter，避免副作用与异常；
+   运行期另外用 `runCatching` 兜住 `toString()`，坏成员显示 `<error>`，不影响其它成员。
+7. 没有用 `debugValues` 编译的类（release 插件、第三方 klib）只能靠内置适配器展开。
+8. **ABI**：`debugValues` 改变 klib 的 IR 与类的父类型。debug 产物不要发布到仓库；
+   同一个 image 的所有模块（Host + 各插件）必须用同一套调试配置，否则链接时可能出现
+   `DebugView` 继承关系 / 虚表不一致。
+
 ### 5.5 协议 v0
 
 帧 = `type:u8 + length:i32 + payload`，payload 是 UTF-8、`\t` 分隔；**只传结构化字段，
@@ -402,8 +454,11 @@ IR: enter(id) / exit(id)  ── 写进「当前协程的」FrameStack
 |---|---|---|
 | agent → IDE | `HELLO` | `moduleId  buildId  arch`（arch 固定 `native`） |
 | IDE → agent | `BREAKPOINTS` | `version  locationId,locationId,...`（整表替换，只含当前模块的 id） |
-| agent → IDE | `VALUES` | `locationId  count  name  value  name  value...`（命中瞬间的参数快照，先于 `SUSPENDED`） |
-| agent → IDE | `SUSPENDED` | `locationId  threadId  module  reason  callers  correlation  creation`（`callers` = 当前帧、由内到外；`creation` = 协程创建栈，线程栈为空） |
+| agent → IDE | `FRAME_VALUES` | `locationId  count` + 每行 `name  type  preview  ref`（命中瞬间的变量快照，先于 `SUSPENDED`） |
+| agent → IDE | `VALUES` | `locationId  count  name  value ...`（旧版快照，只有字符串；为兼容保留） |
+| IDE → agent | `GET_MEMBERS` | `ref`（展开一个句柄；只在停住时回） |
+| agent → IDE | `MEMBERS` | `ref  stopSeq  typeName  count` + 每行 `name  type  preview  childRef` |
+| agent → IDE | `SUSPENDED` | `locationId  stopSeq  module  reason  callers  correlation  creation`（`callers` = 当前帧、由内到外；`creation` = 协程创建栈，线程栈为空；`stopSeq` 用于丢弃过期的展开应答） |
 | agent → IDE | `NAMES` | `locationId  owner  file  line`（运行期注册的命名帧，id 为负） |
 | agent → IDE | `WAITING` | `correlation  module  callers`（等待方快照，用于跨 image 拼栈） |
 | agent → IDE | `STACK` | `threadId  count` + `count` 行 `locationId  depth`（M3 暂未使用，栈随 `SUSPENDED` 走） |

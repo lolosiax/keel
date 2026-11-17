@@ -27,6 +27,12 @@ internal class KeelLoggerCliProcessor : CommandLineProcessor {
             required = false,
         ),
         CliOption(KeelLoggerOption.DEBUG, "<true|false>", "是否插入调试检查点", required = false),
+        CliOption(
+            KeelLoggerOption.DEBUG_VALUES,
+            "<true|false>",
+            "是否给类生成调试展开实现",
+            required = false,
+        ),
         CliOption(KeelLoggerOption.DEBUG_OUTPUT, "<path>", "位置表输出文件（.keel-debug）", required = false),
         CliOption(KeelLoggerOption.DEBUG_MODULE, "<id>", "位置表里的模块 id", required = false),
         CliOption(KeelLoggerOption.DEBUG_BUILD_ID, "<id>", "位置表里的 buildId", required = false),
@@ -41,6 +47,8 @@ internal class KeelLoggerCliProcessor : CommandLineProcessor {
                 configuration.put(KeelLoggerKeys.EXCEPTION_TRACE, value.toBooleanStrictOrNull() ?: true)
 
             KeelLoggerOption.DEBUG -> configuration.put(KeelLoggerKeys.DEBUG, value.toBooleanStrictOrNull() ?: true)
+            KeelLoggerOption.DEBUG_VALUES ->
+                configuration.put(KeelLoggerKeys.DEBUG_VALUES, value.toBooleanStrictOrNull() ?: true)
             KeelLoggerOption.DEBUG_OUTPUT -> configuration.put(KeelLoggerKeys.DEBUG_OUTPUT, value)
             KeelLoggerOption.DEBUG_MODULE -> configuration.put(KeelLoggerKeys.DEBUG_MODULE, value)
             KeelLoggerOption.DEBUG_BUILD_ID -> configuration.put(KeelLoggerKeys.DEBUG_BUILD_ID, value)

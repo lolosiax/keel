@@ -20,7 +20,7 @@ object KeelDebugWire {
     const val GET_STACK = 6
     const val DISCONNECT = 7
 
-    /** 命中瞬间的参数快照，先于 `SUSPENDED` 到达。 */
+    /** 旧版命中瞬间的参数快照，先于 `SUSPENDED` 到达（只有名字 + 字符串）。 */
     const val VALUES = 8
 
     /** 运行期注册的桥接帧：`locationId  name  file  line`。 */
@@ -28,6 +28,15 @@ object KeelDebugWire {
 
     /** 等待方快照：`correlation  module  callers`，用于跨 image 拼栈。 */
     const val WAITING = 10
+
+    /** IDE → agent：展开一个句柄，payload 是 `ref`。 */
+    const val GET_MEMBERS = 11
+
+    /** agent → IDE：一帧的变量快照 `locationId  count` + 每行 `name type preview ref`。 */
+    const val FRAME_VALUES = 12
+
+    /** agent → IDE：句柄的子成员 `ref  stopSeq  typeName  count` + 每行 `name type preview childRef`。 */
+    const val MEMBERS = 13
 
     private const val MAX_PAYLOAD = 1 shl 20
 

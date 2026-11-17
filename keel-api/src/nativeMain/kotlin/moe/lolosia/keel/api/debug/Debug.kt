@@ -36,6 +36,8 @@ object Debug {
     const val RESUME = 5
     const val GET_STACK = 6
     const val DISCONNECT = 7
+
+    /** 旧版参数快照（只有名字 + `toString()`）；为兼容旧编译器插件保留。 */
     const val VALUES = 8
 
     /** 运行期注册的「命名帧」（keel-api 里的桥接点，不参与编译期插桩）。 */
@@ -43,6 +45,15 @@ object Debug {
 
     /** 等待方快照：`correlation  module  callers`，用于跨 image 拼栈。 */
     const val WAITING = 10
+
+    /** IDE → agent：展开一个句柄，payload 是 `ref`。 */
+    const val GET_MEMBERS = 11
+
+    /** agent → IDE：一帧的值快照 `locationId  count` + 每行 `name type preview ref`。 */
+    const val FRAME_VALUES = 12
+
+    /** agent → IDE：句柄的子成员 `ref  stopSeq  typeName  count` + 每行 `name type preview childRef`。 */
+    const val MEMBERS = 13
 
     private const val MAX_PAYLOAD = 1 shl 20
     private const val RX_CAPACITY = 64 * 1024
@@ -100,8 +111,8 @@ object Debug {
     private var stopSeq = 0
     private var stopLocation = 0
 
-    /** 最近一次 [publish] 的快照；命中时随 `VALUES` 帧发出。 */
-    private var pendingValues: String? = null
+    /** 最近一次 [checkpoint] 的帧快照；命中时随 `FRAME_VALUES` 帧发出。 */
+    private var pendingFrame: String? = null
 
     /** 当前事件对应的 correlation；SUSPENDED 里带出去，IDE 用它找等待方。 */
     private var servingCorrelation = 0L
@@ -181,7 +192,27 @@ object Debug {
     }
 
     /** 所有线程都从这里经过；没有断点也没有单步时只有两次原子读。 */
-    fun checkpoint(locationId: Int) {
+    fun checkpoint(locationId: Int) = halt(locationId, null, null, null)
+
+    /**
+     * 命中时的检查点：先把当前帧的变量快照登记成句柄，再停住等 IDE。
+     *
+     * 编译器在 `if (Debug.shouldStop(id))` 分支里调用它，所以不命中时一次都不会执行；
+     * 值本身在命中瞬间求值（预览用 `toString()`，句柄是可展开对象的引用）。
+     */
+    fun checkpoint(
+        locationId: Int,
+        names: Array<String>,
+        types: Array<String>,
+        values: Array<Any?>,
+    ) = halt(locationId, names, types, values)
+
+    private fun halt(
+        locationId: Int,
+        names: Array<String>?,
+        types: Array<String>?,
+        values: Array<Any?>?,
+    ) {
         if (active.load() == 0) return
         if (halted.load() != 0) return
 
@@ -192,15 +223,23 @@ object Debug {
             if (!contains(ids, locationId)) return
         }
 
-        // 已经有线程停住时不打断它：只保证「停住的那个线程停住，其它线程继续跑」
+        // 先抢到 halted 再发布句柄：IDE 收到 SUSPENDED 之前不可能发 GET_MEMBERS
         if (!halted.compareAndSet(0, 1)) return
         // 单步只生效一次；先摘掉，恢复后按普通执行继续（此时若又来了新的 step 请求也不受影响）
         if (stepping) step.store(null)
+        val frame = if (names == null || types == null || values == null) {
+            null
+        } else {
+            guarded { DebugValues.frameValues(locationId, names, types, values) }
+        }
+        guarded { pendingFrame = frame }
         try {
             suspendAt(locationId, if (stepping) "step" else "breakpoint")
         } finally {
             stopLocation = 0
+            pendingFrame = null
             halted.store(0)
+            DebugValues.reset()
         }
     }
 
@@ -244,23 +283,6 @@ object Debug {
             else -> STEP_OVER
         }
         step.store(StepRequest(kind, stack.depth, stack))
-    }
-
-    /**
-     * 上报当前栈帧的参数快照。
-     *
-     * 编译器在命中分支里生成 `Debug.publish(id, "this", this, "context", context)`，
-     * 值在命中瞬间求值（`toString()`），随下一条 `SUSPENDED` 一起发给 IDE。
-     */
-    fun publish(locationId: Int, vararg values: Any?) {
-        if (values.isEmpty()) return
-        val text = buildString(64) {
-            values.forEachIndexed { index, value ->
-                if (index > 0) append('\t')
-                append(escape(value?.toString() ?: "null"))
-            }
-        }
-        guarded { pendingValues = "$locationId\t${values.size}\t$text" }
     }
 
     /**
@@ -424,9 +446,9 @@ object Debug {
             stopSeq++
             epoch = resumeEpoch.load()
 
-            pendingValues?.let { values ->
-                pendingValues = null
-                if (!sendFrame(VALUES, values)) return@guarded
+            pendingFrame?.let { frame ->
+                pendingFrame = null
+                if (!sendFrame(FRAME_VALUES, frame)) return@guarded
             }
             sent = sendFrame(
                 SUSPENDED,
@@ -483,9 +505,15 @@ object Debug {
                 // `step:over|into|out` 是单步；其它（`all` / `thread:<id>`）就是全量恢复
                 val text = fields.lastOrNull().orEmpty()
                 if (text.startsWith("step:")) armStep(text.removePrefix("step:"))
+                DebugValues.reset()
                 resumeEpoch.fetchAndAdd(1)
             }
             GET_STACK -> if (stopped) sendFrame(STACK, "$stopSeq\t1\t$stopLocation\t0")
+            GET_MEMBERS -> if (stopped) {
+                val ref = fields.getOrNull(0)?.toIntOrNull() ?: return
+                val payload = DebugValues.members(ref, stopSeq)
+                if (payload != null) sendFrame(MEMBERS, payload)
+            }
             DISCONNECT -> closeChannel("IDE 主动断开")
         }
     }
@@ -519,6 +547,7 @@ object Debug {
         rxSize = 0
         stops.store(IntArray(0))
         step.store(null)
+        DebugValues.reset()
         active.store(0)
         Log.info("调试通道已关闭：$reason", tag = "Debug")
     }
@@ -585,29 +614,7 @@ object Debug {
         }
     }
 
-    /** 值里可能有制表符 / 换行，帧载荷按 `\t` 分隔，先转义。 */
-    private fun escape(text: String): String {
-        var needs = false
-        for (char in text) {
-            if (char == '\\' || char == '\t' || char == '\n' || char == '\r') {
-                needs = true
-                break
-            }
-        }
-        if (!needs) return text
-        return buildString(text.length + 8) {
-            text.forEach { char ->
-                when (char) {
-                    '\\' -> append("\\\\")
-                    '\t' -> append("\\t")
-                    '\n' -> append("\\n")
-                    '\r' -> append("\\r")
-                    else -> append(char)
-                }
-            }
-        }
-    }
-
+    /** 帧头：`type:u8 + length:i32`。 */
     private const val HEADER_SIZE = 5
 }
 

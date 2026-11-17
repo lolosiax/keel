@@ -18,9 +18,11 @@ import org.jetbrains.kotlin.name.*
 internal class DebugSymbols(
     val debugClass: IrClassSymbol,
     val debugType: IrType,
+    /** `checkpoint(locationId)`：当前帧没有可上报的值时用。 */
     val checkpoint: IrSimpleFunctionSymbol,
+    /** `checkpoint(locationId, names, types, values)`：带变量快照；旧版 keel-api 里没有时为 null。 */
+    val checkpointValues: IrSimpleFunctionSymbol?,
     val shouldStop: IrSimpleFunctionSymbol,
-    val publish: IrSimpleFunctionSymbol,
     val enter: IrSimpleFunctionSymbol,
     val exit: IrSimpleFunctionSymbol,
 ) {
@@ -39,8 +41,9 @@ internal class DebugSymbols(
                     }
 
             val checkpoint = method("checkpoint", 1) ?: return null
+            // 旧版 keel-api 没有带快照的重载：只插纯检查点，变量栏为空
+            val checkpointValues = method("checkpoint", 4)
             val shouldStop = method("shouldStop", 1) ?: return null
-            val publish = method("publish", 2) ?: return null
             val enter = method("enter", 1) ?: return null
             val exit = method("exit", 1) ?: return null
 
@@ -48,8 +51,8 @@ internal class DebugSymbols(
                 debugClass = debugClass,
                 debugType = debugClass.owner.defaultType,
                 checkpoint = checkpoint,
+                checkpointValues = checkpointValues,
                 shouldStop = shouldStop,
-                publish = publish,
                 enter = enter,
                 exit = exit,
             )

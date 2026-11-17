@@ -5,6 +5,7 @@ package moe.lolosia.keel.logger
 import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.*
 import org.jetbrains.kotlin.ir.declarations.*
@@ -14,6 +15,8 @@ import org.jetbrains.kotlin.ir.symbols.*
 import org.jetbrains.kotlin.ir.types.*
 import org.jetbrains.kotlin.ir.types.impl.*
 import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
+import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 
 /**
  * 调试插桩：断点检查点 + 影子栈 + 命中时的参数快照。
@@ -136,75 +139,173 @@ internal class DebugSiteTransformer(
     }
 
     /**
-     * 断点语句：`if (Debug.shouldStop(id)) { Debug.publish(id, 名字, 值, ...); Debug.checkpoint(id) }`。
+     * 断点语句：`if (Debug.shouldStop(id)) { Debug.checkpoint(id, 名字, 类型, 值) }`。
      *
-     * 函数没有 `this` 也没有参数时退化成单独的 `Debug.checkpoint(id)`。
+     * 函数既没有 `this` 也没有参数时退化成单独的 `Debug.checkpoint(id)`。
+     * 有快照时**只发带快照的那一个调用**——它自己会停住，不能在前后再接一次 1 参调用，
+     * 否则恢复后会在同一行再命中一次。
      */
     private fun checkpoint(statement: IrStatement, locationId: Int): IrStatement {
         val start = statement.startOffset
         val end = statement.endOffset
         val builder = builderAt(start, end)
-        val checkpointCall = call(builder, symbols.checkpoint, locationId)
-        val pairs = snapshotValues(builder)
-        if (pairs.isEmpty()) return checkpointCall
+        val snapshot = snapshotValues(builder)
+        val checkpointValues = symbols.checkpointValues
+        if (snapshot.values.isEmpty() || checkpointValues == null) {
+            return call(builder, symbols.checkpoint, locationId)
+        }
 
         val shouldStop = builder.irCall(symbols.shouldStop).apply {
             initializeTargetShapeFromSymbol()
             dispatchReceiver = builder.irGetObjectValue(symbols.debugType, symbols.debugClass)
             arguments[receiverOffset(symbols.shouldStop)] = builder.irInt(locationId)
         }
-        val publish = builder.irCall(symbols.publish).apply {
+        val withValues = builder.irCall(checkpointValues).apply {
             initializeTargetShapeFromSymbol()
             dispatchReceiver = builder.irGetObjectValue(symbols.debugType, symbols.debugClass)
-            val offset = receiverOffset(symbols.publish)
+            val offset = receiverOffset(checkpointValues)
             arguments[offset] = builder.irInt(locationId)
-            arguments[offset + 1] = IrVarargImpl(
+            arguments[offset + 1] = stringArray(builder, snapshot.names)
+            arguments[offset + 2] = stringArray(builder, snapshot.types)
+            arguments[offset + 3] = IrVarargImpl(
                 start,
                 end,
                 anyArrayType(),
                 pluginContext.irBuiltIns.anyNType,
-                pairs,
+                snapshot.values,
             )
         }
         val unit = pluginContext.irBuiltIns.unitType
-        val thenBranch = IrBlockImpl(start, end, unit).apply {
-            statements.add(publish)
-            statements.add(checkpointCall)
-        }
-        return builder.irIfThen(unit, shouldStop, thenBranch)
+        return builder.irIfThen(unit, shouldStop, withValues)
     }
 
     /**
-     * 命中时要上报的值：`this` + 全部参数（扩展接收者也算参数）。
+     * 命中时要上报的变量：`this` + 全部参数（扩展接收者也算 `this`）。
+     *
+     * 当前函数是 lambda 时没有有意义的 `this`，改成列出它捕获的字段（`captured.xxx`）。
+     * 只覆盖**当前闭包直接持有**的捕获；再往上层的闭包要顺着 `$outer` 链找，
+     * 这一版明确不做（见 `doc/debug-design.md`）。
      *
      * 只取值、不递归展开；`toString()` 由运行期做，不在热路径上。
      */
-    private fun snapshotValues(builder: DeclarationIrBuilder): List<IrVarargElement> {
-        val function = currentScope?.scope?.scopeOwnerSymbol?.owner as? IrFunction ?: return emptyList()
-        val values = ArrayList<IrVarargElement>(8)
+    private fun snapshotValues(builder: DeclarationIrBuilder): Snapshot {
+        val function = currentScope?.scope?.scopeOwnerSymbol?.owner as? IrFunction
+            ?: return Snapshot(emptyList(), emptyList(), emptyList())
+        val names = ArrayList<IrExpression>(8)
+        val types = ArrayList<IrExpression>(8)
+        val values = ArrayList<IrExpression>(8)
+        val lambda = function.origin == IrDeclarationOrigin.LOCAL_FUNCTION_FOR_LAMBDA
+
         function.parameters.forEach { parameter ->
             when (parameter.kind) {
                 IrParameterKind.DispatchReceiver -> {
-                    values += builder.irString("this")
-                    values += builder.irGet(parameter)
+                    // lambda 在这个阶段还是「局部函数」，没有有意义的 this；捕获在下面单独扫
+                    if (!lambda) {
+                        add(builder, names, types, values, "this", parameter.type, builder.irGet(parameter))
+                    }
                 }
 
                 IrParameterKind.ExtensionReceiver -> {
-                    values += builder.irString("this")
-                    values += builder.irGet(parameter)
+                    val name = parameter.name
+                    if (!name.isSpecial && !name.asString().contains('$')) {
+                        add(builder, names, types, values, "this", parameter.type, builder.irGet(parameter))
+                    }
                 }
 
                 IrParameterKind.Regular -> {
                     if (parameter.isVararg || parameter.name.isSpecial) return@forEach
-                    values += builder.irString(parameter.name.asString())
-                    values += builder.irGet(parameter)
+                    add(
+                        builder,
+                        names,
+                        types,
+                        values,
+                        parameter.name.asString(),
+                        parameter.type,
+                        builder.irGet(parameter),
+                    )
                 }
 
                 else -> Unit
             }
         }
-        return values
+        if (lambda) captureValues(function, builder, names, types, values)
+        return Snapshot(names, types, values)
     }
+
+    /**
+     * lambda 捕获的外层局部变量。
+     *
+     * 这个阶段 lambda 还是「局部函数」（`LOCAL_FUNCTION_FOR_LAMBDA`），捕获值在函数体里
+     * 以 `IrGetValue` 直接引用外层声明；后端的 lambda lowering 会扫描函数体、把它们改写成
+     * 闭包字段。我们插进去的取值表达式也在函数体里，所以同样会被列入捕获并改写。
+     *
+     * 只取当前这层直接引用的值；再往外一层的闭包要顺着 `$outer` 链找（见设计文档的边界）。
+     */
+    private fun captureValues(
+        function: IrFunction,
+        builder: DeclarationIrBuilder,
+        names: MutableList<IrExpression>,
+        types: MutableList<IrExpression>,
+        values: MutableList<IrExpression>,
+    ) {
+        val seen = HashSet<String>()
+        function.body?.acceptChildrenVoid(object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) {
+                element.acceptChildrenVoid(this)
+            }
+
+            override fun visitGetValue(expression: IrGetValue) {
+                val owner = expression.symbol.owner as? IrValueDeclaration ?: return
+                if (owner.parent === function) return
+                when (owner) {
+                    // 只取源码里声明的局部变量；IR 临时量（tmp0、elvis 的 lhs 等）生命周期
+                    // 可能已经结束，塞进闭包会让后端报「使用未初始化变量」
+                    is IrVariable -> if (owner.origin != IrDeclarationOrigin.DEFINED) return
+                    // 外层 lambda 的参数在 inline 之后可能已不存在（`runCatching { it -> ... }`），
+                    // 引用它会生成「孤立参数」；只收普通函数的参数
+                    is IrValueParameter -> {
+                        if (owner.kind != IrParameterKind.Regular) return
+                        val ownerFunction = owner.parent as? IrFunction
+                        if (ownerFunction?.origin == IrDeclarationOrigin.LOCAL_FUNCTION_FOR_LAMBDA) return
+                    }
+
+                    else -> return
+                }
+                val name = owner.name.asString()
+                if (name.isEmpty() || owner.name.isSpecial || name.contains('$')) return
+                if (!seen.add(name)) return
+                add(
+                    builder,
+                    names,
+                    types,
+                    values,
+                    "captured.$name",
+                    owner.type,
+                    builder.irGet(owner),
+                )
+            }
+        })
+    }
+
+    private fun add(
+        builder: DeclarationIrBuilder,
+        names: MutableList<IrExpression>,
+        types: MutableList<IrExpression>,
+        values: MutableList<IrExpression>,
+        name: String,
+        type: IrType,
+        value: IrExpression,
+    ) {
+        names += builder.irString(name)
+        types += builder.irString(renderDebugType(type))
+        values += value
+    }
+
+    private class Snapshot(
+        val names: List<IrExpression>,
+        val types: List<IrExpression>,
+        val values: List<IrExpression>,
+    )
 
     /** 影子栈：入口压栈、`finally` 出栈。 */
     private fun wrapShadowStack(function: IrFunction, body: IrBlockBody, file: IrFile, frame: Frame) {
@@ -233,9 +334,19 @@ internal class DebugSiteTransformer(
         body.statements.add(tryExpression)
     }
 
-    /** `Array<Any?>`：变长参数 `publish(locationId, vararg values)` 的形参类型。 */
+    /** `Array<Any?>`：`checkpoint(locationId, names, types, values)` 的值数组。 */
     private fun anyArrayType(): IrType =
         pluginContext.irBuiltIns.arrayClass.typeWith(pluginContext.irBuiltIns.anyNType)
+
+    /** `Array<String>`：`checkpoint` 的名字 / 类型数组。 */
+    private fun stringArray(builder: DeclarationIrBuilder, values: List<IrExpression>): IrExpression =
+        IrVarargImpl(
+            builder.startOffset,
+            builder.endOffset,
+            pluginContext.irBuiltIns.arrayClass.typeWith(pluginContext.irBuiltIns.stringType),
+            pluginContext.irBuiltIns.stringType,
+            values,
+        )
 
     private fun call(
         builder: DeclarationIrBuilder,

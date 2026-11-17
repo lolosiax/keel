@@ -19,6 +19,14 @@ open class KeelLoggerExtension(objects: ObjectFactory) {
     /** 是否插入调试检查点并写出 `.keel-debug` 位置表；默认开启。 */
     val debug: Property<Boolean> = objects.property(Boolean::class.javaObjectType).convention(true)
 
+    /**
+     * 是否给类生成 `DebugView`（调试器展开对象成员用）。
+     *
+     * 不设默认值：未显式配置时跟随 [debug]。`keel-api` 自己会设成 `true` 而关掉 [debug]，
+     * 这样它的类型可展开、又不会给 `Debug` 递归插桩。
+     */
+    val debugValues: Property<Boolean> = objects.property(Boolean::class.javaObjectType)
+
     /** 位置表输出目录；默认 `build/keel-debug`。 */
     val debugOutput: DirectoryProperty = objects.directoryProperty()
 
