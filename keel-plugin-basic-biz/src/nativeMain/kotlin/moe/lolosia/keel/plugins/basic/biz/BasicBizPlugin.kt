@@ -12,7 +12,7 @@ import moe.lolosia.keel.plugins.basic.biz.db.UserRepository
  * basic-biz 的生命周期入口。
  *
  * 注解路由由 `keel-router-ksp` 生成（`AuthController` / `UserController` / `SettingController` /
- * `MenuController`），服务由 `@ModuleServiceProvider` 注册；这里只做两件普通路由做不到的事：
+ * `MenuController`），服务由 `@Singleton` 实现经 KSP 注册为本插件的公开单例；这里只做两件普通路由做不到的事：
  *
  * 1. 启动时幂等检查表结构（数据库不可达只告警，不阻断启用）；
  * 2. 注册头像的取件路由（要按文件扩展名回 `image/png` / `image/jpeg`，注解返回值只支持固定类型）。

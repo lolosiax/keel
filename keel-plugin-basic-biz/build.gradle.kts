@@ -1,3 +1,5 @@
+import com.google.devtools.ksp.gradle.KspExtension
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
@@ -12,6 +14,23 @@ keelPlugin {
     target("mingwX64")
     // 插件版本与 keel 版本不是一回事，必须显式指定，否则会去解析 0.1.0-SNAPSHOT 以外的坐标
     keelVersion = libs.versions.keel.get()
+    // plugin.json 声明 requires: ["database"]，本地联调时把能力包一起放进运行目录
+    runPlugin("moe.lolosia.keel:keel-database-mariadb:${libs.versions.keel.get()}@keel")
+    // 联调本仓库的 Host 源码：直接用本地 debug Host（mavenLocal 里的发布版可能落后于 share 协议）
+    runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
+    runHostDebugDir = "../keel-host/build/keel-debug"
+}
+
+// api 工件由 impl 侧 KSP 生成到 api/src/commonMain/kotlin（V1 提交制，产物随仓库提交）
+extensions.configure<KspExtension> {
+    arg("keel.api.dir", file("api/src/commonMain/kotlin").absolutePath)
+}
+
+// api 子工程的编译入口依赖这个任务：三个 target 产物相同，跑 host 目标即可
+tasks.register("keelApiGenerate") {
+    group = "keel"
+    description = "把 @PublicApi 的镜像 / 代理 / Key / 访问器写入 api/src/commonMain/kotlin"
+    dependsOn("kspKotlinMingwX64")
 }
 
 kotlin {
@@ -28,7 +47,6 @@ kotlin {
         }
         commonMain.dependencies {
             api("moe.lolosia.keel:keel-api:${libs.versions.keel.get()}")
-            api("moe.lolosia.keel:keel-plugin-basic-biz-api:${libs.versions.keel.get()}")
             api("moe.lolosia.keel:keel-plugin-rbac-api:${libs.versions.keel.get()}")
             implementation(libs.kotlinx.datetime)
         }

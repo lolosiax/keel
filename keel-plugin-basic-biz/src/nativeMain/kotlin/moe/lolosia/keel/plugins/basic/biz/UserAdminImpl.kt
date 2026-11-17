@@ -1,7 +1,7 @@
 package moe.lolosia.keel.plugins.basic.biz
 
 import moe.lolosia.keel.api.PluginContext
-import moe.lolosia.keel.api.annotation.ModuleServiceProvider
+import moe.lolosia.keel.api.annotation.Singleton
 import moe.lolosia.keel.api.web.ApiException
 import moe.lolosia.keel.plugins.basic.biz.api.dto.*
 import moe.lolosia.keel.plugins.basic.biz.api.service.UserAdmin
@@ -15,7 +15,7 @@ import moe.lolosia.keel.plugins.basic.biz.db.toRow
  * 绑定表（`sys_user_roles`）的写归 basic-biz（见 basic-stack-design §5.3）；
  * 组定义与权限规则不在本插件里。
  */
-@ModuleServiceProvider
+@Singleton
 class UserAdminImpl(private val context: PluginContext) : UserAdmin {
 
     override suspend fun create(req: UserCreateReq, operatorId: String?): UserRow =

@@ -43,7 +43,7 @@
 | `keel-database-api/` | `keel-database-api` | 数据库能力 ABI + 插件侧 Kotlin 门面（不含驱动、不含加载器） | 是 |
 | `keel-database-mariadb/` | `keel-database-mariadb` | `kind: capability` 的 MariaDB 驱动包（纯 C，打成 `.keel`） | 是（`.keel`） |
 | `keel-plugin-rbac-api/` | `keel-plugin-rbac-api` | rbac 契约：`RbacReader` / `RbacAdmin` / `PermissionCatalog` + DTO + `ROLE_ID_*` | 是 |
-| `keel-plugin-basic-biz-api/` | `keel-plugin-basic-biz-api` | basic-biz 契约：用户 / 账户 / 设置接口 + DTO | 是 |
+| `keel-plugin-basic-biz/` | `keel-plugin-basic-biz` + `api/`（坐标 `keel-plugin-basic-biz-api`） | 用户 / 账户 / 设置插件；契约与 DTO 在 impl，api 由 KSP 生成 | 是 |
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
 | `keel-launcher/` | `keel-launcher` | 单文件发行版入口，静态链接 Host 并内嵌插件 | 是（可执行文件） |
 | `keel-plugin-hello/` | `keel-plugin-hello` | 示例插件；新插件按 `keel-plugin-<id>/` 平铺在顶层 | 是 |
@@ -56,7 +56,8 @@
 keel-*-gradle-plugin / keel-router-ksp ──(构建期)──> keel-plugin-*  (KSP / 打包 / 发布)
 keel-api  <──  keel-host  <──  keel-launcher
 keel-api  <──  keel-database-api  <──  keel-plugin-*
-keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-basic-biz-api
+keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-basic-biz（impl）
+keel-api  <──  keel-plugin-basic-biz/api（契约工件，由 impl 的 @PublicApi 生成）
 keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-rbac（实现）
 keel-database-mariadb ──(仅头文件)──> keel-database-api / keel-abi
 ```
@@ -64,7 +65,8 @@ keel-database-mariadb ──(仅头文件)──> keel-database-api / keel-abi
 - `keel-api` **不得**依赖 `keel-host`、`keel-launcher`、Ktor 或任何第三方服务端库；它是对外承诺的稳定面。
 - `keel-plugin-*` 只能依赖 `keel-api`、`keel-database-api` 与各 `-api` 契约库（以及自己声明的库）；
   需要宿主能力时走 API，不要反向 include `keel-host`。
-- `*-api` 是纯契约（接口 + DTO + `ServiceKey`），**不含实现、不含表结构**；实现方才能依赖数据库能力。
+- `*-api` 是消费方工件：v2 由 impl 的 `@PublicApi` 生成（镜像 / 代理 / Key / DTO，随仓库提交），
+  impl **不依赖**自己的 api；`keel-plugin-rbac-api` 仍是手写 v1 契约（实现归 klive）。
 - 跨构建的依赖一律写 Maven 坐标 `moe.lolosia.keel:<artifact>:<version>`；在根 composite 下 Gradle 会自动替换成本地工程。
 
 ## 2. 构建与验证
@@ -131,7 +133,7 @@ gradlew -p keel-plugin-ksp publish
 | `keel-abi` | C ABI 静态库 + 头文件工件 |
 | `keel-database-api` | 数据库能力包 ABI + 插件侧 Kotlin 门面（数据插件的唯一查库依赖，不含驱动） |
 | `keel-plugin-rbac-api` | rbac 契约库（第三方只依赖它就能读组 / 规则、做权限管理） |
-| `keel-plugin-basic-biz-api` | basic-biz 契约库（用户查询 / 管理、账户、运行时设置） |
+| `keel-plugin-basic-biz-api` | basic-biz 的 api 工件（`keel-plugin-basic-biz/api/`，全生成：镜像 / 代理 / Key / DTO） |
 | `keel-plugin-<id>` | 功能插件，`<id>` 与 `plugin.json` 的 `id` 一致 |
 | `keel-database-<driver>` | `kind: capability` 的数据库驱动包（`keel-database-mariadb` / `-pgsql` …），丢进 `plugins/` |
 | `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` | 构建期 Gradle 插件 |
@@ -454,7 +456,8 @@ keel-database-api/src/nativeCpp/keel_database.h     数据库能力 C ABI（唯�
 keel-database-api/src/nativeMain/…/database/        KeelDatabase / Row / QueryResult / DbValue / currentDatabase()
 keel-database-mariadb/src/nativeCpp/keel_database_mariadb.c   纯 C 能力包（当前后端仅 select 1）
 keel-plugin-rbac-api/src/commonMain/…/rbac/api/      RbacReader / RbacAdmin / PermissionCatalog + DTO + RbacServices
-keel-plugin-basic-biz-api/src/commonMain/…/basic/biz/api/  UserDirectory / UserAdmin / AccountAdmin / SettingApi + DTO
+keel-plugin-basic-biz/src/commonMain/…/basic/biz/api/  UserDirectory / UserAdmin / AccountAdmin / SettingApi + DTO（@PublicApi）
+keel-plugin-basic-biz/api/src/commonMain/…/basic/biz/api/  由 KSP 生成（V1 提交制，勿手改）
 keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   Plugin / PluginContext / PluginMetadata / PluginRegistry / KeelServer / PluginLogger / Scheduler / TaskHandle
   Log.kt                              统一日志门面（of / 六个级别 / install(LogSink)）

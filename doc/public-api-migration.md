@@ -86,7 +86,7 @@ v1 的设计经验全部保留（见 §3），只删除机制本身。
 - 无状态方法的 `SharedCall` 路径；
 - 提供侧自动注册与 `KeelPluginPublicApi` 生命周期。
 
-### 步骤 3：basic-biz / rbac（有 DTO）
+### 步骤 3：basic-biz（已完成）/ rbac（由 klive 负责）
 
 这是主要工作量，依赖 **DTO 镜像生成**（2b-2）：
 
@@ -97,7 +97,14 @@ v1 的设计经验全部保留（见 §3），只删除机制本身。
 5. 消费方改为依赖新坐标（坐标不变）并重新编译；
 6. 冒烟：`UserDirectory.byId / page / search` 等原调用全部通过。
 
-如果 DTO 被多个 provider 共用，优先放公共 `-dto` 模块，避免每个 impl 各复制一份。
+basic-biz 已完成：契约与 DTO 迁入 `keel-plugin-basic-biz/src/commonMain/…/api/`，
+`api/` 子工程由 KSP 生成；`@Singleton` 实现支持 `PluginContext` 构造注入。
+运行期冒烟（本地 Host + database 能力包）确认五个公开单例全部登记，
+`SettingApi.snapshot()` 经 `PublicApiBridge` 往返返回 `allowHiddenFiles=false`；
+数据库驱动仍是桩（只支持 `select 1`），`UserDirectory` 的真实查询留给接入 libmariadb 后验证。
+
+rbac 的实现插件在 klive，**本次不迁**：`keel-plugin-rbac-api` 保持手写 v1 契约，
+等 klive 侧迁移时一起改成 `@PublicApi` + `api/` 生成。
 
 ### 步骤 4：删除 v1
 
@@ -117,8 +124,8 @@ v1 的设计经验全部保留（见 §3），只删除机制本身。
 
 - [x] animal：2b 生成物替换手写 api，dog 冒烟输出与现在一致。
 - [x] hello：`@PublicApi` + `@Singleton` 接入，`ctx.helloApi` 生成，自检经 `requireInstance` 往返通过，无 `@ModuleService`。
-- [ ] basic-biz：`UserDirectory` 原调用通过，DTO 字段/默认值一致。
-- [ ] rbac：原有权限查询调用通过。
+- [x] basic-biz：契约 / DTO 迁入 impl，生成 `api/`；五个单例登记 + `SettingApi.snapshot()` 往返通过。
+- [ ] rbac：实现插件在 klive，本次不迁；`keel-plugin-rbac-api` 暂留 v1。
 - [ ] `keelApiCheck` 通过（V1 提交制）。
 - [ ] 全仓库无 `@ModuleService` / `ServiceCall` / `ctx.modules` 引用。
 - [ ] Host 侧 `SERVICE_CALL` 处理器删除后，全量构建通过。
