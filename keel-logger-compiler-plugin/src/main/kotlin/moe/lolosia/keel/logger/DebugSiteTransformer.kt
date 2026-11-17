@@ -239,7 +239,9 @@ internal class DebugSiteTransformer(
      * 以 `IrGetValue` 直接引用外层声明；后端的 lambda lowering 会扫描函数体、把它们改写成
      * 闭包字段。我们插进去的取值表达式也在函数体里，所以同样会被列入捕获并改写。
      *
-     * 只取当前这层直接引用的值；再往外一层的闭包要顺着 `$outer` 链找（见设计文档的边界）。
+     * 只取当前这层直接引用的值，不进嵌套 lambda / 局部类：它们的变量由各自的 lowering
+     * 处理，塞到这里会让外层闭包的构造引用一个本层不存在的变量。再往外一层的闭包要
+     * 顺着 `$outer` 链找（见设计文档的边界）。
      */
     private fun captureValues(
         function: IrFunction,
@@ -253,6 +255,12 @@ internal class DebugSiteTransformer(
             override fun visitElement(element: IrElement) {
                 element.acceptChildrenVoid(this)
             }
+
+            /** 嵌套的 lambda / 局部函数有自己的捕获集合，后端会单独 lowering；见类注释。 */
+            override fun visitFunction(declaration: IrFunction) = Unit
+
+            /** 局部类的成员初始化同样属于类自己的作用域。 */
+            override fun visitClass(declaration: IrClass) = Unit
 
             override fun visitGetValue(expression: IrGetValue) {
                 val owner = expression.symbol.owner as? IrValueDeclaration ?: return
