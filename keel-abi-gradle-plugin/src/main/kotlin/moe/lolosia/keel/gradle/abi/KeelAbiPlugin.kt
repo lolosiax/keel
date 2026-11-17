@@ -3,6 +3,7 @@ package moe.lolosia.keel.gradle.abi
 import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.initialization.IncludedBuild
 import org.gradle.api.tasks.Sync
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
@@ -122,10 +123,12 @@ class KeelAbiPlugin : Plugin<Project> {
 
         val version = extension.version ?: project.version.toString()
         val default = project.file("../keel-abi/build/keel/keel-abi-$version.zip")
-        if (default.isFile) return default
 
-        // 还没打包过：只要 composite 里有 keel-abi，就让解压任务依赖它的打包任务
+        // composite 里有 keel-abi 时直接用兄弟构建的打包产物：解压任务会依赖它的打包任务，
+        // 首次构建（产物还不存在）也能按依赖顺序生成，不必先发布到 Maven。
         if (includedAbiBuild(project) != null) return default
+
+        if (default.isFile) return default
 
         return resolveFromRepository(project, version)
     }
@@ -150,8 +153,15 @@ class KeelAbiPlugin : Plugin<Project> {
         }
     }
 
-    private fun includedAbiBuild(project: Project) =
-        project.gradle.includedBuilds.firstOrNull { it.name == "keel-abi" }
+    /**
+     * 找参与当前构建的 `keel-abi`。
+     *
+     * 顶层构建直接看自己的 `includedBuilds`；被 composite 聚合的构建（`keel-host` 等）
+     * 自己的 `includedBuilds` 是空的，兄弟构建挂在父构建上，要往上一层找。
+     */
+    private fun includedAbiBuild(project: Project): IncludedBuild? =
+        project.gradle.includedBuilds.firstOrNull { it.name == ABI_BUILD_NAME }
+            ?: project.gradle.parent?.includedBuilds?.firstOrNull { it.name == ABI_BUILD_NAME }
 
     private fun KotlinNativeTarget.suffix(): String =
         name.replaceFirstChar { it.uppercaseChar() }
@@ -159,6 +169,9 @@ class KeelAbiPlugin : Plugin<Project> {
     private companion object {
         /** 从 Maven 解析 ABI 包的配置名。 */
         const val ABI_ARCHIVE = "keelAbiArchive"
+
+        /** 兄弟构建 `keel-abi` 的名字（composite 聚合时按它查找）。 */
+        const val ABI_BUILD_NAME = "keel-abi"
 
         /**
          * 插件 dylib 固定对外导出的符号。

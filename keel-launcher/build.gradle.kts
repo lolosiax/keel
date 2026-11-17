@@ -66,7 +66,8 @@ fun registerLauncherPackage(target: String, release: Boolean): TaskProvider<Zip>
     val suffix = target.replaceFirstChar { it.uppercaseChar() }
     val kind = if (release) "release" else "debug"
     val taskName = "keelLauncherPackage" + (if (release) "Release" else "") + suffix
-    val fileName = if (target.startsWith("mingw")) "keel.exe" else "keel"
+    // K/N 在非 Windows 目标上给可执行文件加 `.kexe` 后缀
+    val fileName = if (target.startsWith("mingw")) "keel.exe" else "keel.kexe"
 
     // strip 任务要在 Zip 的配置块之外注册（Gradle 9 不允许嵌套 register）
     val stripTask = if (release) {
