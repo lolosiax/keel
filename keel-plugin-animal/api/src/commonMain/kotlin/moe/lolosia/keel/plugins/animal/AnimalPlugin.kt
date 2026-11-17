@@ -1,10 +1,15 @@
 package moe.lolosia.keel.plugins.animal
 
+import moe.lolosia.keel.api.annotation.PublicApi
+import moe.lolosia.keel.api.annotation.Singleton
+
 /**
  * 声明方插件的跨插件视图。
  *
- * 只导出标了 `@PublicApi` 的成员；生命周期钩子不参与共享。
+ * 插件本体是公开单例，所以镜像上同时标 `@Singleton`，由 KSP 生成 `ctx.animalPlugin`。
  */
+@PublicApi
+@Singleton
 interface AnimalPlugin {
 
     /**

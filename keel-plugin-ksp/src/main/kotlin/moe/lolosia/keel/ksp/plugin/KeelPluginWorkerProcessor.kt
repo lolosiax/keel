@@ -5,6 +5,9 @@ import com.google.devtools.ksp.symbol.KSAnnotated
 import com.google.devtools.ksp.symbol.KSClassDeclaration
 import com.google.devtools.ksp.validate
 
+/** api 工件的落点；由插件构建通过 `ksp { arg(...) }` 传入。 */
+private const val API_DIR_OPTION = "keel.api.dir"
+
 /**
  * 插件 Worker 入口生成器。
  *
@@ -17,12 +20,17 @@ import com.google.devtools.ksp.validate
 class KeelPluginWorkerProcessorProvider : SymbolProcessorProvider {
 
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        KeelPluginWorkerProcessor(environment.codeGenerator, environment.logger)
+        KeelPluginWorkerProcessor(
+            codeGenerator = environment.codeGenerator,
+            logger = environment.logger,
+            apiDir = environment.options[API_DIR_OPTION]?.takeIf { it.isNotBlank() },
+        )
 }
 
 private class KeelPluginWorkerProcessor(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
+    private val apiDir: String?,
 ) : SymbolProcessor {
 
     private var generated = false
@@ -60,7 +68,7 @@ private class KeelPluginWorkerProcessor(
         }
 
         // @PublicApi 的注册表与 Worker 入口成对生成：入口固定引用 KeelPluginPublicApi
-        publicApi.generate(resolver, main)
+        publicApi.generate(resolver, main, apiDir)
 
         val file = codeGenerator.createNewFile(
             dependencies = Dependencies(false, *listOfNotNull(main.containingFile).toTypedArray()),

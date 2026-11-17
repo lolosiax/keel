@@ -1,12 +1,9 @@
+// 由 keel-plugin-ksp 生成，不要手改。
 package moe.lolosia.keel.plugins.animal
 
 import moe.lolosia.keel.api.PluginContext
 
-/**
- * 声明方插件单例的访问器。
- *
- * 与 `ctx.<service>` 同形：显式 Key、无反射；返回的是经 Host 路由的本地代理。
- */
+/** 声明方插件 `moe.lolosia.keel.plugins.animal.AnimalPlugin` 的单例访问器。 */
 val PluginContext.animalPlugin: AnimalPlugin
     get() {
         val directory = publicApi

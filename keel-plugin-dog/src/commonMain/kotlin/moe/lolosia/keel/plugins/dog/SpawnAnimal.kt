@@ -37,7 +37,7 @@ open class SpawnAnimal(private val api: PublicApiDirectory? = null) : Callable, 
             dispatcher = DogDispatcher(dog),
             overrides = setOf("bark"),
         )
-        dog.attachHandle(ref.handle)
+        dog.sharedHandle = ref.handle
         animal = dog
         Log.info("SpawnAnimal.initialization: Dog(handle=${ref.handle})")
     }

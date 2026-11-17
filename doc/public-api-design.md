@@ -443,11 +443,15 @@ else                       → owner            // 纯接口直接给所有者
 | Phase 2（`9b23fbc`） | `createInstance` + `initialization` 状态机 | 已完成 |
 | Phase 2a（`507776e`） | KSP 生成 impl 侧注册表并接入生命周期 | 已完成 |
 | Phase 2a（`3c9bc15`） | KSP 生成 impl 侧 dispatcher / shadow / proxy，删除手写胶水 | 已完成 |
-| **2b** | api 全生成：镜像 / 代理 / Key / 访问器 / DTO 镜像 | 待开始（方案已定） |
+| **2b** | api 生成：代理 / Key / 访问器（V1 提交制，镜像仍手写） | 已完成 |
+| 2b-2 | api 生成：镜像 / DTO 镜像 | 待开始 |
 | 2c | 消费方子类胶水：从 api klib 读契约，生成 overrides 与 dispatcher | 待开始 |
 | 3 | v1 迁移：hello → basic-biz / rbac → 删除 `@ModuleService` | 待开始 |
 
-当前 `keel-plugin-animal-api` 仍是手写的 v2 原型；2b 会把它换成 `api/` 生成物。v1 的 `@ModuleService` 模块仍在，迁移前保持可用。
+2b 采用 V1 提交制：KMP 下 KSP 的 `CodeGenerator` 只能写目标 fragment，commonMain 看不到生成声明；
+因此由 impl 侧 KSP 通过 `keel.api.dir` 直接写入 `api/src/commonMain/kotlin`，产物随仓库提交。
+当前 animal 的 `api/` 子工程里，镜像（`Animal` / `Callable` / `AnimalPlugin`）仍手写；
+`XxxProxy` / `XxxKey` / `ctx.xxx` 由 KSP 生成。
 
 ---
 

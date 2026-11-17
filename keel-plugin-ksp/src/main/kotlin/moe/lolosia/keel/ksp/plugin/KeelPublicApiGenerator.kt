@@ -53,6 +53,11 @@ internal class KeelPublicApiGenerator(
     ) {
         val hasBase: Boolean get() = kind != Kind.INTERFACE
         val packageName: String get() = fqn.substringBeforeLast('.')
+        val singleton: Boolean
+            get() = kind == Kind.PLUGIN ||
+                declaration.annotations.any {
+                    it.annotationType.resolve().declaration.qualifiedName?.asString() == SINGLETON
+                }
         val dispatcherNeedsDirectory: Boolean get() = methods.any { it.result is Wire.Shared }
         val proxyFqn: String get() = "$packageName.${simpleName}Proxy"
         val shadowFqn: String get() = "$packageName.${simpleName}Shadow"
@@ -67,7 +72,7 @@ internal class KeelPublicApiGenerator(
 
     private class Instantiation(val expression: String, val usesPlugin: Boolean)
 
-    fun generate(resolver: Resolver, main: KSClassDeclaration) {
+    fun generate(resolver: Resolver, main: KSClassDeclaration, apiDir: String? = null) {
         val mainFqn = main.qualifiedName?.asString()
         if (mainFqn == null) {
             logger.error("@KeelPluginMain 只能标在具名类上", main)
@@ -157,6 +162,15 @@ internal class KeelPublicApiGenerator(
             code = renderSetup(mainFqn, models, handlerEntries),
             dependencies = dependencies,
         )
+
+        if (apiDir != null) {
+            emitApi(models, apiDir)
+        } else if (models.any { !it.manual && it.kind != Kind.PLUGIN }) {
+            logger.warn(
+                "存在 @PublicApi 类型但本构建没有 api 工程；如需导出，创建 api/ 并配置 keel.api.dir",
+                main,
+            )
+        }
     }
 
     // ---------------------------------- 模型提取 ----------------------------------
@@ -286,6 +300,248 @@ internal class KeelPublicApiGenerator(
     }
 
     // ---------------------------------- 渲染 ----------------------------------
+
+    // ---------------------------------- api 工件（V1 提交制） ----------------------------------
+
+    /**
+     * 把 api 侧需要的代理 / Key / 访问器直接写进 `api/src/commonMain/kotlin`。
+     *
+     * KSP 的 `CodeGenerator` 只能写当前编译输出（在 KMP 里是目标 fragment，common 代码看不到），
+     * 所以这里用普通文件写入；落点由 `keel.api.dir` 指定，生成物随仓库提交。
+     * 只写 `XXXProxy.kt` / `XXXKey.kt` / `XXXAccessor.kt`，不碰镜像；
+     * 已存在且不是生成物的文件绝不覆盖。
+     */
+    private fun emitApi(models: List<TypeModel>, dir: String) {
+        val targets = models.filter { !it.manual && it.supported }
+        if (targets.isEmpty()) return
+
+        val root = java.io.File(dir)
+        root.mkdirs()
+        val directoryNeeds = apiDirectoryNeeds(targets)
+        // 三个 target 各跑一次 KSP，可能并发；用文件锁串行化
+        val lock = java.io.File(
+            System.getProperty("java.io.tmpdir"),
+            "keel-api-${dir.hashCode()}.lock",
+        )
+        java.nio.channels.FileChannel.open(
+            lock.toPath(),
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.WRITE,
+        ).use { channel ->
+            channel.lock().use {
+                targets.forEach { model ->
+                    val packageDir = java.io.File(root, model.packageName.replace('.', '/'))
+                    val keyWritten = writeApiFile(
+                        packageDir,
+                        "${model.simpleName}Key.kt",
+                        renderApiKey(model),
+                    )
+                    val proxyWritten = writeApiFile(
+                        packageDir,
+                        "${model.simpleName}Proxy.kt",
+                        renderApiProxy(model, directoryNeeds),
+                    )
+                    if (!model.singleton) return@forEach
+                    if (!keyWritten || !proxyWritten) {
+                        logger.warn(
+                            "api 的 Key / Proxy 被手写占用，跳过访问器：${model.fqn}",
+                            model.declaration,
+                        )
+                        return@forEach
+                    }
+                    writeApiFile(
+                        packageDir,
+                        "${model.simpleName}Accessor.kt",
+                        renderApiAccessor(model, directoryNeeds),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun apiDirectoryNeeds(models: List<TypeModel>): Map<String, Boolean> {
+        val needs = models.associate { it.fqn to false }.toMutableMap()
+        var changed = true
+        while (changed) {
+            changed = false
+            models.forEach { model ->
+                if (needs[model.fqn] == true) return@forEach
+                val value = model.methods.any { method ->
+                    method.params.any { it.wire is Wire.Shared } ||
+                        (method.result as? Wire.Shared)?.let { needs[it.fqn] == true } == true
+                }
+                if (value) {
+                    needs[model.fqn] = true
+                    changed = true
+                }
+            }
+        }
+        return needs
+    }
+
+    private fun renderApiKey(model: TypeModel): String = buildString {
+        appendLine(API_HEADER)
+        appendLine("package ${model.packageName}")
+        appendLine()
+        appendLine("import moe.lolosia.keel.api.share.PublicApiKey")
+        appendLine()
+        appendLine("/** `${model.fqn}` 的跨插件类型 id；声明方与消费方必须一致。 */")
+        appendLine("const val ${apiConstName(model)}: String = \"${escape(model.id)}\"")
+        appendLine()
+        appendLine("/** `${model.fqn}` 的查找键。 */")
+        appendLine(
+            "val ${apiKeyName(model)} = PublicApiKey<${model.simpleName}>(${apiConstName(model)})"
+        )
+    }
+
+    private fun renderApiProxy(model: TypeModel, directoryNeeds: Map<String, Boolean>): String =
+        buildString {
+            appendLine(API_HEADER)
+            appendLine("package ${model.packageName}")
+            appendLine()
+
+            val needsDirectory = directoryNeeds[model.fqn] == true
+            val usesValue = model.methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
+            val usesShared = model.methods.any { method ->
+                method.params.any { it.wire is Wire.Shared } || method.result is Wire.Shared
+            }
+            val usesBytes = model.methods.any { method ->
+                method.params.any { it.wire is Wire.Bytes } || method.result is Wire.Bytes
+            }
+            if (usesValue) appendLine("import kotlinx.serialization.builtins.serializer")
+            if (usesBytes) appendLine("import kotlinx.serialization.builtins.ByteArraySerializer")
+            appendLine("import moe.lolosia.keel.api.service.ServiceWire")
+            appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
+            if (needsDirectory) appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
+            if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
+            appendLine()
+
+            appendLine("/** `${model.fqn}` 在消费方运行时里的代理。 */")
+            val directory = if (needsDirectory) ", private val directory: PublicApiDirectory" else ""
+            when (model.kind) {
+                Kind.CLASS -> {
+                    appendLine("class ${model.simpleName}Proxy(")
+                    appendLine("    proxyHandle: Long$directory,")
+                    appendLine(") : ${model.fqn}() {")
+                    appendLine()
+                    appendLine("    init {")
+                    appendLine("        sharedHandle = proxyHandle")
+                    appendLine("    }")
+                }
+                else -> {
+                    appendLine("class ${model.simpleName}Proxy(")
+                    appendLine("    private val proxyHandle: Long$directory,")
+                    appendLine(") : ${model.fqn} {")
+                }
+            }
+
+            val handle = if (model.kind == Kind.CLASS) "sharedHandle" else "proxyHandle"
+            model.methods.forEach { method ->
+                appendLine()
+                appendLine(
+                    "    override ${if (method.suspend) "suspend " else ""}fun " +
+                        "${method.name}(${signature(method.params)}): ${method.resultFqn} {"
+                )
+                val call = apiBridgeCall(model, method, handle)
+                when (val result = method.result) {
+                    Wire.Unit -> appendLine("        $call")
+                    is Wire.Shared -> {
+                        appendLine(
+                            "        val ref = ServiceWire.decode(SharedRef.serializer(), $call)"
+                        )
+                        val extra = if (directoryNeeds[result.fqn] == true) ", directory" else ""
+                        appendLine("        return ${result.proxy}(ref.handle$extra)")
+                    }
+                    else -> appendLine(
+                        "        return ServiceWire.decode(${serializer(result)}, $call)"
+                    )
+                }
+                appendLine("    }")
+            }
+            appendLine("}")
+        }
+
+    private fun apiBridgeCall(model: TypeModel, method: Method, handle: String): String {
+        val args = mutableListOf(handle, "\"${escape(model.id)}\"", "\"${method.name}\"")
+        method.params.firstOrNull()?.let { param ->
+            args += when (val wire = param.wire) {
+                is Wire.Shared ->
+                    "ServiceWire.encode(SharedRef.serializer(), " +
+                        "SharedRef(directory.handleOf(${param.name})))"
+                else -> "ServiceWire.encode(${serializer(wire)}, ${param.name})"
+            }
+        }
+        return "PublicApiBridge.call(${args.joinToString(", ")})"
+    }
+
+    private fun renderApiAccessor(model: TypeModel, directoryNeeds: Map<String, Boolean>): String =
+        buildString {
+            appendLine(API_HEADER)
+            appendLine("package ${model.packageName}")
+            appendLine()
+            appendLine("import moe.lolosia.keel.api.PluginContext")
+            appendLine()
+            appendLine("/** 声明方插件 `${model.fqn}` 的单例访问器。 */")
+            appendLine("val PluginContext.${apiAccessorName(model)}: ${model.simpleName}")
+            appendLine("    get() {")
+            if (directoryNeeds[model.fqn] == true) {
+                appendLine("        val directory = publicApi")
+                appendLine(
+                    "        return directory.requireInstance(${apiKeyName(model)}) { " +
+                        "${model.simpleName}Proxy(it, directory) }"
+                )
+            } else {
+                appendLine(
+                    "        return publicApi.requireInstance(${apiKeyName(model)}) { " +
+                        "${model.simpleName}Proxy(it) }"
+                )
+            }
+            appendLine("    }")
+        }
+
+    private fun writeApiFile(dir: java.io.File, name: String, code: String): Boolean {
+        val file = java.io.File(dir, name)
+        if (file.isFile && !file.readText().startsWith(API_HEADER)) {
+            logger.warn("api 文件已存在且不是生成物，跳过：${file.path}")
+            return false
+        }
+        dir.mkdirs()
+        val tmp = java.io.File.createTempFile(name, ".tmp", dir)
+        tmp.writeText(code)
+        val target = file.toPath()
+        try {
+            java.nio.file.Files.move(
+                tmp.toPath(),
+                target,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: Throwable) {
+            java.nio.file.Files.move(
+                tmp.toPath(),
+                target,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
+        return true
+    }
+
+    private fun apiConstName(model: TypeModel): String =
+        "${screamingSnake(model.simpleName)}_TYPE_ID"
+
+    private fun apiKeyName(model: TypeModel): String = "${model.simpleName}Key"
+
+    private fun apiAccessorName(model: TypeModel): String =
+        model.simpleName.replaceFirstChar { it.lowercaseChar() }
+
+    private fun screamingSnake(name: String): String = buildString {
+        name.forEachIndexed { index, char ->
+            if (char.isUpperCase() && index > 0 && !name[index - 1].isUpperCase()) {
+                append('_')
+            }
+            append(char.uppercaseChar())
+        }
+    }
 
     private fun writeGlue(model: TypeModel) {
         if (model.kind != Kind.PLUGIN) {
@@ -703,7 +959,9 @@ internal class KeelPublicApiGenerator(
     private companion object {
         const val PUBLIC_API = "moe.lolosia.keel.api.annotation.PublicApi"
         const val PUBLIC_API_HANDLER = "moe.lolosia.keel.api.annotation.PublicApiHandler"
+        const val SINGLETON = "moe.lolosia.keel.api.annotation.Singleton"
         const val PLUGIN_CONTEXT = "moe.lolosia.keel.api.PluginContext"
+        const val API_HEADER = "// 由 keel-plugin-ksp 生成，不要手改。"
         val ANY_METHODS = setOf("equals", "hashCode", "toString")
     }
 }

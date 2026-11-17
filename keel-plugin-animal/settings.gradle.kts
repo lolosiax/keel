@@ -41,3 +41,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "keel-plugin-animal"
+
+// api 工件与插件同属一个构建：目录叫 api，工程名保持发布坐标 `keel-plugin-animal-api`
+include(":keel-plugin-animal-api")
+project(":keel-plugin-animal-api").projectDir = file("api")
