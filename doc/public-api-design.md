@@ -444,13 +444,17 @@ else                       → owner            // 纯接口直接给所有者
 | Phase 2a（`507776e`） | KSP 生成 impl 侧注册表并接入生命周期 | 已完成 |
 | Phase 2a（`3c9bc15`） | KSP 生成 impl 侧 dispatcher / shadow / proxy，删除手写胶水 | 已完成 |
 | **2b** | api 全生成：镜像 / 代理 / Key / 访问器（V1 提交制） | 已完成 |
-| 2b-2 | api 生成：`@Serializable` DTO 镜像 | 待开始 |
+| 2b-2 | api 生成：`@Serializable` DTO 镜像 | 已完成 |
 | 2c | 消费方子类胶水：从 api klib 读契约，生成 overrides 与 dispatcher | 已完成 |
 | 3 | v1 迁移：hello → basic-biz / rbac → 删除 `@ModuleService` | 进行中（hello 已完成） |
 
 2b 采用 V1 提交制：KMP 下 KSP 的 `CodeGenerator` 只能写目标 fragment，commonMain 看不到生成声明；
 因此由 impl 侧 KSP 通过 `keel.api.dir` 直接写入 `api/src/commonMain/kotlin`，产物随仓库提交。
-animal 的 `api/` 子工程里，镜像、代理、Key、访问器全部由 KSP 生成；DTO 镜像尚未实现。
+`@PublicApi` 接口与 `@Serializable` DTO / 枚举的镜像直接搬 impl 的源文件（KSP 读不到默认值表达式，
+搬源码才能保住默认参数 / `@SerialName` / KDoc），因此要求一个源文件只放一个顶层声明；
+共享类仍渲染成「无状态桩 + `sharedHandle`」。DTO 按值走 `serializer<T>()`，不生成代理 / Key；
+多参数方法在两侧各生成一个 `@Serializable` Args DTO（`XxxCallXxxArgs` / `XxxDispatchXxxArgs`），
+单参数保持直编码以兼容已有线格式。
 消费方子类（如 `Dog : Animal`）的 `XxxOverrides` 与 `XxxDispatcher` 同样由 KSP 生成，
 通过 `keel.glue.dir` 写回本模块的 `src/commonMain/kotlin`。
 

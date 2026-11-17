@@ -2,7 +2,7 @@
 package moe.lolosia.keel.plugins.animal
 
 import moe.lolosia.keel.api.annotation.PublicApi
-import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.serializer
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.share.PublicApiBridge
 import moe.lolosia.keel.api.share.SharedProxy
@@ -15,10 +15,10 @@ open class Animal : SharedProxy {
     override var sharedHandle: Long = 0L
 
     open fun bark(): Unit {
-        PublicApiBridge.call(sharedHandle, "moe.lolosia.keel.plugins.animal.Animal", "base.bark")
+        PublicApiBridge.call(sharedHandle, "moe.lolosia.keel.plugins.animal.Animal", "base.bark", ByteArray(0))
     }
 
     open fun describe(): String {
-        return ServiceWire.decode(String.serializer(), PublicApiBridge.call(sharedHandle, "moe.lolosia.keel.plugins.animal.Animal", "base.describe"))
+        return ServiceWire.decode(serializer<String>(), PublicApiBridge.call(sharedHandle, "moe.lolosia.keel.plugins.animal.Animal", "base.describe", ByteArray(0)))
     }
 }

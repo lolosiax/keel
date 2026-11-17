@@ -2,12 +2,15 @@
 package moe.lolosia.keel.plugins.hello
 
 import moe.lolosia.keel.api.annotation.PublicApi
-import moe.lolosia.keel.api.annotation.Singleton
 
-/** `moe.lolosia.keel.plugins.hello.HelloApi` 在 api 工件里的镜像；对应 impl 的同名类型。 */
+/**
+ * 跨模块服务的最小示例。
+ *
+ * 契约写在 impl 模块；api 工件里的镜像 / 代理 / Key / 访问器由 `keel-plugin-ksp` 生成。
+ */
 @PublicApi
-@Singleton
 interface HelloApi {
+
     fun greet(name: String): String
 
     suspend fun echo(text: String): String

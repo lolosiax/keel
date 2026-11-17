@@ -3,8 +3,11 @@ package moe.lolosia.keel.plugins.animal
 
 import moe.lolosia.keel.api.annotation.PublicApi
 
-/** `moe.lolosia.keel.plugins.animal.Callable` 在 api 工件里的镜像；对应 impl 的同名类型。 */
+/**
+ * 声明方提供的回调接口：调用时返回一个 `Animal` 引用。
+ */
 @PublicApi
 interface Callable {
-    suspend fun invoke(): moe.lolosia.keel.plugins.animal.Animal
+
+    suspend fun invoke(): Animal
 }

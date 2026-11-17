@@ -20,13 +20,14 @@ internal class KeelPublicApiGenerator(
     private val logger: KSPLogger,
 ) {
 
-    private enum class Kind { CLASS, INTERFACE, PLUGIN }
+    private enum class Kind { CLASS, INTERFACE, PLUGIN, VALUE }
 
     private sealed interface Wire {
         object Unit : Wire
-        object Text : Wire
-        data class Primitive(val type: String) : Wire
-        object Bytes : Wire
+
+        /** 按值传递的 `@Serializable` 类型；[type] 是源码里的 Kotlin 类型文本。 */
+        data class Value(val type: String) : Wire
+
         data class Shared(val fqn: String, val proxy: String) : Wire
     }
 
@@ -51,7 +52,8 @@ internal class KeelPublicApiGenerator(
         val supported: Boolean,
         val methods: List<Method>,
     ) {
-        val hasBase: Boolean get() = kind != Kind.INTERFACE
+        val hasBase: Boolean get() = kind == Kind.CLASS
+        val isValue: Boolean get() = kind == Kind.VALUE
         val packageName: String get() = fqn.substringBeforeLast('.')
         val annotatedSingleton: Boolean
             get() = kind == Kind.PLUGIN ||
@@ -82,6 +84,8 @@ internal class KeelPublicApiGenerator(
         val implFqn: String,
         val simpleName: String,
         val contracts: List<TypeModel>,
+        val useContext: Boolean,
+        val usePlugin: Boolean,
     )
 
     fun generate(resolver: Resolver, main: KSClassDeclaration, apiDir: String? = null) {
@@ -96,7 +100,8 @@ internal class KeelPublicApiGenerator(
             .filter {
                 it.classKind == ClassKind.CLASS ||
                     it.classKind == ClassKind.INTERFACE ||
-                    it.classKind == ClassKind.OBJECT
+                    it.classKind == ClassKind.OBJECT ||
+                    it.classKind == ClassKind.ENUM_CLASS
             }
             .toList()
 
@@ -106,7 +111,8 @@ internal class KeelPublicApiGenerator(
             .filter {
                 it.classKind == ClassKind.CLASS ||
                     it.classKind == ClassKind.INTERFACE ||
-                    it.classKind == ClassKind.OBJECT
+                    it.classKind == ClassKind.OBJECT ||
+                    it.classKind == ClassKind.ENUM_CLASS
             }
             .distinctBy { it.qualifiedName?.asString() }
             .sortedBy { it.qualifiedName?.asString() }
@@ -118,7 +124,6 @@ internal class KeelPublicApiGenerator(
             .sortedBy { it.qualifiedName?.asString() }
             .toList()
 
-        val shared = declarations.associateBy { it.qualifiedName?.asString() ?: "" }
         val manualTargets = handlerDeclarations.mapNotNull { handlerTarget(it) }.toSet()
         val handlerEntries = handlerDeclarations.mapNotNull { handler ->
             val target = handlerTarget(handler)
@@ -135,10 +140,19 @@ internal class KeelPublicApiGenerator(
             HandlerEntry(target, instantiation.expression, instantiation.usesPlugin)
         }
 
+        // 句柄类型（共享对象）才参与 declare / 分发；DTO / 枚举走按值传递。
+        val sharedNames: Map<String, String> = declarations
+            .filter { !isValueDeclaration(it) }
+            .mapNotNull { declaration ->
+                declaration.qualifiedName?.asString()?.let { it to declaration.simpleName.asString() }
+            }
+            .toMap()
+
         val models = declarations.mapNotNull { declaration ->
             val fqn = declaration.qualifiedName?.asString() ?: return@mapNotNull null
             val kind = when {
                 fqn == mainFqn -> Kind.PLUGIN
+                isValueDeclaration(declaration) -> Kind.VALUE
                 declaration.classKind == ClassKind.INTERFACE -> Kind.INTERFACE
                 declaration.classKind == ClassKind.CLASS -> Kind.CLASS
                 else -> {
@@ -147,7 +161,17 @@ internal class KeelPublicApiGenerator(
                 }
             }
             val manual = fqn in manualTargets
-            val methods = if (manual) emptyList() else extractMethods(declaration, kind, shared)
+            val methods = if (manual || kind == Kind.VALUE) emptyList() else
+                extractMethods(declaration, kind, sharedNames)
+            if (kind == Kind.VALUE &&
+                declaration.classKind == ClassKind.CLASS &&
+                !isSerializable(declaration)
+            ) {
+                logger.error(
+                    "@PublicApi 值类型必须标 @Serializable，否则无法按值跨插件传递：$fqn",
+                    declaration,
+                )
+            }
             TypeModel(
                 declaration = declaration,
                 fqn = fqn,
@@ -155,9 +179,20 @@ internal class KeelPublicApiGenerator(
                 id = idOf(declaration) ?: fqn,
                 kind = kind,
                 manual = manual,
-                supported = manual || methods != null,
+                supported = manual || kind == Kind.VALUE || methods != null,
                 methods = methods ?: emptyList(),
             )
+        }
+
+        models.forEach { model ->
+            if (model.kind == Kind.PLUGIN || model.manual) return@forEach
+            model.methods.forEach { method ->
+                (method.params.map { it.wire } + method.result).forEach { wire ->
+                    if (wire is Wire.Shared && wire.fqn !in sharedNames) {
+                        logger.error("共享类型 ${wire.fqn} 未被声明为 @PublicApi", model.declaration)
+                    }
+                }
+            }
         }
 
         val providers = singletonProviders(resolver, models, mainFqn)
@@ -228,14 +263,38 @@ internal class KeelPublicApiGenerator(
                     )
                     return@mapNotNull null
                 }
+                val injection = providerInjection(declaration, mainFqn) ?: return@mapNotNull null
                 SingletonProvider(
                     declaration = declaration,
                     implFqn = implFqn,
                     simpleName = declaration.simpleName.asString(),
                     contracts = contracts,
+                    useContext = injection.first,
+                    usePlugin = injection.second,
                 )
             }
             .toList()
+
+    /** `@Singleton` 实现的构造注入：无参 / `PluginContext` / 插件本体。 */
+    private fun providerInjection(
+        declaration: KSClassDeclaration,
+        mainFqn: String,
+    ): Pair<Boolean, Boolean>? {
+        val parameters = declaration.primaryConstructor?.parameters.orEmpty()
+        if (parameters.isEmpty()) return false to false
+        if (parameters.size == 1) {
+            val type = parameters.single().type.resolve().declaration.qualifiedName?.asString()
+            when (type) {
+                PLUGIN_CONTEXT -> return true to false
+                mainFqn -> return false to true
+            }
+        }
+        logger.error(
+            "@Singleton 类的构造器必须是 () / (PluginContext) / (插件本体)：${declaration.qualifiedName}",
+            declaration,
+        )
+        return null
+    }
 
     private fun writeInterfaceDispatcher(model: TypeModel, provider: SingletonProvider) {
         writeFile(
@@ -254,7 +313,7 @@ internal class KeelPublicApiGenerator(
     private fun extractMethods(
         declaration: KSClassDeclaration,
         kind: Kind,
-        shared: Map<String, KSClassDeclaration>,
+        shared: Map<String, String>,
     ): List<Method>? {
         if (kind == Kind.CLASS && Modifier.OPEN !in declaration.modifiers) {
             logger.error("@PublicApi 类必须 open，才能生成代理与影子：${declaration.qualifiedName}", declaration)
@@ -274,6 +333,7 @@ internal class KeelPublicApiGenerator(
                     Kind.PLUGIN -> function.annotations.any { it.isNamed(PUBLIC_API) }
                     Kind.CLASS -> isOverridable(function)
                     Kind.INTERFACE -> true
+                    Kind.VALUE -> false
                 }
             }
             .toList()
@@ -289,10 +349,6 @@ internal class KeelPublicApiGenerator(
                 logger.error("@PublicApi 方法不能是 inline：${function.qualifiedName}", function)
                 return null
             }
-            if (function.parameters.size > 1) {
-                logger.error("暂不支持多参数的 @PublicApi 方法：${function.qualifiedName}", function)
-                return null
-            }
             val params = function.parameters.mapIndexed { index, parameter ->
                 if (parameter.isVararg) {
                     logger.error("@PublicApi 方法不能有 vararg：${function.qualifiedName}", function)
@@ -301,17 +357,17 @@ internal class KeelPublicApiGenerator(
                 val type = parameter.type.resolve()
                 val wire = wireOf(type, shared)
                 if (wire == null) {
-                    logger.error("不支持的参数类型 ${type.renderName()}：${function.qualifiedName}", function)
+                    logger.error("不支持的参数类型 ${type.render()}：${function.qualifiedName}", function)
                     return null
                 }
-                if (kind != Kind.PLUGIN && wire is Wire.Shared) {
+                if (wire is Wire.Shared && (kind != Kind.PLUGIN || function.parameters.size > 1)) {
                     logger.error(
-                        "暂不支持代理方法带共享类型参数：${function.qualifiedName}",
+                        "共享类型参数只支持单参数插件方法：${function.qualifiedName}",
                         function,
                     )
                     return null
                 }
-                Param(parameter.name?.asString() ?: "arg$index", type.renderName(), wire)
+                Param(parameter.name?.asString() ?: "arg$index", type.render(), wire)
             }
 
             val resultType = function.returnType?.resolve() ?: run {
@@ -320,7 +376,7 @@ internal class KeelPublicApiGenerator(
             }
             val result = wireOf(resultType, shared)
             if (result == null) {
-                logger.error("不支持的返回类型 ${resultType.renderName()}：${function.qualifiedName}", function)
+                logger.error("不支持的返回类型 ${resultType.render()}：${function.qualifiedName}", function)
                 return null
             }
 
@@ -330,34 +386,44 @@ internal class KeelPublicApiGenerator(
                 open = kind != Kind.PLUGIN && isOverridable(function),
                 params = params,
                 result = result,
-                resultFqn = resultType.renderName(),
+                resultFqn = resultType.render(),
             )
         }
         return methods
     }
 
-    private fun wireOf(type: KSType, shared: Map<String, KSClassDeclaration>): Wire? {
-        if (type.isMarkedNullable) return null
-        if (type.arguments.isNotEmpty()) return null
+    private fun wireOf(type: KSType, shared: Map<String, String>): Wire? {
         val name = type.declaration.qualifiedName?.asString() ?: return null
-        return when (name) {
-            "kotlin.Unit" -> Wire.Unit
-            "kotlin.String" -> Wire.Text
-            "kotlin.Int" -> Wire.Primitive("Int")
-            "kotlin.Long" -> Wire.Primitive("Long")
-            "kotlin.Short" -> Wire.Primitive("Short")
-            "kotlin.Byte" -> Wire.Primitive("Byte")
-            "kotlin.Boolean" -> Wire.Primitive("Boolean")
-            "kotlin.Float" -> Wire.Primitive("Float")
-            "kotlin.Double" -> Wire.Primitive("Double")
-            "kotlin.ByteArray" -> Wire.Bytes
-            else -> {
-                val declaration = shared[name]
-                if (declaration == null) null else {
-                    val simple = declaration.simpleName.asString()
-                    Wire.Shared(name, "${name.substringBeforeLast('.')}.${simple}Proxy")
-                }
+        if (name == UNIT) return if (type.isMarkedNullable) null else Wire.Unit
+
+        val sharedSimple = shared[name]
+        if (sharedSimple != null) {
+            // 共享对象按句柄传，不支持可空或泛型包装
+            if (type.isMarkedNullable || type.arguments.isNotEmpty()) return null
+            return Wire.Shared(name, "${name.substringBeforeLast('.')}.$sharedSimple" + "Proxy")
+        }
+
+        return if (isValueType(type)) Wire.Value(type.render()) else null
+    }
+
+    /** `@Serializable` 值类型的白名单：基本类型、枚举、DTO、集合（递归）与可空。 */
+    private fun isValueType(type: KSType): Boolean {
+        val declaration = type.declaration as? KSClassDeclaration ?: return false
+        val name = declaration.qualifiedName?.asString() ?: return false
+
+        if (type.arguments.isNotEmpty()) {
+            if (name !in COLLECTIONS) return false
+            return type.arguments.all { argument ->
+                val resolved = argument.type?.resolve() ?: return@all false
+                isValueType(resolved)
             }
+        }
+        return when {
+            name in PRIMITIVES -> true
+            declaration.classKind == ClassKind.ENUM_CLASS -> true
+            name.startsWith("kotlin.Function") -> false
+            declaration.classKind == ClassKind.CLASS -> isSerializable(declaration)
+            else -> false
         }
     }
 
@@ -380,11 +446,12 @@ internal class KeelPublicApiGenerator(
     // ---------------------------------- api 工件（V1 提交制） ----------------------------------
 
     /**
-     * 把 api 侧需要的代理 / Key / 访问器直接写进 `api/src/commonMain/kotlin`。
+     * 把 api 侧需要的镜像 / 代理 / Key / 访问器直接写进 `api/src/commonMain/kotlin`。
      *
      * KSP 的 `CodeGenerator` 只能写当前编译输出（在 KMP 里是目标 fragment，common 代码看不到），
      * 所以这里用普通文件写入；落点由 `keel.api.dir` 指定，生成物随仓库提交。
-     * 只写 `XXXProxy.kt` / `XXXKey.kt` / `XXXAccessor.kt`，不碰镜像；
+     * 接口与 DTO 的镜像直接搬 impl 的源文件（保留默认值 / `@SerialName` / KDoc），
+     * 共享类渲染成无状态桩；代理 / Key / 访问器按需生成。
      * 已存在且不是生成物的文件绝不覆盖。
      */
     private fun emitApi(models: List<TypeModel>, dir: String) {
@@ -407,11 +474,20 @@ internal class KeelPublicApiGenerator(
             channel.lock().use {
                 targets.forEach { model ->
                     val packageDir = java.io.File(root, model.packageName.replace('.', '/'))
-                    writeApiFile(
-                        packageDir,
-                        "${model.simpleName}.kt",
-                        renderApiMirror(model, directoryNeeds),
-                    )
+                    // DTO：只镜像类型本身，不生成 Key / 代理 / 访问器
+                    if (model.isValue) {
+                        emitSourceMirror(model, packageDir)
+                        return@forEach
+                    }
+                    if (model.kind == Kind.INTERFACE) {
+                        emitSourceMirror(model, packageDir)
+                    } else {
+                        writeApiFile(
+                            packageDir,
+                            "${model.simpleName}.kt",
+                            renderApiMirror(model, directoryNeeds),
+                        )
+                    }
                     val keyWritten = writeApiFile(
                         packageDir,
                         "${model.simpleName}Key.kt",
@@ -438,6 +514,37 @@ internal class KeelPublicApiGenerator(
                 }
             }
         }
+    }
+
+    /**
+     * 把 impl 的声明源文件原样搬进 api。
+     *
+     * KSP 读不到默认值表达式，只有搬源码才能保住 `page(pageNo: Int = 1, ...)`
+     * 这类默认参数与 `@SerialName`；因此要求一个源文件只放一个顶层声明。
+     */
+    private fun emitSourceMirror(model: TypeModel, packageDir: java.io.File): Boolean {
+        val containing = model.declaration.containingFile ?: run {
+            logger.error("@PublicApi 镜像只能从源码生成：${model.fqn}", model.declaration)
+            return false
+        }
+        if (containing.declarations.count() != 1) {
+            logger.error(
+                "@PublicApi 镜像要求源文件只有一个顶层声明：${containing.filePath}",
+                model.declaration,
+            )
+            return false
+        }
+        val source = java.io.File(containing.filePath)
+        val text = runCatching { source.readText() }.getOrNull() ?: run {
+            logger.error("读不到 @PublicApi 源文件：${source.path}", model.declaration)
+            return false
+        }
+        val body = text.removePrefix("\uFEFF").trimStart()
+        return writeApiFile(
+            packageDir,
+            "${model.simpleName}.kt",
+            API_HEADER + "\n" + body.trimEnd() + "\n",
+        )
     }
 
     private fun apiDirectoryNeeds(models: List<TypeModel>): Map<String, Boolean> {
@@ -490,7 +597,9 @@ internal class KeelPublicApiGenerator(
         if (model.kind == Kind.CLASS) {
             val usesValue = methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
             val usesShared = methods.any { it.result is Wire.Shared }
-            if (usesValue) appendLine("import kotlinx.serialization.builtins.serializer")
+            val usesArgs = methods.any { it.params.size > 1 }
+            if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
+            if (usesValue) appendLine("import kotlinx.serialization.serializer")
             appendLine("import moe.lolosia.keel.api.service.ServiceWire")
             appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
             appendLine("import moe.lolosia.keel.api.share.SharedProxy")
@@ -502,6 +611,10 @@ internal class KeelPublicApiGenerator(
         if (model.singleton) appendLine("@Singleton")
         when (model.kind) {
             Kind.CLASS -> {
+                methods.filter { it.params.size > 1 }.forEach { method ->
+                    appendLine(renderArgsClass(argsClassName(model, method, "Mirror"), method))
+                    appendLine()
+                }
                 appendLine("open class ${model.simpleName} : SharedProxy {")
                 appendLine()
                 appendLine("    /** Host 分配的句柄；由登记方在首次跨界登记后写入。 */")
@@ -532,7 +645,7 @@ internal class KeelPublicApiGenerator(
 
     /** 镜像类的基类桩：只走 `base.*`，绝不调虚方法。 */
     private fun mirrorBody(model: TypeModel, method: Method, indent: String): String = buildString {
-        val call = apiBridgeCall(model, method, "sharedHandle", "base.${method.name}")
+        val call = apiBridgeCall(model, method, "sharedHandle", "Mirror", "base.${method.name}")
         when (val result = method.result) {
             Wire.Unit -> appendLine("$indent$call")
             is Wire.Shared -> {
@@ -569,17 +682,19 @@ internal class KeelPublicApiGenerator(
             val usesShared = model.methods.any { method ->
                 method.params.any { it.wire is Wire.Shared } || method.result is Wire.Shared
             }
-            val usesBytes = model.methods.any { method ->
-                method.params.any { it.wire is Wire.Bytes } || method.result is Wire.Bytes
-            }
-            if (usesValue) appendLine("import kotlinx.serialization.builtins.serializer")
-            if (usesBytes) appendLine("import kotlinx.serialization.builtins.ByteArraySerializer")
+            val usesArgs = model.methods.any { it.params.size > 1 }
+            if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
+            if (usesValue) appendLine("import kotlinx.serialization.serializer")
             appendLine("import moe.lolosia.keel.api.service.ServiceWire")
             appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
             if (needsDirectory) appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
             if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
             appendLine()
 
+            model.methods.filter { it.params.size > 1 }.forEach { method ->
+                appendLine(renderArgsClass(argsClassName(model, method, "Call"), method))
+                appendLine()
+            }
             appendLine("/** `${model.fqn}` 在消费方运行时里的代理。 */")
             val directory = if (needsDirectory) ", private val directory: PublicApiDirectory" else ""
             when (model.kind) {
@@ -606,7 +721,7 @@ internal class KeelPublicApiGenerator(
                     "    override ${if (method.suspend) "suspend " else ""}fun " +
                         "${method.name}(${signature(method.params)}): ${method.resultFqn} {"
                 )
-                val call = apiBridgeCall(model, method, handle)
+                val call = apiBridgeCall(model, method, handle, "Call")
                 when (val result = method.result) {
                     Wire.Unit -> appendLine("        $call")
                     is Wire.Shared -> {
@@ -629,18 +744,29 @@ internal class KeelPublicApiGenerator(
         model: TypeModel,
         method: Method,
         handle: String,
+        argsSuffix: String,
         lineName: String = method.name,
     ): String {
-        val args = mutableListOf(handle, "\"${escape(model.id)}\"", "\"${escape(lineName)}\"")
-        method.params.firstOrNull()?.let { param ->
-            args += when (val wire = param.wire) {
-                is Wire.Shared ->
-                    "ServiceWire.encode(SharedRef.serializer(), " +
-                        "SharedRef(directory.handleOf(${param.name})))"
-                else -> "ServiceWire.encode(${serializer(wire)}, ${param.name})"
-            }
+        val payload = payloadExpression(model, method, argsSuffix)
+        return "PublicApiBridge.call(" +
+            "$handle, \"${escape(model.id)}\", \"${escape(lineName)}\", $payload)"
+    }
+
+    /** 参数载荷：0 参空字节，单参直接编码，多参包一层生成的 Args DTO。 */
+    private fun payloadExpression(model: TypeModel, method: Method, argsSuffix: String): String {
+        if (method.params.isEmpty()) return "ByteArray(0)"
+        if (method.params.size > 1) {
+            val argsName = argsClassName(model, method, argsSuffix)
+            val init = method.params.joinToString(", ") { "${it.name} = ${it.name}" }
+            return "ServiceWire.encode(serializer<$argsName>(), $argsName($init))"
         }
-        return "PublicApiBridge.call(${args.joinToString(", ")})"
+        val param = method.params.single()
+        return when (val wire = param.wire) {
+            is Wire.Shared ->
+                "ServiceWire.encode(SharedRef.serializer(), " +
+                    "SharedRef(directory.handleOf(${param.name})))"
+            else -> "ServiceWire.encode(${serializer(wire)}, ${param.name})"
+        }
     }
 
     private fun renderApiAccessor(model: TypeModel, directoryNeeds: Map<String, Boolean>): String =
@@ -713,6 +839,7 @@ internal class KeelPublicApiGenerator(
     }
 
     private fun writeGlue(model: TypeModel) {
+        if (model.isValue) return
         if (model.kind != Kind.PLUGIN) {
             writeFile(
                 fileName = "${model.simpleName}Proxy",
@@ -743,11 +870,21 @@ internal class KeelPublicApiGenerator(
         appendLine("// 由 keel-plugin-ksp 生成，不要手改。")
         appendLine("package ${model.packageName}")
         appendLine()
-        appendLine("import kotlinx.serialization.builtins.serializer")
+        val usesValue = model.methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
+        val usesShared = model.methods.any {
+            it.params.any { param -> param.wire is Wire.Shared } || it.result is Wire.Shared
+        }
+        val usesArgs = model.methods.any { it.params.size > 1 }
+        if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
+        if (usesValue) appendLine("import kotlinx.serialization.serializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
-        appendLine("import moe.lolosia.keel.api.share.SharedRef")
+        if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
         appendLine()
+        model.methods.filter { it.params.size > 1 }.forEach { method ->
+            appendLine(renderArgsClass(argsClassName(model, method, "Call"), method))
+            appendLine()
+        }
         appendLine("/** `${model.fqn}` 的本地代理。 */")
         val superType = if (model.kind == Kind.INTERFACE) model.fqn else "${model.fqn}()"
         appendLine("internal class ${model.simpleName}Proxy(private val proxyHandle: Long) : $superType {")
@@ -776,11 +913,9 @@ internal class KeelPublicApiGenerator(
     }
 
     private fun bridgeCall(model: TypeModel, method: Method): String {
-        val args = mutableListOf("proxyHandle", "\"${escape(model.id)}\"", "\"${method.name}\"")
-        method.params.firstOrNull()?.let { param ->
-            args += "ServiceWire.encode(${serializer(param.wire)}, ${param.name})"
-        }
-        return "PublicApiBridge.call(${args.joinToString(", ")})"
+        val payload = payloadExpression(model, method, "Call")
+        return "PublicApiBridge.call(" +
+            "proxyHandle, \"${escape(model.id)}\", \"${method.name}\", $payload)"
     }
 
     private fun renderShadow(model: TypeModel): String = """
@@ -795,19 +930,26 @@ internal class KeelPublicApiGenerator(
     private fun renderDispatcher(model: TypeModel): String = when (model.kind) {
         Kind.PLUGIN -> renderOwnerDispatcher(model)
         Kind.CLASS -> renderShadowDispatcher(model)
-        Kind.INTERFACE -> error("接口不生成分发器")
+        Kind.INTERFACE, Kind.VALUE -> error("接口 / DTO 不生成分发器")
     }
 
     private fun renderOwnerDispatcher(model: TypeModel): String = buildString {
         appendLine("// 由 keel-plugin-ksp 生成，不要手改。")
         appendLine("package ${model.packageName}")
         appendLine()
-        appendLine("import kotlinx.serialization.builtins.serializer")
+        val usesValue = model.methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
+        val usesArgs = model.methods.any { it.params.size > 1 }
+        if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
+        if (usesValue) appendLine("import kotlinx.serialization.serializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDispatcher")
         appendLine("import moe.lolosia.keel.api.share.SharedRef")
         appendLine()
+        model.methods.filter { it.params.size > 1 }.forEach { method ->
+            appendLine(renderArgsClass(argsClassName(model, method, "Dispatch"), method))
+            appendLine()
+        }
         appendLine("/** `${model.fqn}` 的所有者侧分发器。 */")
         val directory = if (model.dispatcherNeedsDirectory) ", private val directory: PublicApiDirectory" else ""
         appendLine("internal class ${model.simpleName}Dispatcher(")
@@ -825,7 +967,7 @@ internal class KeelPublicApiGenerator(
         appendLine("    ): ByteArray = when (method) {")
         model.methods.forEach { method ->
             appendLine("        \"${method.name}\" -> {")
-            append(decodeParams(method, "            "))
+            append(decodeParams(model, method, "Dispatch", "            "))
             append(ownerCall(method, "            "))
             appendLine("        }")
             appendLine()
@@ -839,13 +981,20 @@ internal class KeelPublicApiGenerator(
         appendLine("// 由 keel-plugin-ksp 生成，不要手改。")
         appendLine("package ${model.packageName}")
         appendLine()
-        appendLine("import kotlinx.serialization.builtins.serializer")
+        val usesValue = model.methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
+        val usesArgs = model.methods.any { it.params.size > 1 }
+        if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
+        if (usesValue) appendLine("import kotlinx.serialization.serializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDispatcher")
         appendLine("import moe.lolosia.keel.api.share.SharedRef")
         appendLine()
+        model.methods.filter { it.params.size > 1 }.forEach { method ->
+            appendLine(renderArgsClass(argsClassName(model, method, "Dispatch"), method))
+            appendLine()
+        }
         appendLine("/** `${model.fqn}` 的声明方分发器。 */")
         val directory = if (model.dispatcherNeedsDirectory) "private val directory: PublicApiDirectory" else ""
         appendLine("internal class ${model.simpleName}Dispatcher($directory) : PublicApiDispatcher {")
@@ -869,14 +1018,14 @@ internal class KeelPublicApiGenerator(
                 appendLine("                if (\"${method.name}\" in overrides) {")
                 appendLine("                    forward(handle, \"${method.name}\", payload)")
                 appendLine("                } else {")
-                append(decodeParams(method, "                    "))
+                append(decodeParams(model, method, "Dispatch", "                    "))
                 append(localCall(method, "                    "))
                 appendLine("                }")
                 if (method.result is Wire.Unit) {
                     appendLine("                ByteArray(0)")
                 }
             } else {
-                append(decodeParams(method, "                "))
+                append(decodeParams(model, method, "Dispatch", "                "))
                 append(localCall(method, "                "))
                 if (method.result is Wire.Unit) {
                     appendLine("                ByteArray(0)")
@@ -885,7 +1034,7 @@ internal class KeelPublicApiGenerator(
             appendLine("            }")
             appendLine()
             appendLine("            \"base.${method.name}\" -> {")
-            append(decodeParams(method, "                "))
+            append(decodeParams(model, method, "Dispatch", "                "))
             append(localCall(method, "                "))
             if (method.result is Wire.Unit) {
                 appendLine("                ByteArray(0)")
@@ -909,7 +1058,9 @@ internal class KeelPublicApiGenerator(
         appendLine()
         val usesValue = model.methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
         val usesShared = model.methods.any { it.result is Wire.Shared }
-        if (usesValue) appendLine("import kotlinx.serialization.builtins.serializer")
+        val usesArgs = model.methods.any { it.params.size > 1 }
+        if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
+        if (usesValue) appendLine("import kotlinx.serialization.serializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         if (model.dispatcherNeedsDirectory) {
             appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
@@ -917,6 +1068,10 @@ internal class KeelPublicApiGenerator(
         appendLine("import moe.lolosia.keel.api.share.PublicApiDispatcher")
         if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
         appendLine()
+        model.methods.filter { it.params.size > 1 }.forEach { method ->
+            appendLine(renderArgsClass(argsClassName(model, method, "Dispatch"), method))
+            appendLine()
+        }
         appendLine("/** `${model.fqn}` 的提供者侧分发器；实现类是 `$implFqn`。 */")
         val directory = if (model.dispatcherNeedsDirectory) ", private val directory: PublicApiDirectory" else ""
         appendLine("internal class ${model.simpleName}Dispatcher(private val impl: $implFqn$directory) : PublicApiDispatcher {")
@@ -932,7 +1087,7 @@ internal class KeelPublicApiGenerator(
         appendLine("    ): ByteArray = when (method) {")
         model.methods.forEach { method ->
             appendLine("        \"${method.name}\" -> {")
-            append(decodeParams(method, "            "))
+            append(decodeParams(model, method, "Dispatch", "            "))
             append(ownerCall(method, "            "))
             appendLine("        }")
             appendLine()
@@ -942,6 +1097,20 @@ internal class KeelPublicApiGenerator(
         appendLine("}")
     }
 
+    private fun argsClassName(model: TypeModel, method: Method, suffix: String): String =
+        "${model.simpleName}$suffix${method.name.replaceFirstChar { it.uppercaseChar() }}Args"
+
+    private fun renderArgsClass(name: String, method: Method): String = buildString {
+        appendLine("@Serializable")
+        appendLine("internal class $name(")
+        appendLine(method.params.joinToString(",\n") { "    val ${it.name}: ${it.fqn}" })
+        appendLine(")")
+    }
+
+    private fun Method.callArguments(): String =
+        if (params.size > 1) params.joinToString(", ") { "args.${it.name}" }
+        else params.joinToString(", ") { it.name }
+
     private fun renderSetup(
         mainFqn: String,
         models: List<TypeModel>,
@@ -950,7 +1119,8 @@ internal class KeelPublicApiGenerator(
     ): String = buildString {
         val main = models.firstOrNull { it.fqn == mainFqn && it.kind == Kind.PLUGIN }
         val handlerByTarget = handlers.associateBy { it.target }
-        val usesPlugin = main != null || handlers.any { it.usesPlugin }
+        val handleTypes = models.filter { !it.isValue }
+        val usesPlugin = main != null || handlers.any { it.usesPlugin } || providers.any { it.usePlugin }
 
         appendLine("// 由 keel-plugin-ksp 生成，不要手改。")
         appendLine("package ${mainFqn.substringBeforeLast('.')}")
@@ -968,16 +1138,16 @@ internal class KeelPublicApiGenerator(
         if (usesPlugin) {
             appendLine("        val pluginInstance = plugin as $mainFqn")
         }
-        if (models.isNotEmpty()) {
+        if (handleTypes.isNotEmpty()) {
             appendLine("        context.publicApi.declare(")
             appendLine("            types = listOf(")
-            models.forEach { model ->
+            handleTypes.forEach { model ->
                 appendLine(
                     "                PublicApiType(\"${escape(model.id)}\", hasBase = ${model.hasBase}),"
                 )
             }
             appendLine("            ),")
-            val entries = models.mapNotNull { model ->
+            val entries = handleTypes.mapNotNull { model ->
                 when {
                     model.manual -> handlerByTarget[model.fqn]?.expression
                     !model.supported -> null
@@ -1010,7 +1180,12 @@ internal class KeelPublicApiGenerator(
         }
         providers.forEach { provider ->
             val instance = provider.simpleName.replaceFirstChar { it.lowercaseChar() } + "Instance"
-            appendLine("        val $instance = ${provider.implFqn}()")
+            val injection = when {
+                provider.useContext -> "context"
+                provider.usePlugin -> "pluginInstance"
+                else -> ""
+            }
+            appendLine("        val $instance = ${provider.implFqn}($injection)")
             provider.contracts.forEach { contract ->
                 val args = mutableListOf(instance)
                 if (contract.dispatcherNeedsDirectory) args += "context.publicApi"
@@ -1037,7 +1212,19 @@ internal class KeelPublicApiGenerator(
 
     // ---------------------------------- 方法体片段 ----------------------------------
 
-    private fun decodeParams(method: Method, indent: String): String = buildString {
+    private fun decodeParams(
+        model: TypeModel,
+        method: Method,
+        argsSuffix: String,
+        indent: String,
+    ): String = buildString {
+        if (method.params.size > 1) {
+            val argsName = argsClassName(model, method, argsSuffix)
+            appendLine(
+                "${indent}val args = ServiceWire.decode(serializer<$argsName>(), payload)"
+            )
+            return@buildString
+        }
         method.params.firstOrNull()?.let { param ->
             when (val wire = param.wire) {
                 is Wire.Shared ->
@@ -1055,7 +1242,7 @@ internal class KeelPublicApiGenerator(
     }
 
     private fun ownerCall(method: Method, indent: String): String = buildString {
-        val call = "impl.${method.name}(${method.params.joinToString(", ") { it.name }})"
+        val call = "impl.${method.name}(${method.callArguments()})"
         when (val result = method.result) {
             Wire.Unit -> {
                 appendLine("${indent}$call")
@@ -1073,7 +1260,7 @@ internal class KeelPublicApiGenerator(
     }
 
     private fun localCall(method: Method, indent: String): String = buildString {
-        val call = "shadow.${method.name}(${method.params.joinToString(", ") { it.name }})"
+        val call = "shadow.${method.name}(${method.callArguments()})"
         when (val result = method.result) {
             Wire.Unit -> appendLine("${indent}$call")
             is Wire.Shared -> {
@@ -1092,9 +1279,7 @@ internal class KeelPublicApiGenerator(
 
     private fun serializer(wire: Wire): String = when (wire) {
         Wire.Unit -> error("Unit 没有序列化器")
-        Wire.Text -> "String.serializer()"
-        is Wire.Primitive -> "${wire.type}.serializer()"
-        Wire.Bytes -> "ByteArraySerializer()"
+        is Wire.Value -> "serializer<${wire.type}>()"
         is Wire.Shared -> "SharedRef.serializer()"
     }
 
@@ -1145,9 +1330,9 @@ internal class KeelPublicApiGenerator(
     private fun KSAnnotation.isNamed(name: String): Boolean =
         annotationType.resolve().declaration.qualifiedName?.asString() == name
 
-    private fun KSType.renderName(): String {
+    private fun KSType.render(): String {
         val name = declaration.qualifiedName?.asString() ?: declaration.simpleName.asString()
-        val simple = when (name) {
+        val base = when (name) {
             "kotlin.Unit" -> "Unit"
             "kotlin.String" -> "String"
             "kotlin.Int" -> "Int"
@@ -1157,10 +1342,22 @@ internal class KeelPublicApiGenerator(
             "kotlin.Boolean" -> "Boolean"
             "kotlin.Float" -> "Float"
             "kotlin.Double" -> "Double"
+            "kotlin.ByteArray" -> "ByteArray"
             else -> name
         }
-        return if (isMarkedNullable) "$simple?" else simple
+        val text = if (arguments.isEmpty()) base else
+            base + "<" + arguments.joinToString(", ") { it.type?.resolve()?.render() ?: "*" } + ">"
+        return if (isMarkedNullable) "$text?" else text
     }
+
+    /** DTO / 枚举：按值传，需要在 api 里镜像。 */
+    private fun isValueDeclaration(declaration: KSClassDeclaration): Boolean =
+        declaration.classKind == ClassKind.ENUM_CLASS ||
+            (declaration.classKind == ClassKind.CLASS && Modifier.DATA in declaration.modifiers)
+
+    private fun isSerializable(declaration: KSClassDeclaration): Boolean =
+        declaration.annotations.any { it.isNamed(SERIALIZABLE) } ||
+            declaration.annotations.any { it.isNamed(SERIALIZABLE_WITH) }
 
     private fun writeFile(
         fileName: String,
@@ -1185,7 +1382,30 @@ internal class KeelPublicApiGenerator(
         const val PUBLIC_API_HANDLER = "moe.lolosia.keel.api.annotation.PublicApiHandler"
         const val SINGLETON = "moe.lolosia.keel.api.annotation.Singleton"
         const val PLUGIN_CONTEXT = "moe.lolosia.keel.api.PluginContext"
+        const val SERIALIZABLE = "kotlinx.serialization.Serializable"
+        const val SERIALIZABLE_WITH = "kotlinx.serialization.SerializableWith"
+        const val UNIT = "kotlin.Unit"
         const val API_HEADER = "// 由 keel-plugin-ksp 生成，不要手改。"
+        val COLLECTIONS = setOf(
+            "kotlin.collections.List",
+            "kotlin.collections.Set",
+            "kotlin.collections.Map",
+        )
+        val PRIMITIVES = setOf(
+            "kotlin.String",
+            "kotlin.Boolean",
+            "kotlin.Int",
+            "kotlin.Long",
+            "kotlin.Short",
+            "kotlin.Byte",
+            "kotlin.Float",
+            "kotlin.Double",
+            "kotlin.ByteArray",
+            "kotlin.UInt",
+            "kotlin.ULong",
+            "kotlin.UShort",
+            "kotlin.UByte",
+        )
         val ANY_METHODS = setOf("equals", "hashCode", "toString")
     }
 }

@@ -1,7 +1,7 @@
 // 由 keel-plugin-ksp 生成，不要手改。
 package moe.lolosia.keel.plugins.animal
 
-import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.serializer
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.share.PublicApiBridge
 import moe.lolosia.keel.api.share.PublicApiDirectory
