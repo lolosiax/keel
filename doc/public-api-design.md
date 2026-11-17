@@ -445,12 +445,14 @@ else                       → owner            // 纯接口直接给所有者
 | Phase 2a（`3c9bc15`） | KSP 生成 impl 侧 dispatcher / shadow / proxy，删除手写胶水 | 已完成 |
 | **2b** | api 全生成：镜像 / 代理 / Key / 访问器（V1 提交制） | 已完成 |
 | 2b-2 | api 生成：`@Serializable` DTO 镜像 | 待开始 |
-| 2c | 消费方子类胶水：从 api klib 读契约，生成 overrides 与 dispatcher | 待开始 |
+| 2c | 消费方子类胶水：从 api klib 读契约，生成 overrides 与 dispatcher | 已完成 |
 | 3 | v1 迁移：hello → basic-biz / rbac → 删除 `@ModuleService` | 待开始 |
 
 2b 采用 V1 提交制：KMP 下 KSP 的 `CodeGenerator` 只能写目标 fragment，commonMain 看不到生成声明；
 因此由 impl 侧 KSP 通过 `keel.api.dir` 直接写入 `api/src/commonMain/kotlin`，产物随仓库提交。
 animal 的 `api/` 子工程里，镜像、代理、Key、访问器全部由 KSP 生成；DTO 镜像尚未实现。
+消费方子类（如 `Dog : Animal`）的 `XxxOverrides` 与 `XxxDispatcher` 同样由 KSP 生成，
+通过 `keel.glue.dir` 写回本模块的 `src/commonMain/kotlin`。
 
 ---
 

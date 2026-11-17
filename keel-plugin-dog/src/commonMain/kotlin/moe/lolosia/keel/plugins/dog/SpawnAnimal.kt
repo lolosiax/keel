@@ -35,7 +35,7 @@ open class SpawnAnimal(private val api: PublicApiDirectory? = null) : Callable, 
             instance = dog,
             key = AnimalKey,
             dispatcher = DogDispatcher(dog),
-            overrides = setOf("bark"),
+            overrides = DogOverrides,
         )
         dog.sharedHandle = ref.handle
         animal = dog

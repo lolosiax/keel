@@ -1,3 +1,5 @@
+import com.google.devtools.ksp.gradle.KspExtension
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
@@ -6,6 +8,11 @@ plugins {
 
 group = "moe.lolosia.keel.plugins"
 version = libs.versions.keel.get()
+
+// 消费方子类（Dog : Animal）的 overrides / dispatcher 由 KSP 写回源码目录
+extensions.configure<KspExtension> {
+    arg("keel.glue.dir", file("src/commonMain/kotlin").absolutePath)
+}
 
 keelPlugin {
     target("mingwX64")

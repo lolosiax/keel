@@ -8,6 +8,9 @@ import com.google.devtools.ksp.validate
 /** api 工件的落点；由插件构建通过 `ksp { arg(...) }` 传入。 */
 private const val API_DIR_OPTION = "keel.api.dir"
 
+/** 消费方子类胶水的落点；默认不生成。 */
+private const val GLUE_DIR_OPTION = "keel.glue.dir"
+
 /**
  * 插件 Worker 入口生成器。
  *
@@ -24,6 +27,7 @@ class KeelPluginWorkerProcessorProvider : SymbolProcessorProvider {
             codeGenerator = environment.codeGenerator,
             logger = environment.logger,
             apiDir = environment.options[API_DIR_OPTION]?.takeIf { it.isNotBlank() },
+            glueDir = environment.options[GLUE_DIR_OPTION]?.takeIf { it.isNotBlank() },
         )
 }
 
@@ -31,6 +35,7 @@ private class KeelPluginWorkerProcessor(
     private val codeGenerator: CodeGenerator,
     private val logger: KSPLogger,
     private val apiDir: String?,
+    private val glueDir: String?,
 ) : SymbolProcessor {
 
     private var generated = false
@@ -38,6 +43,8 @@ private class KeelPluginWorkerProcessor(
     private val services = KeelServiceGenerator(codeGenerator, logger)
 
     private val publicApi = KeelPublicApiGenerator(codeGenerator, logger)
+
+    private val subclass = KeelSubclassGenerator(logger, glueDir)
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
         // 服务代码先在当前模块生成：契约侧 Key / Client，实现侧 Dispatcher / KeelPluginServices
@@ -69,6 +76,9 @@ private class KeelPluginWorkerProcessor(
 
         // @PublicApi 的注册表与 Worker 入口成对生成：入口固定引用 KeelPluginPublicApi
         publicApi.generate(resolver, main, apiDir)
+
+        // 消费方子类（如 Dog : Animal）的 overrides / dispatcher，写进提交制的源码目录
+        subclass.generate(resolver)
 
         val file = codeGenerator.createNewFile(
             dependencies = Dependencies(false, *listOfNotNull(main.containingFile).toTypedArray()),
