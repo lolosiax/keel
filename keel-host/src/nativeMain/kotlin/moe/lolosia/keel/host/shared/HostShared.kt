@@ -3,25 +3,32 @@ package moe.lolosia.keel.host.shared
 import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.share.PublicApiType
 import moe.lolosia.keel.api.share.SharedCall
+import moe.lolosia.keel.api.share.SharedCreateReply
 import moe.lolosia.keel.api.share.SharedRegistration
 
 /**
- * Host 侧的共享对象表：句柄 → 所有者 / 声明方 / 导出类型。
+ * Host 侧的共享对象表：句柄 → 所有者 / 声明方 / 导出类型 / 生命周期。
  *
- * - 句柄由 Host 分配，随登记返回给插件；
+ * - 句柄由 Host 分配，随登记或构造返回给插件；
  * - [types] 记录每个类型由谁声明、是否带基类体，决定调用先路由到声明方还是直接给所有者；
- * - [singletons] 是 `getInstance` 的惰性入口：调用里只给 typeId 时按这里查句柄。
+ * - [singletons] 是 `getInstance` 的惰性入口：调用里只给 typeId 时按这里查句柄；
+ * - [Entry.state] 实现 `Creating → Open → Closed`：Creating 时只有创建者能调 `initialization`。
  *
  * 只在泵线程访问，因此不加锁。
  */
 internal object HostShared {
 
+    /** 共享对象的生命周期。 */
+    enum class State { Creating, Open, Closed }
+
     class Entry(
         val owner: ULong,
         val declaring: ULong,
-        val types: Set<String>,
-        val overrides: Set<String>,
+        val types: MutableSet<String>,
+        val overrides: MutableSet<String>,
         val singleton: Boolean,
+        val creator: ULong,
+        var state: State,
     )
 
     private class TypeEntry(val declaring: ULong, val hasBase: Boolean)
@@ -37,6 +44,9 @@ internal object HostShared {
         Log.info("declared ${declared.size} public type(s) for plugin $pluginId", tag = "Shared")
     }
 
+    /** 类型由哪个插件声明；没有声明过的类型返回 null。 */
+    fun declaringOf(typeId: String): ULong? = types[typeId]?.declaring
+
     /** 登记一个对象；返回 Host 分配的句柄。 */
     fun register(pluginId: ULong, registration: SharedRegistration): Long {
         val handle = nextHandle++
@@ -45,9 +55,11 @@ internal object HostShared {
         entries[handle] = Entry(
             owner = pluginId,
             declaring = declaring,
-            types = exported,
-            overrides = registration.overrides.toSet(),
+            types = exported.toMutableSet(),
+            overrides = registration.overrides.toMutableSet(),
             singleton = registration.singleton,
+            creator = pluginId,
+            state = State.Open,
         )
         if (registration.singleton) singletons[registration.typeId] = handle
         Log.info(
@@ -56,6 +68,51 @@ internal object HostShared {
             tag = "Shared",
         )
         return handle
+    }
+
+    /**
+     * 构造请求先占一个句柄，等提供者回执再补全导出类型与覆盖集合。
+     *
+     * @param provider 负责实例化的插件（类型的声明方）
+     * @param creator 发起构造的插件；只有它能完成 `initialization`
+     */
+    fun beginCreate(provider: ULong, typeId: String, creator: ULong): Long {
+        val handle = nextHandle++
+        entries[handle] = Entry(
+            owner = provider,
+            declaring = types[typeId]?.declaring ?: provider,
+            types = mutableSetOf(typeId),
+            overrides = mutableSetOf(),
+            singleton = false,
+            creator = creator,
+            state = State.Creating,
+        )
+        Log.info(
+            "creating $typeId handle=$handle creator=$creator provider=$provider",
+            tag = "Shared",
+        )
+        return handle
+    }
+
+    /** 提供者回执：补全导出类型与覆盖集合；没有 `initialization` 的类型直接可用。 */
+    fun completeCreate(handle: Long, reply: SharedCreateReply) {
+        val entry = entries[handle] ?: return
+        entry.types += reply.interfaces
+        entry.overrides += reply.overrides
+        if (!reply.initialization) entry.state = State.Open
+        Log.info("created handle=$handle types=${entry.types} state=${entry.state}", tag = "Shared")
+    }
+
+    fun markOpen(handle: Long) {
+        val entry = entries[handle] ?: return
+        entry.state = State.Open
+        Log.info("initialized handle=$handle", tag = "Shared")
+    }
+
+    fun markClosed(handle: Long) {
+        val entry = entries[handle] ?: return
+        entry.state = State.Closed
+        Log.info("closed handle=$handle", tag = "Shared")
     }
 
     fun entry(handle: Long): Entry? = entries[handle]

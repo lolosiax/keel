@@ -225,6 +225,7 @@ private fun dispatchEventBody(e: KeelEvent) {
             KEEL_SUBJECT_CONSOLE.toULong() -> PluginConsole.handle(e)
             KEEL_SUBJECT_SERVICE_CALL.toULong() -> handleServiceCall(e)
             HostSubjects.SHARED_CALL.toULong() -> handleSharedCall(e)
+            HostSubjects.PUBLIC_API_CREATE.toULong() -> handleSharedCreate(e)
             KEEL_SUBJECT_AUTHN.toULong() -> handleAuthn(e)
             KEEL_SUBJECT_AUTHZ.toULong() -> handleAuthz(e)
             KEEL_SUBJECT_LOG_WAKE.toULong() -> LogSubscriptions.signal(e.correlation.toLong())
@@ -370,6 +371,13 @@ private fun handleServiceCall(event: KeelEvent) {
         PluginServices.dispatch(call, event.source.toLong())
     }
     replyCompleteWithPayload(event, reply)
+}
+
+/** 处理 Host 转来的共享对象构造命令：用本地构造器建实例，回执里带生命周期标记。 */
+private fun handleSharedCreate(event: KeelEvent) {
+    val command = ServiceWire.decode(SharedCreateCommand.serializer(), payloadOf(event))
+    val reply = PublicApiObjects.create(command)
+    replyCompleteWithPayload(event, ServiceWire.encode(SharedCreateReply.serializer(), reply))
 }
 
 /** 处理 Host 转来的共享对象调用：解码信封 → 本地 / 声明方分发 → 回包。 */

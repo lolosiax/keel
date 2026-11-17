@@ -5,10 +5,13 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.annotation.KeelPluginMain
-import moe.lolosia.keel.plugins.animal.*
+import moe.lolosia.keel.api.share.PublicApiType
+import moe.lolosia.keel.plugins.animal.CALLABLE_TYPE_ID
+import moe.lolosia.keel.plugins.animal.animalPlugin
 
 /**
- * 实例方示例插件：创建 [Dog] 与 [SpawnAnimal]，再把回调交给声明方。
+ * 实例方示例插件：注册 `SpawnAnimal` 的构造器，按远程构造流程拿回代理，
+ * 初始化后再把回调交给声明方。
  *
  * `requires: ["animal"]` 保证声明方先启用；`onEnable` 不是 `suspend`，
  * 跨插件调用放进 `ctx.scope`，在 Worker 线程上执行。
@@ -20,29 +23,35 @@ class DogPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
+        // 本插件是 SpawnAnimal 的声明方：Host 据此把构造请求路由回来
+        context.publicApi.declare(listOf(PublicApiType(SPAWN_ANIMAL_TYPE_ID)))
+        context.publicApi.constructor(
+            key = SpawnAnimalKey,
+            factory = { handle -> SpawnAnimal(context.publicApi).also { it.attachHandle(handle) } },
+            dispatcher = { SpawnAnimalDispatcher(it, context.publicApi) },
+            interfaces = listOf(CALLABLE_TYPE_ID),
+            initialization = true,
+        )
         Log.info("loaded")
     }
 
     override fun onEnable() {
-        val dog = Dog()
-        val dogRef = context.publicApi.register(
-            instance = dog,
-            key = AnimalKey,
-            dispatcher = DogDispatcher(dog),
-            overrides = setOf("bark"),
-        )
-        dog.attachHandle(dogRef.handle)
-
-        val spawn = SpawnAnimal(dog)
-        context.publicApi.register(
-            instance = spawn,
-            key = CallableKey,
-            dispatcher = SpawnAnimalDispatcher(spawn, dogRef),
-        )
-
         context.scope.launch {
-            Log.info("准备把 SpawnAnimal(handle=${context.publicApi.handleOf(spawn)}) 注册到 AnimalPlugin")
-            context.animalPlugin.register(spawn)
+            val callback = context.publicApi.createInstance(SpawnAnimalKey) { SpawnAnimalProxy(it) }
+            Log.info("createInstance 返回 SpawnAnimal(handle=${callback.sharedHandle})，state=Creating")
+
+            // 状态机：初始化之前除 initialization 外的调用都应被 Host 拒绝
+            try {
+                callback.invoke()
+                Log.warn("未初始化调用 invoke 竟然成功了")
+            } catch (e: Throwable) {
+                Log.info("未初始化调用 invoke 被拒绝：${e.message}")
+            }
+
+            callback.initialization()
+            Log.info("initialization 完成，准备注册到 AnimalPlugin")
+
+            context.animalPlugin.register(callback)
             Log.info("注册完成")
         }
     }

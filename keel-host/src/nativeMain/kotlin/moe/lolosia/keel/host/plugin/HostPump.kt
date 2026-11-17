@@ -73,7 +73,15 @@ private class Forward(
     val deadlineMs: Long,
     /** 转发给提供方时使用的 subject，回包与超时错误都原样带回。 */
     val subject: ULong,
+    /** 远程构造：提供者回执后补全句柄表，并把 `SharedHandleReply` 回给创建者。 */
+    val createHandle: Long? = null,
+    /** `initialization` 调用：成功后转 Open，失败 / 超时转 Closed。 */
+    val initializationHandle: Long? = null,
 )
+
+/** `initialization` / `initialization/...` 线名；只有创建者能在 Creating 状态调用。 */
+private fun SharedCall.isInitialization(): Boolean =
+    method == "initialization" || method.startsWith("initialization/")
 
 /**
  * Host 侧事件泵。
@@ -449,6 +457,27 @@ internal object HostPump {
             return
         }
 
+        // Creating 时只放行创建者的 initialization；其余方法等初始化成功后再来
+        val initializing = call.isInitialization()
+        if (entry.state != HostShared.State.Open && !initializing) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "shared object not initialized: ${call.handle}",
+                HostSubjects.SHARED_CALL.toULong(),
+            )
+            return
+        }
+        if (initializing && event.source != entry.creator) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "only the creator can initialize handle ${call.handle}",
+                HostSubjects.SHARED_CALL.toULong(),
+            )
+            return
+        }
+
         val target = HostShared.targetOf(entry, call)
         val payload = ServiceWire.encode(
             SharedCall.serializer(),
@@ -478,18 +507,129 @@ internal object HostPump {
             providerId = target,
             deadlineMs = nowMs() + debugTimeoutMs(SERVICE_TIMEOUT_MS),
             subject = HostSubjects.SHARED_CALL.toULong(),
+            initializationHandle = if (initializing) call.handle else null,
+        )
+    }
+
+    /**
+     * 远程构造：占一个句柄，转发给提供者实例化。
+     *
+     * 提供者回执后由 [completeForward] 补全句柄表，并把 `SharedHandleReply` 回给创建者。
+     */
+    private fun routeSharedCreate(event: HostEvent) {
+        val request = try {
+            ServiceWire.decode(SharedCreateRequest.serializer(), event.payload ?: ByteArray(0))
+        } catch (error: Throwable) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "shared create payload cannot be decoded: ${error.message}",
+                HostSubjects.PUBLIC_API_CREATE.toULong(),
+            )
+            return
+        }
+
+        val provider = HostShared.declaringOf(request.typeId)
+        if (provider == null) {
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "unknown shared type: ${request.typeId}",
+                HostSubjects.PUBLIC_API_CREATE.toULong(),
+            )
+            return
+        }
+
+        val handle = HostShared.beginCreate(provider, request.typeId, event.source)
+        val correlation = nextCorrelation()
+        if (!pushToPlugin(
+                pluginId = provider,
+                kind = KEEL_EVENT_COMMAND.toInt(),
+                subject = HostSubjects.PUBLIC_API_CREATE.toULong(),
+                correlation = correlation,
+                payload = ServiceWire.encode(
+                    SharedCreateCommand.serializer(),
+                    SharedCreateCommand(request.typeId, handle),
+                ),
+                source = event.source,
+            )
+        ) {
+            HostShared.markClosed(handle)
+            replyServiceError(
+                event.source,
+                event.correlation,
+                "shared type provider offline: ${request.typeId}",
+                HostSubjects.PUBLIC_API_CREATE.toULong(),
+            )
+            return
+        }
+        forwards[correlation] = Forward(
+            callerId = event.source,
+            callerCorrelation = event.correlation,
+            providerId = provider,
+            deadlineMs = nowMs() + debugTimeoutMs(SERVICE_TIMEOUT_MS),
+            subject = HostSubjects.PUBLIC_API_CREATE.toULong(),
+            createHandle = handle,
         )
     }
 
     /** 把提供者的回包送回调用方；correlation 换回调用方当初发出去的值。 */
     private fun completeForward(forward: Forward, reply: HostEvent) {
+        val createHandle = forward.createHandle
+        if (createHandle != null) {
+            completeCreate(forward, createHandle, reply)
+            return
+        }
+
+        forward.initializationHandle?.let { handle ->
+            if (reply.status == KEEL_OK.toInt()) HostShared.markOpen(handle)
+            else HostShared.markClosed(handle)
+        }
+        pushForwardReply(forward, reply.subject, reply.status, reply.payload)
+    }
+
+    /** 构造回执：成功时补全句柄表并回 `SharedHandleReply`，失败时关闭占位句柄。 */
+    private fun completeCreate(forward: Forward, handle: Long, reply: HostEvent) {
+        if (reply.status != KEEL_OK.toInt()) {
+            HostShared.markClosed(handle)
+            pushForwardReply(forward, reply.subject, reply.status, reply.payload)
+            return
+        }
+        val created = runCatching {
+            ServiceWire.decode(SharedCreateReply.serializer(), reply.payload ?: ByteArray(0))
+        }.getOrNull()
+        if (created == null) {
+            HostShared.markClosed(handle)
+            replyServiceError(
+                forward.callerId,
+                forward.callerCorrelation,
+                "shared create reply cannot be decoded",
+                HostSubjects.PUBLIC_API_CREATE.toULong(),
+            )
+            return
+        }
+        HostShared.completeCreate(handle, created)
+        pushForwardReply(
+            forward,
+            reply.subject,
+            KEEL_OK.toInt(),
+            ServiceWire.encode(SharedHandleReply.serializer(), SharedHandleReply(handle)),
+        )
+    }
+
+    private fun pushForwardReply(
+        forward: Forward,
+        subject: ULong,
+        status: Int,
+        payload: ByteArray?,
+    ) {
         val pushed = pushToPlugin(
             pluginId = forward.callerId,
             kind = KEEL_EVENT_COMPLETE.toInt(),
-            subject = reply.subject,
+            subject = subject,
             correlation = forward.callerCorrelation,
-            status = reply.status,
-            payload = reply.payload,
+            status = status,
+            payload = payload,
             source = forward.providerId,
         )
         if (!pushed) {
@@ -544,6 +684,11 @@ internal object HostPump {
         // 共享对象调用同样要按句柄转发，不能在 Host 本地作答
         if (event.subject == HostSubjects.SHARED_CALL.toULong()) {
             routeSharedCall(event)
+            return
+        }
+        // 远程构造要等提供者实例化，回执里才有句柄
+        if (event.subject == HostSubjects.PUBLIC_API_CREATE.toULong()) {
+            routeSharedCreate(event)
             return
         }
 
@@ -850,6 +995,9 @@ internal object HostPump {
             val expired = forwards.filterValues { it.deadlineMs <= now }.keys.toList()
             expired.forEach { correlation ->
                 val forward = forwards.remove(correlation) ?: return@forEach
+                // 半成品（构造 / 初始化）没有成功回执，超时后不再对外可用
+                forward.createHandle?.let { HostShared.markClosed(it) }
+                forward.initializationHandle?.let { HostShared.markClosed(it) }
                 val reason =
                     if (forward.subject == KEEL_SUBJECT_MESSAGE.toULong()) "message timed out"
                     else "service call timed out"

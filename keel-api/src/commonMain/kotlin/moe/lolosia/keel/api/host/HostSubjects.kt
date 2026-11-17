@@ -73,4 +73,11 @@ object HostSubjects {
 
     /** 请求：共享对象方法调用；载荷见 [SharedCall]，Host 按句柄路由。 */
     const val SHARED_CALL: Long = 0x1016L
+
+    /**
+     * 请求：按 typeId 远程构造共享对象；载荷见 [SharedCreateRequest]。
+     *
+     * Host → 提供者复用同一个 subject，载荷是 [SharedCreateCommand]。
+     */
+    const val PUBLIC_API_CREATE: Long = 0x1017L
 }
