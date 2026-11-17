@@ -116,7 +116,7 @@ v1 的设计经验全部保留（见 §3），只删除机制本身。
 ## 7. 验收清单
 
 - [x] animal：2b 生成物替换手写 api，dog 冒烟输出与现在一致。
-- [ ] hello：`ctx.helloApi` 调用通过，无 `@ModuleService`。
+- [x] hello：`@PublicApi` + `@Singleton` 接入，`ctx.helloApi` 生成，自检经 `requireInstance` 往返通过，无 `@ModuleService`。
 - [ ] basic-biz：`UserDirectory` 原调用通过，DTO 字段/默认值一致。
 - [ ] rbac：原有权限查询调用通过。
 - [ ] `keelApiCheck` 通过（V1 提交制）。

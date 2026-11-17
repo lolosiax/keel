@@ -1,14 +1,13 @@
 package moe.lolosia.keel.plugins.hello
 
-import moe.lolosia.keel.api.annotation.ModuleService
+import moe.lolosia.keel.api.annotation.PublicApi
 
 /**
  * 跨模块服务的最小示例。
  *
- * Key / Client / 访问器由 `keel-plugin-ksp` 生成（同包的 `HelloApiKeel.kt`），
- * 服务端分发器与注册表由 `@ModuleServiceProvider` 触发生成。
+ * 契约写在 impl 模块；api 工件里的镜像 / 代理 / Key / 访问器由 `keel-plugin-ksp` 生成。
  */
-@ModuleService("hello")
+@PublicApi
 interface HelloApi {
 
     fun greet(name: String): String

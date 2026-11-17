@@ -53,11 +53,16 @@ internal class KeelPublicApiGenerator(
     ) {
         val hasBase: Boolean get() = kind != Kind.INTERFACE
         val packageName: String get() = fqn.substringBeforeLast('.')
-        val singleton: Boolean
+        val annotatedSingleton: Boolean
             get() = kind == Kind.PLUGIN ||
                 declaration.annotations.any {
                     it.annotationType.resolve().declaration.qualifiedName?.asString() == SINGLETON
                 }
+
+        /** 是否有 `@Singleton` 实现类提供本契约；由 [singletonProviders] 回填。 */
+        var providedSingleton: Boolean = false
+
+        val singleton: Boolean get() = annotatedSingleton || providedSingleton
         val dispatcherNeedsDirectory: Boolean get() = methods.any { it.result is Wire.Shared }
         val proxyFqn: String get() = "$packageName.${simpleName}Proxy"
         val shadowFqn: String get() = "$packageName.${simpleName}Shadow"
@@ -71,6 +76,13 @@ internal class KeelPublicApiGenerator(
     )
 
     private class Instantiation(val expression: String, val usesPlugin: Boolean)
+
+    private class SingletonProvider(
+        val declaration: KSClassDeclaration,
+        val implFqn: String,
+        val simpleName: String,
+        val contracts: List<TypeModel>,
+    )
 
     fun generate(resolver: Resolver, main: KSClassDeclaration, apiDir: String? = null) {
         val mainFqn = main.qualifiedName?.asString()
@@ -148,8 +160,17 @@ internal class KeelPublicApiGenerator(
             )
         }
 
+        val providers = singletonProviders(resolver, models, mainFqn)
+        providers.flatMap { it.contracts }.forEach { it.providedSingleton = true }
+
         models.filter { !it.manual && it.supported }.forEach { model ->
             writeGlue(model)
+        }
+
+        providers.forEach { provider ->
+            provider.contracts.forEach { contract ->
+                writeInterfaceDispatcher(contract, provider)
+            }
         }
 
         val dependencies = (declarations + handlerDeclarations)
@@ -159,7 +180,7 @@ internal class KeelPublicApiGenerator(
         writeFile(
             fileName = "KeelPluginPublicApi",
             packageName = main.packageName.asString(),
-            code = renderSetup(mainFqn, models, handlerEntries),
+            code = renderSetup(mainFqn, models, handlerEntries, providers),
             dependencies = dependencies,
         )
 
@@ -171,6 +192,61 @@ internal class KeelPublicApiGenerator(
                 main,
             )
         }
+    }
+
+    // ---------------------------------- 单例提供者 ----------------------------------
+
+    /**
+     * 扫 `@Singleton` 实现类，找出它们提供的 `@PublicApi` 契约。
+     *
+     * 一个 typeId 只允许一个单例；重复时 Host 拒绝后到者，这里保持声明顺序。
+     */
+    private fun singletonProviders(
+        resolver: Resolver,
+        models: List<TypeModel>,
+        mainFqn: String,
+    ): List<SingletonProvider> =
+        resolver.getSymbolsWithAnnotation(SINGLETON)
+            .filterIsInstance<KSClassDeclaration>()
+            .filter { it.classKind == ClassKind.CLASS }
+            .distinctBy { it.qualifiedName?.asString() }
+            .mapNotNull { declaration ->
+                val implFqn = declaration.qualifiedName?.asString() ?: return@mapNotNull null
+                // 插件本体已经由 @KeelPluginMain 自动登记，不需要再处理
+                if (implFqn == mainFqn) return@mapNotNull null
+                val implType = declaration.asStarProjectedType()
+                val contracts = models.filter { model ->
+                    model.kind == Kind.INTERFACE &&
+                        runCatching {
+                            model.declaration.asStarProjectedType().isAssignableFrom(implType)
+                        }.getOrDefault(false)
+                }
+                if (contracts.isEmpty()) {
+                    logger.warn(
+                        "@Singleton 类没有实现任何 @PublicApi 接口：$implFqn",
+                        declaration,
+                    )
+                    return@mapNotNull null
+                }
+                SingletonProvider(
+                    declaration = declaration,
+                    implFqn = implFqn,
+                    simpleName = declaration.simpleName.asString(),
+                    contracts = contracts,
+                )
+            }
+            .toList()
+
+    private fun writeInterfaceDispatcher(model: TypeModel, provider: SingletonProvider) {
+        writeFile(
+            fileName = "${model.simpleName}Dispatcher",
+            packageName = model.packageName,
+            code = renderInterfaceDispatcher(model, provider.implFqn),
+            dependencies = listOfNotNull(
+                model.declaration.containingFile,
+                provider.declaration.containingFile,
+            ).distinct().toTypedArray(),
+        )
     }
 
     // ---------------------------------- 模型提取 ----------------------------------
@@ -826,10 +902,51 @@ internal class KeelPublicApiGenerator(
         appendLine("}")
     }
 
+    /** 接口契约的单例提供者分发器：方法与实现类一一对应，走所有者侧。 */
+    private fun renderInterfaceDispatcher(model: TypeModel, implFqn: String): String = buildString {
+        appendLine("// 由 keel-plugin-ksp 生成，不要手改。")
+        appendLine("package ${model.packageName}")
+        appendLine()
+        val usesValue = model.methods.any { it.params.isNotEmpty() || it.result !is Wire.Unit }
+        val usesShared = model.methods.any { it.result is Wire.Shared }
+        if (usesValue) appendLine("import kotlinx.serialization.builtins.serializer")
+        appendLine("import moe.lolosia.keel.api.service.ServiceWire")
+        if (model.dispatcherNeedsDirectory) {
+            appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
+        }
+        appendLine("import moe.lolosia.keel.api.share.PublicApiDispatcher")
+        if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
+        appendLine()
+        appendLine("/** `${model.fqn}` 的提供者侧分发器；实现类是 `$implFqn`。 */")
+        val directory = if (model.dispatcherNeedsDirectory) ", private val directory: PublicApiDirectory" else ""
+        appendLine("internal class ${model.simpleName}Dispatcher(private val impl: $implFqn$directory) : PublicApiDispatcher {")
+        appendLine()
+        appendLine("    override val typeId: String = \"${escape(model.id)}\"")
+        appendLine()
+        appendLine("    override suspend fun dispatch(")
+        appendLine("        handle: Long,")
+        appendLine("        method: String,")
+        appendLine("        payload: ByteArray,")
+        appendLine("        callerModule: Long,")
+        appendLine("        overrides: Set<String>,")
+        appendLine("    ): ByteArray = when (method) {")
+        model.methods.forEach { method ->
+            appendLine("        \"${method.name}\" -> {")
+            append(decodeParams(method, "            "))
+            append(ownerCall(method, "            "))
+            appendLine("        }")
+            appendLine()
+        }
+        appendLine("        else -> throw IllegalArgumentException(\"${model.simpleName} 没有方法 \$method\")")
+        appendLine("    }")
+        appendLine("}")
+    }
+
     private fun renderSetup(
         mainFqn: String,
         models: List<TypeModel>,
         handlers: List<HandlerEntry>,
+        providers: List<SingletonProvider>,
     ): String = buildString {
         val main = models.firstOrNull { it.fqn == mainFqn && it.kind == Kind.PLUGIN }
         val handlerByTarget = handlers.associateBy { it.target }
@@ -887,6 +1004,20 @@ internal class KeelPublicApiGenerator(
                 appendLine("            instance = pluginInstance,")
                 appendLine("            key = PublicApiKey<$mainFqn>(\"${escape(main.id)}\"),")
                 appendLine("            dispatcher = $dispatcher,")
+                appendLine("            singleton = true,")
+                appendLine("        )")
+            }
+        }
+        providers.forEach { provider ->
+            val instance = provider.simpleName.replaceFirstChar { it.lowercaseChar() } + "Instance"
+            appendLine("        val $instance = ${provider.implFqn}()")
+            provider.contracts.forEach { contract ->
+                val args = mutableListOf(instance)
+                if (contract.dispatcherNeedsDirectory) args += "context.publicApi"
+                appendLine("        context.publicApi.register(")
+                appendLine("            instance = $instance,")
+                appendLine("            key = PublicApiKey<${contract.fqn}>(\"${escape(contract.id)}\"),")
+                appendLine("            dispatcher = ${contract.dispatcherFqn}(${args.joinToString(", ")}),")
                 appendLine("            singleton = true,")
                 appendLine("        )")
             }
