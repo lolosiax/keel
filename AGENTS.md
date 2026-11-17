@@ -86,6 +86,11 @@ gradlew -p keel-plugin-hello linkReleaseSharedLibLinuxArm64
 # 只组装运行目录（不启动 Host），供 IDE / 调试器使用
 gradlew -p keel-plugin-hello keelPrepareRun
 
+# V1 提交制：确认插件的 api/ 生成物已经随源码提交（过期则失败）
+gradlew -p keel-plugin-animal keelApiCheck
+gradlew -p keel-plugin-hello keelApiCheck
+gradlew -p keel-plugin-basic-biz keelApiCheck
+
 # IDEA 插件（独立构建，不参与 buildAll）
 gradlew -p keel-idea-plugin buildPlugin
 gradlew -p keel-idea-plugin runIde

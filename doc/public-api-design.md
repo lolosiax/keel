@@ -156,7 +156,8 @@ V1 先跑通，再把落点切到 V2；两者使用同一个生成器，切换�
   - 同名 `XxxProxy` / `XxxKey` / `ctx.xxx` → 跳过 + warning；
   - 访问器依赖的 proxy 或 key 被手写占用 → 访问器也跳过，提示自行接线；
   - 永不覆盖已有文件。
-- `keelApiCheck`（V1）在 CI 重新生成并 diff，防止提交过期产物。
+- `keelApiCheck`（V1）在 CI 重新生成并 diff，防止提交过期产物：各插件构建里的 `keelApiCheck`
+  依赖 `keelApiGenerate`，再检查 `api/src/commonMain` 是否还有未提交改动。
 
 ---
 

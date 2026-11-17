@@ -126,7 +126,7 @@ rbac 的实现插件在 klive，**本次不迁**：`keel-plugin-rbac-api` 保持
 - [x] hello：`@PublicApi` + `@Singleton` 接入，`ctx.helloApi` 生成，自检经 `requireInstance` 往返通过，无 `@ModuleService`。
 - [x] basic-biz：契约 / DTO 迁入 impl，生成 `api/`；五个单例登记 + `SettingApi.snapshot()` 往返通过。
 - [ ] rbac：实现插件在 klive，本次不迁；`keel-plugin-rbac-api` 暂留 v1。
-- [ ] `keelApiCheck` 通过（V1 提交制）。
+- [x] `keelApiCheck` 通过（V1 提交制）。
 - [ ] 全仓库无 `@ModuleService` / `ServiceCall` / `ctx.modules` 引用。
 - [ ] Host 侧 `SERVICE_CALL` 处理器删除后，全量构建通过。
 

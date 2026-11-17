@@ -22,6 +22,21 @@ tasks.register("keelApiGenerate") {
     dependsOn("kspKotlinMingwX64")
 }
 
+// V1 提交制：生成器直接改写 api/src/commonMain，产物必须随仓库提交；过期时这里失败
+tasks.register("keelApiCheck") {
+    group = "keel"
+    description = "确认 api 生成物与 @PublicApi 声明一致（V1 提交制）"
+    dependsOn("keelApiGenerate")
+    doLast {
+        val status = providers.exec {
+            commandLine("git", "status", "--porcelain", "--", "api/src/commonMain")
+        }.standardOutput.asText.get()
+        check(status.isBlank()) {
+            "api 生成物已过期，请提交 api/src/commonMain 的改动：\n$status"
+        }
+    }
+}
+
 keelPlugin {
     // 当前开发机先只打 mingwX64；Linux 目标在对应平台或 CI 上打
     target("mingwX64")
