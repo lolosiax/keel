@@ -1,6 +1,7 @@
 package moe.lolosia.keel.plugins.animal
 
 import kotlinx.serialization.builtins.serializer
+import moe.lolosia.keel.api.annotation.PublicApiHandler
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.share.PublicApiBridge
 import moe.lolosia.keel.api.share.PublicApiDispatcher
@@ -11,6 +12,7 @@ import moe.lolosia.keel.api.share.PublicApiDispatcher
  * 每个句柄一个影子；覆盖方法按实例方上报的 override 集合决定「本地跑基类体」还是
  * 「转回实例方」；`base.` 前缀永远只跑基类体，防止影子与镜像互相转发。
  */
+@PublicApiHandler(Animal::class)
 class AnimalDispatcher : PublicApiDispatcher {
 
     override val typeId: String = ANIMAL_TYPE_ID

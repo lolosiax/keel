@@ -43,6 +43,9 @@ object PluginWorker {
     internal var pluginId: ULong = 0uL
     internal var hostInbox: CPointer<KeelQueue>? = null
 
+    /** KSP 生成的 `@PublicApi` 初始化 / 释放入口；停用时清空。 */
+    internal var generatedPublicApi: GeneratedPublicApi? = null
+
     /** 本插件的收件箱；阻塞式服务调用等应答时要在这里重入事件泵。 */
     internal var inbox: CPointer<KeelQueue>? = null
 
@@ -61,6 +64,7 @@ object PluginWorker {
         out: CPointer<KeelPluginHandlers>?,
         generated: GeneratedRoutes? = null,
         services: GeneratedServices? = null,
+        publicApi: GeneratedPublicApi = GeneratedPublicApi.Empty,
         factory: () -> Plugin,
     ): UInt {
         if (api == null || out == null) return KEEL_ERR_INVALID
@@ -118,6 +122,10 @@ object PluginWorker {
             // onLoad / onEnable 期间可能已经收到事件（例如服务回包），先登记实例
             plugin = instance
             instance.onLoad(context)
+            // 生成的 @PublicApi 注册放在 onLoad 之后、onEnable 之前：
+            // 此时插件已持有上下文，其它插件也还没机会调用它
+            generatedPublicApi = publicApi
+            publicApi.setup(instance, context)
             // Host 只在 manifest 声明了对应 provides 时才会向本插件发起 SPI 请求
             authenticator = instance.authenticator()
             authorizer = instance.authorizer()
@@ -133,6 +141,7 @@ object PluginWorker {
         } catch (e: Throwable) {
             // 启动失败时实例不完整，不能让后续 SHUTDOWN 走到 onDisable
             plugin = null
+            generatedPublicApi = null
             authenticator = null
             authorizer = null
             Log.error("插件生命周期失败", cause = e)
@@ -141,7 +150,11 @@ object PluginWorker {
     }
 
     internal fun disable() {
-        plugin?.onDisable()
+        val instance = plugin
+        instance?.onDisable()
+        // 与 setup 对称：释放钩子在 onDisable 之后、本地表清空之前执行
+        if (instance != null) generatedPublicApi?.release(instance)
+        generatedPublicApi = null
         plugin = null
         pluginContext = null
         authenticator = null

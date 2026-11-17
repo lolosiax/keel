@@ -1,5 +1,6 @@
 package moe.lolosia.keel.plugins.animal
 
+import moe.lolosia.keel.api.annotation.PublicApiHandler
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.share.PublicApiDispatcher
 import moe.lolosia.keel.api.share.SharedRef
@@ -9,6 +10,7 @@ import moe.lolosia.keel.api.share.SharedRef
  *
  * 只导出 [AnimalPlugin.register]；参数里的共享对象按句柄解码成本地代理。
  */
+@PublicApiHandler(AnimalPlugin::class)
 class AnimalPluginDispatcher(private val impl: AnimalPlugin) : PublicApiDispatcher {
 
     override val typeId: String = ANIMAL_PLUGIN_TYPE_ID

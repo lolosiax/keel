@@ -5,7 +5,6 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.api.Plugin
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.annotation.KeelPluginMain
-import moe.lolosia.keel.api.share.PublicApiType
 import moe.lolosia.keel.plugins.animal.CALLABLE_TYPE_ID
 import moe.lolosia.keel.plugins.animal.animalPlugin
 
@@ -23,8 +22,7 @@ class DogPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
-        // 本插件是 SpawnAnimal 的声明方：Host 据此把构造请求路由回来
-        context.publicApi.declare(listOf(PublicApiType(SPAWN_ANIMAL_TYPE_ID)))
+        // 类型声明由生成的 KeelPluginPublicApi 完成；这里只登记构造器
         context.publicApi.constructor(
             key = SpawnAnimalKey,
             factory = { handle -> SpawnAnimal(context.publicApi).also { it.attachHandle(handle) } },
