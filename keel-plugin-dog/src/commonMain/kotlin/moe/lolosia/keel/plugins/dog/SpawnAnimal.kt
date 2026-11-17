@@ -14,7 +14,7 @@ import moe.lolosia.keel.plugins.animal.Callable
  * 构造与初始化都经 Host 状态机：构造完处于 Creating，只有创建者能调 [initialization]，
  * 成功后才允许 [invoke]。
  */
-@PublicApi(SPAWN_ANIMAL_TYPE_ID)
+@PublicApi
 open class SpawnAnimal(private val api: PublicApiDirectory? = null) : Callable, SharedProxy {
 
     override var sharedHandle: Long = 0L

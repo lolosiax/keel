@@ -8,7 +8,7 @@ import moe.lolosia.keel.api.annotation.PublicApi
  *
  * `-api` 工件里的同名类型是它的镜像（无状态、方法体为桩），两者只靠 typeId 对齐。
  */
-@PublicApi(ANIMAL_TYPE_ID)
+@PublicApi
 open class Animal {
 
     /** 基类状态；住在声明方为每个外来实例保留的影子里。 */

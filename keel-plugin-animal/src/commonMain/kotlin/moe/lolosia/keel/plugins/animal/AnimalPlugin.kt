@@ -11,7 +11,7 @@ import moe.lolosia.keel.api.annotation.PublicApi
  * 类型声明、单例登记与分发器收集由 KSP 生成的 `KeelPluginPublicApi` 完成；
  * 本类只保留业务方法。另一个插件通过 `ctx.animalPlugin` 拿到本类的代理。
  */
-@PublicApi(ANIMAL_PLUGIN_TYPE_ID)
+@PublicApi
 @KeelPluginMain
 class AnimalPlugin : Plugin {
 

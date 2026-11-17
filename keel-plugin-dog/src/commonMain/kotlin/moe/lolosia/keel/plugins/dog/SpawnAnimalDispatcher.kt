@@ -1,5 +1,6 @@
 package moe.lolosia.keel.plugins.dog
 
+import moe.lolosia.keel.api.annotation.PublicApiHandler
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.share.PublicApiDirectory
 import moe.lolosia.keel.api.share.PublicApiDispatcher
@@ -9,7 +10,9 @@ import moe.lolosia.keel.api.share.SharedRef
  * `SpawnAnimal` 在实例方侧的分发器。
  *
  * `initialization` 本地执行；`invoke` 的返回值换成 Dog 的句柄。
+ * 标了 `@PublicApiHandler` 表示这份胶水由本插件手写，KSP 不再生成。
  */
+@PublicApiHandler(SpawnAnimal::class)
 class SpawnAnimalDispatcher(
     private val impl: SpawnAnimal,
     private val directory: PublicApiDirectory,
