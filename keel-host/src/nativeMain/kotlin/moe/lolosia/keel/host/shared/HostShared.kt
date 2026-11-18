@@ -38,9 +38,24 @@ internal object HostShared {
     private val singletons = mutableMapOf<String, Long>()
     private var nextHandle = 1L
 
-    /** 声明方启用时上报自己导出的类型。 */
+    /**
+     * 声明方启用时上报自己导出的类型。
+     *
+     * 同一 typeId 只认最先声明的插件：可替换能力（rbac 等）默认实现与第三方实现同时存在时，
+     * 后加载的一方不会被静默串进来；它的实例仍可按句柄调用，只是不参与类型路由与单例查找。
+     */
     fun declare(pluginId: ULong, declared: List<PublicApiType>) {
-        declared.forEach { types[it.typeId] = TypeEntry(pluginId, it.hasBase) }
+        declared.forEach { type ->
+            val existing = types[type.typeId]
+            if (existing != null && existing.declaring != pluginId) {
+                Log.warn(
+                    "类型 ${type.typeId} 已由插件 ${existing.declaring} 声明，忽略插件 $pluginId 的重复声明",
+                    tag = "Shared",
+                )
+            } else {
+                types[type.typeId] = TypeEntry(pluginId, type.hasBase)
+            }
+        }
         Log.info("declared ${declared.size} public type(s) for plugin $pluginId", tag = "Shared")
     }
 
@@ -61,7 +76,18 @@ internal object HostShared {
             creator = pluginId,
             state = State.Open,
         )
-        if (registration.singleton) singletons[registration.typeId] = handle
+        if (registration.singleton) {
+            val existing = singletons[registration.typeId]
+            val owner = existing?.let { entries[it]?.owner }
+            if (existing != null && owner != pluginId) {
+                Log.warn(
+                    "单例 ${registration.typeId} 已被插件 $owner 占用，忽略插件 $pluginId 的注册",
+                    tag = "Shared",
+                )
+            } else {
+                singletons[registration.typeId] = handle
+            }
+        }
         Log.info(
             "registered ${registration.typeId} handle=$handle owner=$pluginId declaring=$declaring " +
                 "singleton=${registration.singleton}",

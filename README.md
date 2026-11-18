@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 <img src="doc/logo/keel-icon-hollow.svg" width="112" alt="Keel" />
 
@@ -715,7 +715,7 @@ Keel is at `0.1.0-SNAPSHOT`. The host, C ABI, plugin loading, HTTP routing, logg
 | Log call sites and exception diagnostics | Available | IR transformation, colors, creation and throw sites |
 | `.keel` packaging and console plugin management | Available | `keelPackage`, `plugins` commands, and `--inspect` |
 | Resource layer | Partially available | Host registry is available. Plugin-side resource reads are not connected. |
-| Cross-module service calls | Available | `@ModuleService` codegen plus Host forwarding with CBOR payloads |
+| Cross-module service calls | Available | `@PublicApi` codegen (`ctx.xxx` / `ctx.xxxOrNull`), Host-routed handles, CBOR payloads |
 | Configuration read and write | Available | Host YAML with comment-preserving writes; `ctx.config` and `ctx.server.config` |
 | Plugin storage | Available | Per-plugin `read` / `write` / `delete` under `<workDir>/plugins/<id>/` |
 | Annotation route generation | Available | `@Controller` / `@GET` etc. generate `KeelPluginRoutes` |

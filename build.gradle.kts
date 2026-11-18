@@ -35,17 +35,33 @@ val publishableBuilds = listOf(
     "keel-launcher",
     "keel-database-api",
     "keel-database-mariadb",
-    "keel-plugin-rbac-api",
 )
+
+/**
+ * 插件构建里单独发布 api 工件的子工程（构建名 → 子工程路径）。
+ *
+ * 这些子工程所在构建的根工程没有 `maven-publish`，不能按构建名整体发布；
+ * 但外部业务插件靠这些坐标消费契约，必须随发布一起推。
+ */
+val publishableSubprojects = listOf(
+    "keel-plugin-basic-biz" to ":keel-plugin-basic-biz-api",
+    "keel-plugin-basic-rbac" to ":keel-plugin-rbac-api",
+)
+
+private fun publishTasks(action: String): List<Any> =
+    publishableBuilds.map { gradle.includedBuild(it).task(":$action") } +
+        publishableSubprojects.map { (build, project) ->
+            gradle.includedBuild(build).task("$project:$action")
+        }
 
 tasks.register("publishAll") {
     group = "publishing"
     description = "把所有可发布工件发布到 keel.repo（在 keel/local.properties 配置）"
-    dependsOn(publishableBuilds.map { gradle.includedBuild(it).task(":publish") })
+    dependsOn(publishTasks("publish"))
 }
 
 tasks.register("publishAllToMavenLocal") {
     group = "publishing"
     description = "把所有可发布工件发布到本机 ~/.m2（独立仓库用 mavenLocal() 消费）"
-    dependsOn(publishableBuilds.map { gradle.includedBuild(it).task(":publishToMavenLocal") })
+    dependsOn(publishTasks("publishToMavenLocal"))
 }

@@ -22,7 +22,7 @@ interface HostLink {
     /**
      * 请求 Host 并等待应答；只能在 Worker 线程调用。
      *
-     * 等待期间会继续分发其它事件（与 `ServiceCaller.callBlocking` 同一语义），
+     * 等待期间会继续分发其它事件（与 `PublicApiBridge.call` 同一语义），
      * 默认超时 3s。
      *
      * @throws HostRequestException 超时、插件已停用或 Host 没有对应处理器

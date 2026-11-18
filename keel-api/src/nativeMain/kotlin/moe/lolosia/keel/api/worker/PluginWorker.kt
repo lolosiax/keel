@@ -55,7 +55,7 @@ object PluginWorker {
      * @param api  Host 传给 `keel_plugin_bootstrap` 的能力表，由 C 侧填好
      * @param out  分发表，C 侧在 START 之后用它转发所有事件
      * @param generated KSP 生成的路由集合（固定名 `KeelPluginRoutes`），没有控制器时是空实现
-     * @param services KSP 生成的服务注册表（固定名 `KeelPluginServices`），没有提供者时是空实现
+     * @param publicApi KSP 生成的 `@PublicApi` 注册表（固定名 `KeelPluginPublicApi`）
      * @param factory 创建插件实例（KSP 生成，指向 `@KeelPluginMain` 的类）
      * @return `KeelStatus`；C 侧据此回投 COMPLETE
      */
@@ -63,7 +63,6 @@ object PluginWorker {
         api: CPointer<KeelPluginApi>?,
         out: CPointer<KeelPluginHandlers>?,
         generated: GeneratedRoutes? = null,
-        services: GeneratedServices? = null,
         publicApi: GeneratedPublicApi = GeneratedPublicApi.Empty,
         factory: () -> Plugin,
     ): UInt {
@@ -115,7 +114,6 @@ object PluginWorker {
 
         return try {
             PluginRoutes.reset()
-            PluginServices.reset()
             PublicApiObjects.reset()
             PublicApiBridge.install(PublicApiObjects)
             val instance = factory()
@@ -131,9 +129,6 @@ object PluginWorker {
             authorizer = instance.authorizer()
             // 手写路由先入表，生成的控制器路由后入表（同 routeId 由生成侧覆盖）
             generated?.let { PluginRoutes.applyGenerated(it) }
-            services?.register(PluginServices, context)
-            // 先声明服务再执行 onEnable：onEnable 里可能已经要调用别的模块
-            PluginServices.publish()
             instance.onEnable()
             PluginRoutes.publish()
             out.pointed.on_event = staticCFunction(::dispatch)
@@ -162,7 +157,6 @@ object PluginWorker {
         PluginCapabilities.databaseApi = null
         PluginCapabilities.databaseHandle = null
         PluginRoutes.reset()
-        PluginServices.reset()
         PublicApiObjects.reset()
         LogSubscriptions.reset()
         WorkerScheduler.reset()
@@ -236,7 +230,6 @@ private fun dispatchEventBody(e: KeelEvent) {
             KEEL_SUBJECT_TIMER.toULong() -> WorkerScheduler.tick()
             KEEL_SUBJECT_HTTP.toULong() -> handleHttp(e)
             KEEL_SUBJECT_CONSOLE.toULong() -> PluginConsole.handle(e)
-            KEEL_SUBJECT_SERVICE_CALL.toULong() -> handleServiceCall(e)
             HostSubjects.SHARED_CALL.toULong() -> handleSharedCall(e)
             HostSubjects.PUBLIC_API_CREATE.toULong() -> handleSharedCreate(e)
             KEEL_SUBJECT_AUTHN.toULong() -> handleAuthn(e)
@@ -371,20 +364,6 @@ private fun apiErrorResponse(error: ApiException): HttpResponse =
             contentType = "application/json; charset=utf-8",
         ),
     )
-
-/** 处理其它插件经 Host 转来的服务调用：解码信封 → 走本地分发器 → 回包。 */
-private fun handleServiceCall(event: KeelEvent) {
-    val bytes = if (event.payload_size > 0u) {
-        event.payload?.reinterpret<ByteVar>()?.readBytes(event.payload_size.toInt())
-    } else {
-        null
-    }
-    val call = ServiceWire.decodeCall(bytes ?: ByteArray(0))
-    val reply = runBlocking {
-        PluginServices.dispatch(call, event.source.toLong())
-    }
-    replyCompleteWithPayload(event, reply)
-}
 
 /** 处理 Host 转来的共享对象构造命令：用本地构造器建实例，回执里带生命周期标记。 */
 private fun handleSharedCreate(event: KeelEvent) {

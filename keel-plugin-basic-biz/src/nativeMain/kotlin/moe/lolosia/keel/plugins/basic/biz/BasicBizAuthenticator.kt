@@ -4,7 +4,6 @@ import moe.lolosia.keel.api.auth.Authenticator
 import moe.lolosia.keel.api.web.UserSnapshot
 import moe.lolosia.keel.plugins.basic.biz.db.AccountRepository
 import moe.lolosia.keel.plugins.basic.biz.db.UserRepository
-import moe.lolosia.keel.plugins.rbac.api.ROLE_TYPE_OWNER
 
 /**
  * Host 认证 SPI：`Authorization: Bearer <会话 id>` → [UserSnapshot]。

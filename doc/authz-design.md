@@ -1,8 +1,9 @@
-# 权限系统：嵌进 Host，还是做成 `keel-plugin-rbac`？
+﻿# 权限系统：嵌进 Host，还是做成 `keel-plugin-basic-rbac`？
 
 > 结论：**契约嵌进 core，实现做成插件**（hybrid）。
 > core 只保留 `@Permission`、`Context.hasPermission` 和 `Authorizer` SPI；
-> RBAC 的表、规则、管理接口、默认权限注册表全部归 `keel-plugin-rbac`。
+> RBAC 的表、规则、管理接口、默认权限注册表归默认实现 `keel-plugin-basic-rbac`
+> （`plugin.json` 的 `id = "rbac"`，可被第三方实现原位替换）。
 
 ---
 
@@ -39,14 +40,17 @@
 - Host 侧按 `(userId, permission)` 做短 TTL 缓存；授权插件通过事件失效缓存。
 - core **不**知道角色、组、通配符、负权限、数据库表。
 
-### 2.2 `keel-plugin-rbac`
+### 2.2 `keel-plugin-basic-rbac`（默认实现，可替换）
 
-- 拥有表：`sys_role`、`sys_user_role`、`sys_role_permission` 等（从 backend 迁移）；
+- 拥有表：`sys_role`、`sys_user_roles`、`sys_role_permission`、`sys_user_permission`（从 backend 迁移）；
 - 拥有规则：组链、`+/-` 通配、负号优先、`owner` 放行；
-- 拥有默认注册表 `permissions.yaml`；
-- 拥有管理接口（角色 / 规则 / 用户直授）；
-- 实现并注册 `Authorizer`；
-- 通过 `keel-plugin-rbac-api` 暴露管理侧接口给需要的插件。
+- 拥有默认注册表（内置组规则；库里一旦有规则以库为准）；
+- 拥有管理接口（组 / 规则 / 用户直授）与 `@Controller` 路由；
+- 实现并注册 `Authorizer`（`plugin.json` 的 `provides: ["authz"]`）；
+- 契约 `RbacReader` / `RbacAdmin` + DTO 由本插件生成到 `api/`，以**中性坐标**
+  `keel-plugin-rbac-api` 发布；第三方实现只依赖该工件即可原位替换（同一 typeId、同一能力）。
+- 权限节点目录不单独定义契约：统一用 `ctx.host.permissionCatalog()`
+  （Host 聚合各插件的 `@Permission`）。
 
 ### 2.3 只声明权限的业务插件
 
@@ -56,9 +60,12 @@
 suspend fun users(ctx: Context): List<UserDto> = ...
 ```
 
-- 只依赖 `keel-api`，**不需要**依赖 `keel-plugin-rbac`；
+- 只依赖 `keel-api`，**不需要**依赖 rbac 的契约或实现；
+- 请求期判定用 `ctx.hasPermission`（快照里的 `rules` / `owner`，本地同步）；需要当前用户的
+  角色与规则时直接读 `ctx.user.roles` / `ctx.user.rules`（Host 已通过 `Authorizer.snapshot` 注入）；
 - `plugin.json` 不需要声明 `requires("rbac")`（路由强制由 Host 兜底）；
-- 只有要**管理**角色 / 权限时才依赖 `keel-plugin-rbac-api` 并 `requires("rbac")`。
+- 只有要**精细查询**（如按组列出规则）或**管理**角色 / 权限时才依赖 `keel-plugin-rbac-api`，
+  并用 `ctx.rbacReaderOrNull` 在实现缺席时降级。
 
 ---
 
@@ -98,7 +105,7 @@ HTTP → Host Auth（登录） → Host authorizer 校验
 ## 5. 与认证（Authentication）的关系
 
 - 认证回答「你是谁」：会话 / Token / 签名 URL；由 Host 的 `AuthInterceptor`（或 `keel-plugin-auth`）负责。
-- 授权回答「你能不能做」：`Authorizer` / `keel-plugin-rbac`。
+- 授权回答「你能不能做」：`Authorizer` / `keel-plugin-basic-rbac`。
 - 两者分开：可以换认证方式而不动 RBAC，也可以换授权模型而不动登录。
 - 标准发行版默认同时启用 auth + rbac；最小发行版可以都不装，但带权限的路由会 503。
 
@@ -112,7 +119,7 @@ HTTP → Host Auth（登录） → Host authorizer 校验
 | minimal | 可选 | 不启用 | 公开路由可用；带 `@Permission` 的路由 503 |
 | custom | 任意 | 任意 `Authorizer` 插件 | core 不感知实现 |
 
-`keel-plugin-rbac` 的实现只依赖 `Authorizer` SPI，因此也可以**静态编进 Host** 做零跳版本；
+`keel-plugin-basic-rbac` 的实现只依赖 `Authorizer` SPI，因此也可以**静态编进 Host** 做零跳版本；
 同一份实现既能当插件，也能内嵌，不改业务代码。
 
 ---
@@ -121,7 +128,7 @@ HTTP → Host Auth（登录） → Host authorizer 校验
 
 | backend 现状 | Keel |
 | --- | --- |
-| `sys_role` / `sys_user_role` / `sys_role_permission` | `keel-plugin-rbac` 的表与迁移脚本 |
+| `sys_role` / `sys_user_role` / `sys_role_permission` | `keel-plugin-basic-rbac` 的表与迁移脚本 |
 | `permissions.yaml` 默认注册表 | 随 rbac 插件发布 |
 | `PermissionService` / `PermissionResolver` | rbac 插件内部 |
 | `@Permission` + `ctx.hasPermission` | 留在 core |
@@ -146,7 +153,7 @@ HTTP → Host Auth（登录） → Host authorizer 校验
 ### P0
 
 - `Authorizer` SPI + Host 分发前校验 + fail closed；
-- `keel-plugin-rbac` 迁移表 / 规则 / 管理接口；
+- `keel-plugin-basic-rbac` 迁移表 / 规则 / 管理接口；
 - 标准发行版默认启用。
 
 ### P1

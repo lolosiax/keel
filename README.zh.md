@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 <img src="doc/logo/keel-icon-hollow.svg" width="112" alt="Keel" />
 
@@ -721,7 +721,7 @@ Keel 处于 `0.1.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日
 | 日志调用点与异常诊断 | 可用 | IR 改写、配色、创建点与抛出点 |
 | `.keel` 打包与控制台插件管理 | 可用 | `keelPackage`、`plugins` 子命令与 `--inspect` |
 | 资源层 | 部分可用 | 宿主侧注册表可用，插件侧资源读取未接入 |
-| 跨模块服务调用 | 可用 | `@ModuleService` codegen + Host 转发，CBOR 载荷 |
+| 跨模块服务调用 | 可用 | `@PublicApi` codegen（`ctx.xxx` / `ctx.xxxOrNull`）+ Host 句柄路由，CBOR 载荷 |
 | 配置读写 | 可用 | Host YAML（写入保留注释）+ `ctx.config` / `ctx.server.config` |
 | 插件存储 | 可用 | 每插件命名空间下的 `read` / `write` / `delete` |
 | 注解路由生成 | 可用 | `@Controller` / `@GET` 等生成 `KeelPluginRoutes` |

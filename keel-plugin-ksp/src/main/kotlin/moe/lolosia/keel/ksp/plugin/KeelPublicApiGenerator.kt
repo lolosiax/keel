@@ -51,6 +51,8 @@ internal class KeelPublicApiGenerator(
         val manual: Boolean,
         val supported: Boolean,
         val methods: List<Method>,
+        /** 契约来自依赖（klib）而不是本模块源码：只生成提供者侧分发器，不生成镜像 / 代理。 */
+        val external: Boolean = false,
     ) {
         val hasBase: Boolean get() = kind == Kind.CLASS
         val isValue: Boolean get() = kind == Kind.VALUE
@@ -195,14 +197,18 @@ internal class KeelPublicApiGenerator(
             }
         }
 
-        val providers = singletonProviders(resolver, models, mainFqn)
-        providers.flatMap { it.contracts }.forEach { it.providedSingleton = true }
+        // 实现类实现的契约可能来自依赖（可替换能力 / 第三方实现），补进模型集合：
+        // 只参与 declare 与提供者侧分发器，不生成镜像 / 代理（api 工件里已有）。
+        val external = dependencyContracts(resolver, main, models)
+        val allModels = models + external
+        val allProviders = singletonProviders(resolver, allModels, mainFqn)
+        allProviders.flatMap { it.contracts }.forEach { it.providedSingleton = true }
 
         models.filter { !it.manual && it.supported }.forEach { model ->
             writeGlue(model)
         }
 
-        providers.forEach { provider ->
+        allProviders.forEach { provider ->
             provider.contracts.forEach { contract ->
                 writeInterfaceDispatcher(contract, provider)
             }
@@ -215,7 +221,7 @@ internal class KeelPublicApiGenerator(
         writeFile(
             fileName = "KeelPluginPublicApi",
             packageName = main.packageName.asString(),
-            code = renderSetup(mainFqn, models, handlerEntries, providers),
+            code = renderSetup(mainFqn, allModels, handlerEntries, allProviders),
             dependencies = dependencies,
         )
 
@@ -274,6 +280,64 @@ internal class KeelPublicApiGenerator(
                 )
             }
             .toList()
+
+    /**
+     * 实现类实现的、来自依赖（klib）的 `@PublicApi` 接口。
+     *
+     * 可替换能力（如 rbac）的契约由框架的 api 工件提供，第三方实现只依赖该工件；
+     * 这类契约不在本模块源码里，按注解扫描不到，需要顺着 `@Singleton` 实现类的父类型
+     * 反向收集。只生成提供者侧分发器与 declare，镜像 / 代理由 api 工件负责。
+     */
+    private fun dependencyContracts(
+        resolver: Resolver,
+        main: KSClassDeclaration,
+        local: List<TypeModel>,
+    ): List<TypeModel> {
+        val known = local.mapTo(mutableSetOf()) { it.fqn }
+        val result = mutableListOf<TypeModel>()
+        val impls = resolver.getSymbolsWithAnnotation(SINGLETON)
+            .filterIsInstance<KSClassDeclaration>()
+            .filter { it.classKind == ClassKind.CLASS }
+            .toList() + main
+        impls.forEach { impl ->
+            collectSupertypes(impl).forEach { declaration ->
+                if (declaration.classKind != ClassKind.INTERFACE) return@forEach
+                val fqn = declaration.qualifiedName?.asString() ?: return@forEach
+                if (!known.add(fqn)) return@forEach
+                // 本模块的契约已在 local 里；有源码声明的也不属于「依赖契约」
+                if (declaration.containingFile != null) return@forEach
+                if (declaration.annotations.none { it.isNamed(PUBLIC_API) }) return@forEach
+                val methods = extractMethods(declaration, Kind.INTERFACE, emptyMap()) ?: return@forEach
+                result += TypeModel(
+                    declaration = declaration,
+                    fqn = fqn,
+                    simpleName = declaration.simpleName.asString(),
+                    id = idOf(declaration) ?: fqn,
+                    kind = Kind.INTERFACE,
+                    manual = false,
+                    supported = true,
+                    methods = methods,
+                    external = true,
+                )
+            }
+        }
+        return result
+    }
+
+    /** 递归收集父类型（按 FQN 去重），只取声明本身，不解析成员。 */
+    private fun collectSupertypes(declaration: KSClassDeclaration): List<KSClassDeclaration> {
+        val seen = mutableSetOf<String>()
+        val result = mutableListOf<KSClassDeclaration>()
+        fun walk(type: KSType) {
+            val target = type.declaration as? KSClassDeclaration ?: return
+            val fqn = target.qualifiedName?.asString() ?: return
+            if (!seen.add(fqn)) return
+            result += target
+            target.superTypes.forEach { walk(it.resolve()) }
+        }
+        declaration.superTypes.forEach { walk(it.resolve()) }
+        return result
+    }
 
     /** `@Singleton` 实现的构造注入：无参 / `PluginContext` / 插件本体。 */
     private fun providerInjection(
@@ -471,7 +535,7 @@ internal class KeelPublicApiGenerator(
             java.nio.file.StandardOpenOption.CREATE,
             java.nio.file.StandardOpenOption.WRITE,
         ).use { channel ->
-            channel.lock().use {
+            withFileLock(channel) {
                 targets.forEach { model ->
                     val packageDir = java.io.File(root, model.packageName.replace('.', '/'))
                     // DTO：只镜像类型本身，不生成 Key / 代理 / 访问器
@@ -771,28 +835,58 @@ internal class KeelPublicApiGenerator(
 
     private fun renderApiAccessor(model: TypeModel, directoryNeeds: Map<String, Boolean>): String =
         buildString {
+            val needsDirectory = directoryNeeds[model.fqn] == true
+            val name = apiAccessorName(model)
+            val proxy = if (needsDirectory) {
+                "${model.simpleName}Proxy(it, directory)"
+            } else {
+                "${model.simpleName}Proxy(it)"
+            }
             appendLine(API_HEADER)
             appendLine("package ${model.packageName}")
             appendLine()
             appendLine("import moe.lolosia.keel.api.PluginContext")
             appendLine()
-            appendLine("/** 声明方插件 `${model.fqn}` 的单例访问器。 */")
-            appendLine("val PluginContext.${apiAccessorName(model)}: ${model.simpleName}")
+            appendLine("/** 声明方插件 `${model.fqn}` 的单例访问器；提供者未启用时抛异常。 */")
+            appendLine("val PluginContext.$name: ${model.simpleName}")
             appendLine("    get() {")
-            if (directoryNeeds[model.fqn] == true) {
-                appendLine("        val directory = publicApi")
-                appendLine(
-                    "        return directory.requireInstance(${apiKeyName(model)}) { " +
-                        "${model.simpleName}Proxy(it, directory) }"
-                )
-            } else {
-                appendLine(
-                    "        return publicApi.requireInstance(${apiKeyName(model)}) { " +
-                        "${model.simpleName}Proxy(it) }"
-                )
-            }
+            if (needsDirectory) appendLine("        val directory = publicApi")
+            appendLine("        return publicApi.requireInstance(${apiKeyName(model)}) { $proxy }")
+            appendLine("    }")
+            appendLine()
+            appendLine("/** 同 [${name}]；提供者未启用时返回 null（可替换能力按缺席降级时用它）。 */")
+            appendLine("val PluginContext.${name}OrNull: ${model.simpleName}?")
+            appendLine("    get() {")
+            if (needsDirectory) appendLine("        val directory = publicApi")
+            appendLine("        return publicApi.getInstance(${apiKeyName(model)}) { $proxy }")
             appendLine("    }")
         }
+
+    /**
+     * 跨进程 / 跨 target 串行化 api 生成目录。
+     *
+     * 同一 JVM 里多个 KSP worker 同时锁同一个文件会抛 `OverlappingFileLockException`，
+     * 所以用 `tryLock` 轮询而不是阻塞 `lock()`。
+     */
+    private fun <T> withFileLock(channel: java.nio.channels.FileChannel, block: () -> T): T {
+        val deadline = System.currentTimeMillis() + 180_000
+        while (true) {
+            val lock = try {
+                channel.tryLock()
+            } catch (_: java.nio.channels.OverlappingFileLockException) {
+                null
+            }
+            if (lock != null) {
+                return try {
+                    block()
+                } finally {
+                    lock.release()
+                }
+            }
+            check(System.currentTimeMillis() < deadline) { "等待 api 生成目录锁超时：$channel" }
+            Thread.sleep(50)
+        }
+    }
 
     private fun writeApiFile(dir: java.io.File, name: String, code: String): Boolean {
         val file = java.io.File(dir, name)

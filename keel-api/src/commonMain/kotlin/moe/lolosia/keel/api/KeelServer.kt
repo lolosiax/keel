@@ -3,7 +3,6 @@ package moe.lolosia.keel.api
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.event.*
 import moe.lolosia.keel.api.messaging.*
-import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.storage.*
 import moe.lolosia.keel.classpath.*
 
@@ -43,8 +42,6 @@ interface KeelServer {
     val scheduler: Scheduler
 
     val events: EventBus
-
-    val services: ServiceRegistry
 
     val messenger: Messenger
 

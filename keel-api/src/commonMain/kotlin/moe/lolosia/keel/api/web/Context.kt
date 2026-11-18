@@ -3,7 +3,6 @@ package moe.lolosia.keel.api.web
 import moe.lolosia.keel.api.KeelServer
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.config.Config
-import moe.lolosia.keel.api.service.ModuleDirectory
 
 /**
  * 插件侧请求上下文，尽量贴近单进程 Ktor 里 `ctx` 的用法。
@@ -32,8 +31,6 @@ interface Context {
      * 请求期共享数据区，控制器与插件内部服务可读写。
      */
     val data: MutableMap<String, Any?>
-
-    val modules: ModuleDirectory get() = plugin.modules
 
     val server: KeelServer get() = plugin.server
 

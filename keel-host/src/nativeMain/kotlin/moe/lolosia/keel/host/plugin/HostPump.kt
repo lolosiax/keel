@@ -19,8 +19,6 @@ import moe.lolosia.keel.api.error.KeelErrorPayload
 import moe.lolosia.keel.api.host.*
 import moe.lolosia.keel.api.log.*
 import moe.lolosia.keel.api.messaging.*
-import moe.lolosia.keel.api.service.ServiceCall
-import moe.lolosia.keel.api.service.ServiceRegistration
 import moe.lolosia.keel.api.service.ServiceWire
 import moe.lolosia.keel.api.share.*
 import moe.lolosia.keel.api.storage.*
@@ -33,7 +31,6 @@ import moe.lolosia.keel.host.config.HostConfigs
 import moe.lolosia.keel.host.console.HostConsole
 import moe.lolosia.keel.host.route.HostPermissionCatalog
 import moe.lolosia.keel.host.route.HostRoutes
-import moe.lolosia.keel.host.service.HostServices
 import moe.lolosia.keel.host.shared.HostShared
 import moe.lolosia.keel.host.storage.HostStorage
 
@@ -193,21 +190,9 @@ internal object HostPump {
         }
 
         if (kind == KEEL_EVENT_COMMAND.toInt() && e.target == 0uL) {
-            when (e.subject) {
-                KEEL_SUBJECT_ROUTE_REGISTER.toULong() -> {
-                    handleSnapshot(snapshotOf(event))
-                    return false
-                }
-
-                KEEL_SUBJECT_SERVICE_REGISTER.toULong() -> {
-                    handleServiceRegister(snapshotOf(event))
-                    return false
-                }
-
-                KEEL_SUBJECT_SERVICE_CALL.toULong() -> {
-                    handleServiceCall(snapshotOf(event))
-                    return false
-                }
+            if (e.subject == KEEL_SUBJECT_ROUTE_REGISTER.toULong()) {
+                handleSnapshot(snapshotOf(event))
+                return false
             }
 
             // 其余业务 subject 是插件 → Host 的请求；协议 subject 落到下面的告警
@@ -260,79 +245,10 @@ internal object HostPump {
         return true
     }
 
-    /** 插件启用的服务声明：只要 id 列表，不需要方法签名。 */
-    private fun handleServiceRegister(event: HostEvent) {
-        val payload = event.payload
-        if (payload == null) {
-            HostServices.register(event.source, emptyList())
-            return
-        }
-        try {
-            val registration = ServiceWire.decodeRegistration(payload)
-            HostServices.register(event.source, registration.services)
-        } catch (err: Throwable) {
-            Log.warn("服务注册失败：${err.message}", tag = "Service")
-        }
-    }
-
-    /**
-     * 插件 → 插件的服务调用：按 service id 找到提供者，换一个 Host correlation 转发，
-     * 回包到达时再换回调用方的 correlation。
-     */
-    private fun handleServiceCall(event: HostEvent) {
-        val payload = event.payload
-        if (payload == null) {
-            replyServiceError(event.source, event.correlation, "service call without payload")
-            return
-        }
-        val call = try {
-            ServiceWire.decodeCall(payload)
-        } catch (err: Throwable) {
-            Log.warn("服务调用载荷无法解码：${err.message}", tag = "Service")
-            replyServiceError(event.source, event.correlation, "malformed service call")
-            return
-        }
-
-        val provider = HostServices.providerOf(call.service)
-        if (provider == null) {
-            replyServiceError(
-                event.source,
-                event.correlation,
-                "service unavailable: ${call.service}",
-            )
-            return
-        }
-
-        val correlation = nextCorrelation()
-        val pushed = pushToPlugin(
-            pluginId = provider,
-            kind = KEEL_EVENT_COMMAND.toInt(),
-            subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
-            correlation = correlation,
-            payload = payload,
-            source = event.source,
-        )
-        if (!pushed) {
-            replyServiceError(
-                event.source,
-                event.correlation,
-                "service provider offline: ${call.service}",
-            )
-            return
-        }
-        forwards[correlation] = Forward(
-            callerId = event.source,
-            callerCorrelation = event.correlation,
-            providerId = provider,
-            deadlineMs = nowMs() + debugTimeoutMs(SERVICE_TIMEOUT_MS),
-            subject = KEEL_SUBJECT_SERVICE_CALL.toULong(),
-        )
-    }
-
     /**
      * 插件 → 插件的请求：解析 [Message]、按 manifest id 找到目标、换 correlation 转发。
      *
-     * 与 service 调用共用 [forwards] 表；提供方回 COMPLETE 后由 [completeForward]
+     * 提供方回 COMPLETE 后由 [completeForward]
      * 把 correlation 换回调用方当初的值。
      */
     private fun routeMessageRequest(event: HostEvent) {
@@ -936,18 +852,6 @@ internal object HostPump {
             }
         }
         if (event.kind == KEEL_EVENT_COMMAND.toInt() && event.target == 0uL) {
-            when (event.subject) {
-                KEEL_SUBJECT_SERVICE_REGISTER.toULong() -> {
-                    handleServiceRegister(event)
-                    return true
-                }
-
-                KEEL_SUBJECT_SERVICE_CALL.toULong() -> {
-                    handleServiceCall(event)
-                    return true
-                }
-            }
-
             // 其余业务 subject 是插件 → Host 的请求；协议 subject 交给 handleSnapshot / 告警
             if (event.subject >= BUSINESS_SUBJECT_MIN) {
                 handleHostRequest(event)

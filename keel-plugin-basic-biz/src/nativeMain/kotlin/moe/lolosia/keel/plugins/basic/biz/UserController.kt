@@ -14,8 +14,6 @@ import moe.lolosia.keel.plugins.basic.biz.db.AccountRepository
 import moe.lolosia.keel.plugins.basic.biz.db.UserRepository
 import moe.lolosia.keel.plugins.basic.biz.db.displayTime
 import moe.lolosia.keel.plugins.basic.biz.db.toRow
-import moe.lolosia.keel.plugins.rbac.api.ROLE_ID_USER
-import moe.lolosia.keel.plugins.rbac.api.RbacServices
 
 /**
  * 用户接口（路径与请求 / 响应形状照 backend 的 `UserController`，供前端 `core/api/user.ts` 直接复用）。
@@ -155,15 +153,13 @@ object UserController {
         )
     }
 
-    /** 当前用户的组 + 生效规则；rbac 未安装时规则为空（前端守卫按空规则处理）。 */
+    /** 当前用户的组 + 生效规则；规则来自请求快照（rbac 未安装时为空）。 */
     @POST("/user/myRole")
     suspend fun myRole(ctx: Context): UserRoleRow {
         val userId = ctx.requireUserId()
         val user = UserRepository.findById(userId) ?: throw ApiException(401, "用户不存在")
         val role = UserRepository.roleOf(userId)
-        val rules = ctx.modules.get(RbacServices.reader)
-            ?.let { runCatching { it.effectiveRules(userId) }.getOrNull() }
-            .orEmpty()
+        val rules = ctx.user?.rules.orEmpty()
         return UserRoleRow(
             id = role?.bindingId ?: 0L,
             userId = userId,

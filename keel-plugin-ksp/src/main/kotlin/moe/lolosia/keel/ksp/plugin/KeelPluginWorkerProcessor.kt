@@ -40,17 +40,11 @@ private class KeelPluginWorkerProcessor(
 
     private var generated = false
 
-    private val services = KeelServiceGenerator(codeGenerator, logger)
-
     private val publicApi = KeelPublicApiGenerator(codeGenerator, logger)
 
     private val subclass = KeelSubclassGenerator(logger, glueDir)
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
-        // 服务代码先在当前模块生成：契约侧 Key / Client，实现侧 Dispatcher / KeelPluginServices
-        val deferredServices = services.process(resolver)
-        if (deferredServices.isNotEmpty()) return deferredServices
-
         if (generated) return emptyList()
 
         val mains = resolver.getSymbolsWithAnnotation(ANNOTATION)
@@ -114,12 +108,12 @@ private class KeelPluginWorkerProcessor(
         | * `KeelPluginRoutes` 由 `keel-router-ksp` 生成在同一包里；没有控制器的插件
         | * 也会生成空实现，所以这里可以无条件传入。
         | *
-        | * `KeelPluginServices` / `KeelPluginPublicApi` 由本处理器生成，没有对应声明时是空实现。
+        | * `KeelPluginPublicApi` 由本处理器生成，没有 `@PublicApi` 声明时是空实现。
         | */
         |@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
         |@CName("keel_plugin_worker_main")
         |fun keelPluginWorkerMain(api: CPointer<KeelPluginApi>?, out: CPointer<KeelPluginHandlers>?): UInt =
-        |    PluginWorker.enter(api, out, KeelPluginRoutes, KeelPluginServices, KeelPluginPublicApi) { $qualified() }
+        |    PluginWorker.enter(api, out, KeelPluginRoutes, KeelPluginPublicApi) { $qualified() }
         |
     """.trimMargin()
 

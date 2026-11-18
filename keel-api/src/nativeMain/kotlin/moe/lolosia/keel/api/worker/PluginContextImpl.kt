@@ -27,7 +27,6 @@ internal class PluginContextImpl(
         PluginServer(PluginConfig(host, ConfigScope.MAIN), PluginStorageImpl(host))
     }
     override val host: HostLink get() = HostLinkImpl
-    override val modules: ModuleDirectory get() = PluginServices
     override val callbacks: CallbackRegistry get() = error("回调尚未实现")
     override val publicApi: PublicApiDirectory get() = PublicApiObjects
     override val config: Config by lazy {

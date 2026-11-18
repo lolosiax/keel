@@ -1,0 +1,19 @@
+{
+  "id": "rbac",
+  "name": "RBAC",
+  "logTag": "RBAC",
+  "color": "#F5A623",
+  "version": "0.1.0",
+  "abiVersion": 1,
+  "entry": "keel_plugin_worker_main",
+  "provides": ["authz"],
+  "lib": {
+    "mingwX64": "lib/mingwX64/keel_plugin_basic_rbac.dll",
+    "linuxArm64": "lib/linuxArm64/libkeel_plugin_basic_rbac.so",
+    "linuxX64": "lib/linuxX64/libkeel_plugin_basic_rbac.so"
+  },
+  "resources": "resources/",
+  "requires": ["database"],
+  "authors": ["lolosia"],
+  "description": "组 + 点分权限的默认实现（可替换）"
+}

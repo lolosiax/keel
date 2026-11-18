@@ -103,12 +103,15 @@ basic-biz 已完成：契约与 DTO 迁入 `keel-plugin-basic-biz/src/commonMain
 `SettingApi.snapshot()` 经 `PublicApiBridge` 往返返回 `allowHiddenFiles=false`；
 数据库驱动仍是桩（只支持 `select 1`），`UserDirectory` 的真实查询留给接入 libmariadb 后验证。
 
-rbac 的实现插件在 klive，**本次不迁**：`keel-plugin-rbac-api` 保持手写 v1 契约，
-等 klive 侧迁移时一起改成 `@PublicApi` + `api/` 生成。
+rbac 改由本仓库的默认实现 `keel-plugin-basic-rbac` 承担：契约（`RbacReader` / `RbacAdmin` + DTO）
+进 impl 的 commonMain，`api/` 子工程以**中性坐标** `keel-plugin-rbac-api` 生成并发布。
+第三方实现可以只依赖该契约工件，KSP 会顺着实现类的父类型生成提供者侧分发器；
+Host 对同一 typeId 只认最先声明的提供者，删除默认实现的 `.keel` 再放入对方的同名插件即可原位替换。
+`PermissionCatalog` 已删除——权限节点目录统一用 `ctx.host.permissionCatalog()`。
 
-### 步骤 4：删除 v1
+### 步骤 4：删除 v1（已完成）
 
-- 全仓库搜索 `@ModuleService` / `ctx.modules` / `ServiceCall`，清零；
+- 全仓库搜索 `@ModuleService` / `ctx.modules` / `ServiceCall`，已清零；
 - 删除 §4 的代码与 Host 处理器；
 - `SERVICE_REGISTER` / `SERVICE_CALL` 常量可以在下一个 ABI 版本移除；在那之前保留但不使用；
 - 跑全量构建 + animal / hello / basic-biz / rbac 冒烟。
@@ -125,10 +128,11 @@ rbac 的实现插件在 klive，**本次不迁**：`keel-plugin-rbac-api` 保持
 - [x] animal：2b 生成物替换手写 api，dog 冒烟输出与现在一致。
 - [x] hello：`@PublicApi` + `@Singleton` 接入，`ctx.helloApi` 生成，自检经 `requireInstance` 往返通过，无 `@ModuleService`。
 - [x] basic-biz：契约 / DTO 迁入 impl，生成 `api/`；五个单例登记 + `SettingApi.snapshot()` 往返通过。
-- [ ] rbac：实现插件在 klive，本次不迁；`keel-plugin-rbac-api` 暂留 v1。
+- [x] rbac：默认实现 `keel-plugin-basic-rbac` 完成；契约以 `keel-plugin-rbac-api` 中性坐标发布，
+      第三方实现可原位替换。
 - [x] `keelApiCheck` 通过（V1 提交制）。
-- [ ] 全仓库无 `@ModuleService` / `ServiceCall` / `ctx.modules` 引用。
-- [ ] Host 侧 `SERVICE_CALL` 处理器删除后，全量构建通过。
+- [x] 全仓库无 `@ModuleService` / `ServiceCall` / `ctx.modules` 引用。
+- [x] Host 侧 `SERVICE_CALL` 处理器删除后，全量构建通过。
 
 ## 8. 风险
 

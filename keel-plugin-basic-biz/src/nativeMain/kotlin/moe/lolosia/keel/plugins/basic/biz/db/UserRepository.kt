@@ -6,8 +6,8 @@ import moe.lolosia.keel.plugins.basic.biz.api.dto.*
 import moe.lolosia.keel.plugins.basic.biz.crypto.BCrypt
 import moe.lolosia.keel.plugins.basic.biz.newIdentifier
 import moe.lolosia.keel.plugins.basic.biz.nowDisplay
-import moe.lolosia.keel.plugins.rbac.api.ROLE_ID_USER
-import moe.lolosia.keel.plugins.rbac.api.ROLE_TYPE_USER
+import moe.lolosia.keel.plugins.basic.biz.ROLE_ID_USER
+import moe.lolosia.keel.plugins.basic.biz.ROLE_TYPE_USER
 
 /**
  * 用户表仓库（手写 SQL，不依赖 ORM / KSP）。

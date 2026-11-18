@@ -53,7 +53,33 @@ internal class KeelSubclassGenerator(
             java.nio.file.StandardOpenOption.CREATE,
             java.nio.file.StandardOpenOption.WRITE,
         ).use { channel ->
-            channel.lock().use { generateLocked(resolver) }
+            withFileLock(channel) { generateLocked(resolver) }
+        }
+    }
+
+    /**
+     * 跨 target 串行化生成目录。
+     *
+     * 同一 JVM 里的多个 KSP worker 同时锁同一文件会抛 `OverlappingFileLockException`，
+     * 阻塞 `lock()` 不能重入，所以用 `tryLock` 轮询。
+     */
+    private fun <T> withFileLock(channel: java.nio.channels.FileChannel, block: () -> T): T {
+        val deadline = System.currentTimeMillis() + 180_000
+        while (true) {
+            val lock = try {
+                channel.tryLock()
+            } catch (_: java.nio.channels.OverlappingFileLockException) {
+                null
+            }
+            if (lock != null) {
+                return try {
+                    block()
+                } finally {
+                    lock.release()
+                }
+            }
+            check(System.currentTimeMillis() < deadline) { "等待胶水目录锁超时：$channel" }
+            Thread.sleep(50)
         }
     }
 

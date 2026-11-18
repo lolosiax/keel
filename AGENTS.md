@@ -1,4 +1,4 @@
-# AGENTS.md —— Keel 仓库约定
+﻿# AGENTS.md —— Keel 仓库约定
 
 > 本仓库是 **Keel**：一个 Kotlin/Native 的模块化 Web 框架（Host + Plugin API + Launcher + Gradle 工具链）。
 > 本文件是**规范性**文档（约定，不是教程）：改结构、加依赖、写插件都按这里来；与代码冲突时以代码为准，并顺手回来修本文。
@@ -42,7 +42,7 @@
 | `keel-api/` | `keel-api` | 插件契约：生命周期、上下文、消息、调度（`moe.lolosia.keel.api`） | 是 |
 | `keel-database-api/` | `keel-database-api` | 数据库能力 ABI + 插件侧 Kotlin 门面（不含驱动、不含加载器） | 是 |
 | `keel-database-mariadb/` | `keel-database-mariadb` | `kind: capability` 的 MariaDB 驱动包（纯 C，打成 `.keel`） | 是（`.keel`） |
-| `keel-plugin-rbac-api/` | `keel-plugin-rbac-api` | rbac 契约：`RbacReader` / `RbacAdmin` / `PermissionCatalog` + DTO + `ROLE_ID_*` | 是 |
+| `keel-plugin-basic-rbac/` | `keel-plugin-basic-rbac` + `api/`（坐标 `keel-plugin-rbac-api`） | rbac 默认实现（`provides: ["authz"]`）与契约；坐标是中性的，第三方实现可原位替代 | 是 |
 | `keel-plugin-basic-biz/` | `keel-plugin-basic-biz` + `api/`（坐标 `keel-plugin-basic-biz-api`） | 用户 / 账户 / 设置插件；契约与 DTO 在 impl，api 由 KSP 生成 | 是 |
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
 | `keel-launcher/` | `keel-launcher` | 单文件发行版入口，静态链接 Host 并内嵌插件 | 是（可执行文件） |
@@ -56,17 +56,20 @@
 keel-*-gradle-plugin / keel-router-ksp ──(构建期)──> keel-plugin-*  (KSP / 打包 / 发布)
 keel-api  <──  keel-host  <──  keel-launcher
 keel-api  <──  keel-database-api  <──  keel-plugin-*
-keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-basic-biz（impl）
 keel-api  <──  keel-plugin-basic-biz/api（契约工件，由 impl 的 @PublicApi 生成）
-keel-api  <──  keel-plugin-rbac-api  <──  keel-plugin-rbac（实现）
+keel-api  <──  keel-plugin-rbac-api（契约工件，由 keel-plugin-basic-rbac 生成）
+keel-plugin-rbac-api  <──  第三方 rbac 实现（可替换 keel-plugin-basic-rbac）
 keel-database-mariadb ──(仅头文件)──> keel-database-api / keel-abi
 ```
 
 - `keel-api` **不得**依赖 `keel-host`、`keel-launcher`、Ktor 或任何第三方服务端库；它是对外承诺的稳定面。
 - `keel-plugin-*` 只能依赖 `keel-api`、`keel-database-api` 与各 `-api` 契约库（以及自己声明的库）；
   需要宿主能力时走 API，不要反向 include `keel-host`。
-- `*-api` 是消费方工件：v2 由 impl 的 `@PublicApi` 生成（镜像 / 代理 / Key / DTO，随仓库提交），
-  impl **不依赖**自己的 api；`keel-plugin-rbac-api` 仍是手写 v1 契约（实现归 klive）。
+- `*-api` 是消费方工件：v2 由 impl 的 `@PublicApi` 生成（镜像 / 代理 / Key / 访问器 / DTO，随仓库提交），
+  impl **不依赖**自己的 api，生成的访问器同时提供 `ctx.xxx` 与缺席时返回 null 的 `ctx.xxxOrNull`。
+- **可替换能力**（当前只有 rbac）：契约工件的坐标必须中性（`keel-plugin-rbac-api`），默认实现与第三方实现
+  都实现同一组接口；第三方实现只依赖该工件，KSP 会顺着它实现的 `@PublicApi` 接口生成分发器。
+  Host 对同一 typeId 只认最先声明的提供者，`plugin.json` 的能力（`provides: ["authz"]`）同样只认第一个认领者。
 - 跨构建的依赖一律写 Maven 坐标 `moe.lolosia.keel:<artifact>:<version>`；在根 composite 下 Gradle 会自动替换成本地工程。
 
 ## 2. 构建与验证
@@ -137,8 +140,9 @@ gradlew -p keel-plugin-ksp publish
 | `keel-classpath-full` | Host 注册表 / `ClasspathRef` / 跨模块代理 |
 | `keel-abi` | C ABI 静态库 + 头文件工件 |
 | `keel-database-api` | 数据库能力包 ABI + 插件侧 Kotlin 门面（数据插件的唯一查库依赖，不含驱动） |
-| `keel-plugin-rbac-api` | rbac 契约库（第三方只依赖它就能读组 / 规则、做权限管理） |
-| `keel-plugin-basic-biz-api` | basic-biz 的 api 工件（`keel-plugin-basic-biz/api/`，全生成：镜像 / 代理 / Key / DTO） |
+| `keel-plugin-rbac-api` | rbac 契约库（`keel-plugin-basic-rbac/api/` 生成；默认实现与第三方实现都实现它） |
+| `keel-plugin-basic-biz-api` | basic-biz 的 api 工件（`keel-plugin-basic-biz/api/`，全生成：镜像 / 代理 / Key / 访问器 / DTO） |
+| `keel-plugin-basic-rbac` | rbac 默认实现（`plugin.json` 的 `id = "rbac"`，`provides: ["authz"]`），可被第三方 `.keel` 原位替换 |
 | `keel-plugin-<id>` | 功能插件，`<id>` 与 `plugin.json` 的 `id` 一致 |
 | `keel-database-<driver>` | `kind: capability` 的数据库驱动包（`keel-database-mariadb` / `-pgsql` …），丢进 `plugins/` |
 | `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` | 构建期 Gradle 插件 |
@@ -233,8 +237,9 @@ gradlew -p keel-plugin-ksp publish
 - Kotlin 回调不转函数指针：注册「回调 id」，调用时投递事件，拥有者查表执行。
 - 调度器 / 协程不跨运行时：透传的是调度命令与完成事件；`Messenger.request` 是本地 `suspend`，
   continuation 永不跨 ABI。
-- **模块间调用**走 `ctx.modules.require(ServiceKey)` 的本地代理：查询用 `suspend` 请求 / 应答，
-  命令用 ack 或 `post`；没有 `ctx.modules.moduleB` 这种字段。见 [abi-design.md](doc/abi-design.md) §6。
+- **模块间调用**走 `@PublicApi`：契约在声明方，api 工件由 KSP 生成 `ctx.<契约>` / `ctx.<契约>OrNull`
+  访问器；调用经 Host 路由到句柄，查询用 `suspend` 请求 / 应答。v1 的 `ServiceKey` / `ctx.modules`
+  与 `SERVICE_REGISTER` / `SERVICE_CALL` 通道已删除（C 侧常量按 ABI 版本保留，未使用）。
 - 热路径载荷用 Protobuf / CBOR；结构体只在共享头文件里定义，通过指针传，Kotlin 侧不手写布局。
 - 新增 API 时先问三个问题：
   1. 是否需要在两个运行时之间传？需要 → 只留 blittable 面，或改成「句柄 + 事件」。
@@ -256,8 +261,9 @@ ABI 头文件在 [`keel-abi/src/nativeCpp/keel_abi.h`](keel-abi/src/nativeCpp/ke
   - **当前形态（单项目）**：`build.gradle.kts` 里 `plugins { id("moe.lolosia.keel.plugin") }`，
     用 `keelPlugin { target("mingwX64") }` 选择打包目标；`plugin.json` 放在
     `src/commonMain/resources/plugin.json`，由打包插件复制到 `.keel` 根部。
-  - **目标形态（P0）**：内部拆成 `api` / `impl` 两个子项目（`api` 放 `@ModuleService` 接口 + DTO +
-    生成的客户端，`impl` 放实现 + `@KeelPluginMain`）。当前**不要**按 `api` / `impl` 建目录。
+  - **契约与 api 工件**：契约与实现同在 `src/commonMain`（`@PublicApi` 接口 + `@Serializable` DTO；
+    `@Singleton` 实现由 KSP 登记）。需要给外部消费时加 `api/` 子工程，`keel.api.dir` 指向它，
+    镜像 / 代理 / Key / 访问器由 KSP 生成并随仓库提交（V1 提交制，`keelApiCheck` 校验）。
   - Worker 入口不手写：`moe.lolosia.keel.plugin` 自动 apply KSP，并把 `keel-plugin-ksp`
     挂到每个 native 目标的 `ksp<target>` 配置上；`@KeelPluginMain` 类由处理器生成
     `keel_plugin_worker_main`，开发者只实现 `Plugin` 生命周期钩子。
@@ -273,11 +279,12 @@ keel-plugin-<id>/
   src/commonMain/resources/plugin.json         # 部署清单（id / name / logTag / version / entry / lib / resources / requires / color）
 ```
 
-- **目标形态**：代理、分发器、CBOR 编解码、服务注册、`plugin.json`、Maven 发布配置由 Gradle 插件 + KSP 生成，
+- **目标形态**：代理、分发器、CBOR 编解码、`plugin.json`、Maven 发布配置由 Gradle 插件 + KSP 生成，
   机制见 [doc/codegen-design.md](doc/codegen-design.md)。
-  **当前落地**：`plugin.json` 由开发者手写在 `src/commonMain/resources/`，KSP 只生成 Worker 入口；其余生成能力尚未实现。
-- **目标形态**：消费方模块只加一行 `keelPlugin { requires("<id>") }`，然后 `ctx.<id>.method(...)`；
-  同一模块内调用返回本地实现，跨模块返回生成的客户端。当前消费方仍需手写 `ServiceKey` / 代理。
+  **当前落地**：`plugin.json` 由开发者手写在 `src/commonMain/resources/`；KSP 已生成 Worker 入口、
+  `@PublicApi` 注册表与 api 工件，依赖解析和发布配置仍手写。
+- 消费方使用生成的 `ctx.<契约>` / `ctx.<契约>OrNull`；可替换能力按 `OrNull` 缺席降级。
+  目前还没有 `keelPlugin { requires(...) }` 的自动接线。
 - 新增插件 = 在顶层新建 `keel-plugin-<id>/` + 在根 `settings.gradle.kts` 加一行 `includeBuild`；不要塞进某个聚合目录。
 
 - **运行任务分层**：`keelPrepareHost` 只解出 Host，`keelPrepareRun` 只打包 / 拷贝 `.keel` 与配置，
@@ -299,9 +306,12 @@ keel-plugin-<id>/
 - **Web 路由**：插件只写 `@Controller` / `@GET` 等注解，由 `keel-router-ksp` 生成路由表；
   Host 独占 Ktor 端口与中间件，插件**不得**创建引擎或 install Ktor 插件。
   请求上下文是 `Context` 快照，**没有 `ctx.call`**；规则见 [doc/web-design.md](doc/web-design.md)。
-- **权限**：契约在 core（`@Permission` / `ctx.hasPermission` / `Authorizer`），实现是
-  `keel-plugin-rbac`；Host 在分发前校验，无 Authorizer 时带权限的路由 **fail closed（503）**。
-  只声明权限的业务插件不依赖 rbac 工件；需要管理角色 / 规则时才依赖 `keel-plugin-rbac-api`。
+- **权限**：判定契约在 core（`@Permission` / `ctx.hasPermission` / `Authorizer` / `UserSnapshot.rules`），
+  默认实现是 `keel-plugin-basic-rbac`（`plugin.json` 的 `id = "rbac"`，`provides: ["authz"]`），
+  第三方可原位替换；Host 在分发前校验，无 Authorizer 时带权限的路由 **fail closed（503）**。
+  业务插件**不需要**依赖 rbac 契约：`ctx.user.rules` / `ctx.hasPermission` 已经够用；
+  只有需要精细查询或管理角色 / 规则时才依赖 `keel-plugin-rbac-api`（用 `ctx.rbacReaderOrNull` 降级）。
+  节点目录统一用 `ctx.host.permissionCatalog()`，不再单独定义契约。
   见 [doc/authz-design.md](doc/authz-design.md)。
 - 资源（模板、静态文件、配置默认值）放 `src/commonMain/resources`，由 `moe.lolosia.keel.classpath` 打包后在运行期读取。
 - 插件不写 Host 的工作目录：临时文件与日志写 `ctx.cacheDir`（每次加载独占、下次启动回收），
@@ -460,7 +470,7 @@ keel-classpath-full/src/nativeMain/…/classpath/full/DefaultClasspathRegistry.k
 keel-database-api/src/nativeCpp/keel_database.h     数据库能力 C ABI（唯一布局来源）
 keel-database-api/src/nativeMain/…/database/        KeelDatabase / Row / QueryResult / DbValue / currentDatabase()
 keel-database-mariadb/src/nativeCpp/keel_database_mariadb.c   纯 C 能力包（当前后端仅 select 1）
-keel-plugin-rbac-api/src/commonMain/…/rbac/api/      RbacReader / RbacAdmin / PermissionCatalog + DTO + RbacServices
+keel-plugin-basic-rbac/src/commonMain/…/rbac/api/  RbacReader / RbacAdmin + DTO + ROLE_ID_*（api/ 由 KSP 生成，坐标 keel-plugin-rbac-api）
 keel-plugin-basic-biz/src/commonMain/…/basic/biz/api/  UserDirectory / UserAdmin / AccountAdmin / SettingApi + DTO（@PublicApi）
 keel-plugin-basic-biz/api/src/commonMain/…/basic/biz/api/  由 KSP 生成（V1 提交制，勿手改）
 keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
@@ -470,7 +480,7 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
                                       Ansi / LogLineFormatter（Spring Boot 配色与行格式）
                                       LogRecord / LogError / LogLine / LogPage / LogFormat / LogTextFormat
                                       LogRecordFormat（PLAIN / ANSI / RAW 的共享渲染）/ LogHistory / NoneLogHistory
-  annotation/  KeelPluginMain / ModuleService / ModuleServiceProvider
+  annotation/  KeelPluginMain / PublicApi / Singleton / PublicApiHandler
   auth/        Authenticator / Authorizer / AuthnRequest / AuthnReply / AuthzRequest / AuthzReply / AuthzSnapshot
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
   command/     Command / CommandSender / ConsoleCommandRequest / ConsoleCommandResult
@@ -481,18 +491,18 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
                CacheDirReply / DataDirReply / MaterializeRequest / MaterializeReply
                ClasspathNames / ClasspathOp / ClasspathRequest / ClasspathReply
   messaging/   Message / Messenger
-  service/     ModuleDirectory / ServiceCaller / ServiceKey / ServiceRegistry / ServiceWire
+  service/     ServiceWire（CBOR）；跨模块调用见 share/ 的 @PublicApi
                GeneratedServices / ServiceBinder / ServiceDispatcher / ServiceRegistration
   storage/     PluginStorage / StorageOp / StorageRequest / StorageReply
   web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody
                UserSnapshot / RouteDescriptor / Routes / GeneratedRoutes / PermissionNode / ApiResult
 keel-api/src/nativeMain/…/api/worker/
-  PluginWorker.kt                     `@CName` Worker 入口分发（生命周期 / PING / TIMER / HTTP / CONSOLE / SERVICE_CALL / AUTHN / AUTHZ）
+  PluginWorker.kt                     `@CName` Worker 入口分发（生命周期 / PING / TIMER / HTTP / CONSOLE / SHARED_CALL / AUTHN / AUTHZ）
   NativePluginLogger.kt               插件日志 → Host 收件箱
-  PluginContextImpl / PluginServer / PluginServices / PluginRoutes / HostLinkImpl
+  PluginContextImpl / PluginServer / PluginRoutes / HostLinkImpl
   PluginClasspath / HostClasspathClient       自身 `.keel` + Host 的远程资源视图
   PluginCapabilities / PluginConfig / PluginConsole / PluginStorageImpl
-  WorkerScheduler / WorkerScope / WorkerDispatcher / ServiceCallerImpl
+  WorkerScheduler / WorkerScope / WorkerDispatcher
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
 keel-host/src/commonMain/…/host/HostDirs.kt           dataRoot / cacheRoot 模型
@@ -516,7 +526,7 @@ keel-host/src/nativeMain/…/host/capability/           能力包发现 / open /
 keel-host/src/nativeMain/…/host/auth/                 Host 认证授权中间件
 keel-host/src/nativeMain/…/host/config/               YAML 配置读写
 keel-host/src/nativeMain/…/host/route/                路由表与权限目录
-keel-host/src/nativeMain/…/host/service/              模块服务注册与转发
+keel-host/src/nativeMain/…/host/shared/               HostShared（@PublicApi 句柄表 / 单例 / 类型路由）
 keel-host/src/nativeMain/…/host/storage/              插件命名空间存储
 keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs / package actual
 keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
@@ -527,7 +537,7 @@ keel-abi/src/nativeCpp/
   keel_platform.h                     线程 / 同步原语（不导出、不进 Kotlin）
   keel_queue.c / keel_event.c / keel_plugin.c / keel_console.c
 keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（@Controller / @GET → KeelPluginRoutes）
-keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口；@ModuleService → Key / Client / Dispatcher
+keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口；@PublicApi / @Singleton → api 工件 + 分发器
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin
   src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
 keel-plugin-gradle-plugin/src/main/…/gradle/plugin/

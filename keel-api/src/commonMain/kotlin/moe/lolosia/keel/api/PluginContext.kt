@@ -4,7 +4,6 @@ import kotlinx.coroutines.*
 import moe.lolosia.keel.api.callback.*
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.host.*
-import moe.lolosia.keel.api.service.*
 import moe.lolosia.keel.api.share.*
 import moe.lolosia.keel.api.web.*
 import moe.lolosia.keel.classpath.*
@@ -30,12 +29,6 @@ interface PluginContext {
     val host: HostLink
 
     val server: KeelServer
-
-    /**
-     * 跨模块入口。`ctx.modules.require(QueueApiKey)` 拿到的是本地代理，
-     * 方法调用经事件泵转发，不跨运行时传递 Kotlin 对象或 continuation。
-     */
-    val modules: ModuleDirectory
 
     /**
      * 本地回调表；生成的客户端用它把函数类型参数换成数字 id。

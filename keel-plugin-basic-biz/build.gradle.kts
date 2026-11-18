@@ -62,7 +62,6 @@ kotlin {
         }
         commonMain.dependencies {
             api("moe.lolosia.keel:keel-api:${libs.versions.keel.get()}")
-            api("moe.lolosia.keel:keel-plugin-rbac-api:${libs.versions.keel.get()}")
             implementation(libs.kotlinx.datetime)
         }
         nativeMain.dependencies {
