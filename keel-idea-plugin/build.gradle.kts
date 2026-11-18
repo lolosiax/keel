@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "moe.lolosia.keel"
-version = "0.1.11"
+version = "0.1.28"
 
 repositories {
     mavenCentral()
@@ -27,6 +27,8 @@ dependencies {
         }
         // 使用 IDEA 自带的 Gradle 运行面板 / Build 面板来执行 keelPrepareRun
         bundledPlugin("com.intellij.gradle")
+        // @PublicApi 的 PSI（KtClassOrObject / KtNamedFunction）：实现搜索桥接要用
+        bundledPlugin("org.jetbrains.kotlin")
     }
 }
 
