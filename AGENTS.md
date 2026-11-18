@@ -417,8 +417,8 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/public-api-design.md](doc/public-api-design.md) | **`@PublicApi` 讨论稿**：impl + api 两模块下从注解生成 api 工件、跨插件继承的声明方基类影子（`super` / 裸字段 / override 集合）、`create` + `initialization` 远程构造、任何人可 `destroy` 与 Host 句柄表 |
 | [doc/config-design.md](doc/config-design.md) | **配置读写**：YAML + 注释保留、分层覆盖、插件配置隔离、原子落盘与变更通知 |
 | [doc/web-design.md](doc/web-design.md) | **Web 路由**：Host 单端口、插件路由注册、Context 快照、流式响应、中间件与鉴权 |
-| [doc/authz-design.md](doc/authz-design.md) | **权限边界**：core 只留 `@Permission` / `Authorizer` SPI，RBAC 实现归 `keel-plugin-rbac`，fail closed |
-| [doc/basic-stack-design.md](doc/basic-stack-design.md) | **基础栈**：`keel-database-api` 是插件侧查库 klib（ABI + 门面），`keel-database-mariadb` 是 `kind: capability` 驱动包，Host 加载器在 `keel-host`；`keel-plugin-rbac` / `keel-plugin-basic-biz` 的边界、RBAC 与 biz 的交叉裁决、Host 认证/授权强制点与分阶段落地 |
+| [doc/authz-design.md](doc/authz-design.md) | **权限边界**：core 只留 `@Permission` / `Authorizer` SPI，RBAC 默认实现归 `keel-plugin-basic-rbac`（可替换），fail closed |
+| [doc/basic-stack-design.md](doc/basic-stack-design.md) | **基础栈**：`keel-database-api` 是插件侧查库 klib（ABI + 门面），`keel-database-mariadb` 是 `kind: capability` 驱动包，Host 加载器在 `keel-host`；`keel-plugin-basic-rbac` / `keel-plugin-basic-biz` 的边界、RBAC 与 biz 的交叉裁决、Host 认证/授权强制点与分阶段落地 |
 | [doc/capability-design.md](doc/capability-design.md) | **能力插件**：接口在 core、实现按需安装、稳定 C ABI、可卸载；首个示例 Lua 中间件引擎 |
 | [doc/classpath-design.md](doc/classpath-design.md) | **Classpath 与 `.keel`**：资源命名空间、zip / 目录读取、插件包、注册表与卸载语义 |
 | [doc/log-design.md](doc/log-design.md) | **日志归档与订阅**：环形缓冲与容量核算、文本 / 结构化两种视图、插件 Flow 订阅与背压、控制台 / 桌面应用切换 |
@@ -492,7 +492,6 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
                ClasspathNames / ClasspathOp / ClasspathRequest / ClasspathReply
   messaging/   Message / Messenger
   service/     ServiceWire（CBOR）；跨模块调用见 share/ 的 @PublicApi
-               GeneratedServices / ServiceBinder / ServiceDispatcher / ServiceRegistration
   storage/     PluginStorage / StorageOp / StorageRequest / StorageReply
   web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody
                UserSnapshot / RouteDescriptor / Routes / GeneratedRoutes / PermissionNode / ApiResult

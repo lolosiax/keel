@@ -2,6 +2,10 @@
 
 > 状态：**讨论记录，未定稿**。本文只归档 2026-11-09 关于「跨插件访问的声明形态」的讨论与调研结论；
 > 与 [codegen-design.md](codegen-design.md) 冲突时以该文档和代码为准，结论确认后再回填规范。
+>
+> **后续（2026-11-18）**：结论已定稿为 v2-only 的 [`@PublicApi`](public-api-design.md)，
+> 契约写在 impl、api 工件由 KSP 生成；本文的 `@ModuleService` / 独立契约库方案已删除，
+> 只作为取舍过程的记录保留。
 
 ---
 

@@ -6,7 +6,8 @@
 ## 0. 范围与结论
 
 - **目标**：删除 v1 的 `@ModuleService` 机制，只保留 v2 `@PublicApi`。
-- **下游**：当前项目 + klive。两边都重新编译即可，没有外部 ABI 包袱。
+- **下游**：当前仓库的示例插件 + `klive` + `lolosia-keel-plugins`（webdav / dashboard）。重新编译即可，没有外部 ABI 包袱。
+  rbac 由本仓库的默认实现承担，klive 只消费 `keel-api`，不实现 rbac。
 - **原则**：每个插件独立迁移、独立冒烟；v1 代码在最后一步统一删除，迁移期间不破坏现有构建。
 - **坐标不变**：`keel-plugin-<id>-api` 仍是同一个 Maven 坐标；消费方只改 import（如有）并重新编译。
 
@@ -86,7 +87,7 @@ v1 的设计经验全部保留（见 §3），只删除机制本身。
 - 无状态方法的 `SharedCall` 路径；
 - 提供侧自动注册与 `KeelPluginPublicApi` 生命周期。
 
-### 步骤 3：basic-biz（已完成）/ rbac（由 klive 负责）
+### 步骤 3：basic-biz（已完成）/ rbac（本仓默认实现，已完成）
 
 这是主要工作量，依赖 **DTO 镜像生成**（2b-2）：
 
@@ -119,7 +120,7 @@ Host 对同一 typeId 只认最先声明的提供者，删除默认实现的 `.k
 ## 6. 兼容性与回滚
 
 - **坐标**：`keel-plugin-<id>-api` 不变；消费方只重新编译，不改依赖。
-- **协议**：v2 使用 `SHARED_CALL`；v1 的 `SERVICE_CALL` 在迁移期间保留，二者独立。没有结构体布局变化。
+- **协议**：v2 使用 `SHARED_CALL`；v1 的 `SERVICE_REGISTER` / `SERVICE_CALL` 已删除（C 侧常量按 ABI 版本保留，未使用），没有结构体布局变化。
 - **线格式**：`ServiceWire` / CBOR 不变；共享对象用 `SharedRef`；DTO 编码与 v1 一致。
 - **回滚**：按插件回滚。每个插件迁移完成并冒烟后再删它的 v1 代码；最后一步才删公共 v1 代码。任何一步失败都可以保留该插件的 v1 实现，不影响其它插件。
 
@@ -139,7 +140,7 @@ Host 对同一 typeId 只认最先声明的提供者，删除默认实现的 `.k
 | 风险 | 处理 |
 | --- | --- |
 | DTO 镜像生成复杂（默认值、嵌套、枚举、集合） | 先做 hello（无 DTO），再单独做 DTO 生成；不要提前迁 basic-biz |
-| `ctx.modules` 删除破坏 klive | klive 与当前项目同步迁移；访问器名保持 `ctx.xxx`，调用点尽量不改 |
+| `ctx.modules` 删除破坏下游 | webdav 需把 `BasicBizServices` 换成 `ctx.settingApi`（api 工件已发布）；klive 不涉及 |
 | 访问器 / Key 命名冲突 | 生成器扫描已有声明，冲突跳过 + warning；命名约定优先 |
 | 提供侧接口与 api 镜像 typeId 不一致 | 统一由 `@PublicApi(id)` 推导；生成期校验 |
 | 迁移期间两套机制同时存在 | 按插件迁移，公共 v1 代码最后删；不做跨插件的混合调用 |

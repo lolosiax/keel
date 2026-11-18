@@ -1,5 +1,10 @@
 # Keel 零样板模块互访：Gradle 插件 + KSP
 
+> **实现形态已变更（2026-11-18）**：本文手写的 `@ModuleService` / `ServiceKey` / `ServiceCaller`
+> 方案已删除，实际落地是 [`@PublicApi`](public-api-design.md)：契约写在 impl，api 工件由 KSP 生成
+> （镜像 / 代理 / Key / 访问器），提供者侧分发器与 `KeelPluginPublicApi` 自动注册。
+> 本文保留为「零样板」的动机与管线说明；具体注解、生成物与协议以 public-api-design.md 为准。
+>
 > 目标：模块之间可以像普通 Kotlin 一样互相调用（参数、返回值、回调），
 > 开发者**不写代理、不写分发器、不写编解码、不写 plugin.json、不手建 API 工件**。
 > 机制参考 protobuf：接口是唯一手写产物，其余全部构建期生成。

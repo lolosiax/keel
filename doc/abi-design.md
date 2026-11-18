@@ -306,6 +306,10 @@ Host 按依赖拓扑启用；B 不可用时 A 拒绝启用，而不是半启动�
 
 ### 6.3 运行时：`ctx.modules` 拿到的是代理
 
+> **已废止（2026-11-18）**：本节的 `@ModuleService` / `ServiceKey` / `SERVICE_CALL` 通道已删除，
+> 跨模块调用改为 [`@PublicApi`](public-api-design.md)（`SHARED_CALL` + `ctx.xxx` 访问器）。
+> 下面保留为历史设计，用于理解句柄 / 代理的来路。
+
 模块是动态的，**没有 `ctx.modules.moduleB` 这种编译期字段**。按 key 查找：
 
 ```kotlin

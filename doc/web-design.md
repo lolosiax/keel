@@ -21,7 +21,7 @@ object QueueController {
     @GET("/{userId}")
     @Permission("queue.read")
     suspend fun first(ctx: Context, @Path userId: String): QueueInfo =
-        ctx.modules.queue.first(userId)
+        ctx.queueApi.first(userId)
 
     @GET("/{userId}/events")
     suspend fun events(ctx: Context, @Path userId: String): HttpResponse =
@@ -109,7 +109,7 @@ interface Context {
     val user: UserSnapshot?            // id / username / roles
     val data: MutableMap<String, Any?> // 请求期共享
 
-    val modules: ModuleDirectory       // 快捷方式 = plugin.modules
+    // 跨模块访问器：ctx.<契约> / ctx.<契约>OrNull，由 @PublicApi 的 api 工件生成
     val server: KeelServer
     val config: Config
 

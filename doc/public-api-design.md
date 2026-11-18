@@ -13,8 +13,10 @@
 
 - **只保留 v2**：`@PublicApi` 取代 `@ModuleService`，不维护两套并行机制。
 - **impl 是唯一真源**：`@PublicApi` 声明写在 impl，api 工件完全由它生成；impl **不依赖** api。
-- **一个 api 工件**：每个插件一个 `api/` 子工程，坐标仍是 `keel-plugin-<id>-api`；镜像与 impl 同 FQN。
+- **一个 api 工件**：每个插件一个 `api/` 子工程，坐标默认 `keel-plugin-<id>-api`；镜像与 impl 同 FQN。
+  可替换能力（rbac）的 api 子工程使用**中性坐标**（`keel-plugin-rbac-api`），与默认实现的名字解耦。
 - **无状态服务 = 契约接口 + `@Singleton` 实现**：`@PublicApi` 标接口，`@Singleton` 标实现；调用走 `SharedCall`，句柄由 `PUBLIC_API_SINGLETON` 解析。
+  实现类可以实现的契约**来自依赖**（klib）：第三方实现只依赖 api 工件即可，生成器只补提供者侧分发器。
 - **`@KeelPluginMain` = 公开单例**：它语义上等价于 `@PublicApi` + `@Singleton`；没有 api 工程且只有它时跳过 api 生成。
 - **有状态对象 = 可构造类**：`createInstance` + `initialization`，状态机 `Creating → Open → Closed`。
 - **跨插件继承 = 镜像 + 声明方影子**：api 镜像负责编译期超类型，impl 影子负责基类体与基类状态。
@@ -84,7 +86,7 @@ v1 的 `@ModuleService` 是「手写契约接口 + 生成 Client/Dispatcher」�
 - 同一个插件同时有 v1 和 v2 时，impl 依赖 v1 api，而 v2 镜像与 impl 同 FQN → 编译冲突；
 - 为避免冲突又要引入 `.public` 包、显式 id、两套生成器，规则复杂度远高于迁移成本。
 
-当前下游只有 klive 和当前项目，迁移成本可控，因此**选择 v2-only**。v1 的设计经验（契约侧生成、提供侧生成、从 klib 读契约、`serializer<T>()` + Args DTO、命名、单例路由）全部搬进 v2。
+当前下游只有 klive、`lolosia-keel-plugins` 和本仓库，迁移成本可控，因此**选择 v2-only**。v1 的设计经验（契约侧生成、提供侧生成、从 klib 读契约、`serializer<T>()` + Args DTO、命名、单例路由）全部搬进 v2。
 
 ### 3.3 为什么是镜像，而不是共用同一个类型
 
@@ -146,8 +148,15 @@ V1 先跑通，再把落点切到 V2；两者使用同一个生成器，切换�
 - `Xxx` 镜像：接口 / open class / data class，方法体为桩，基类调用走 `base.*`；
 - `XxxProxy`：消费方代理，虚方法转发、共享参数/返回值换 `SharedRef`；
 - `XxxKey`：`PublicApiKey<Xxx>(typeId)`；
-- `val PluginContext.xxx`：单例访问器；
+- `val PluginContext.xxx`：单例访问器（提供者缺席时抛异常）；
+- `val PluginContext.xxxOrNull`：同一访问器，提供者缺席时返回 `null`（可替换能力按缺席降级）；
 - DTO 镜像：`@Serializable` 数据类的镜像（2b-2 引入）。
+
+**提供者侧（第三方实现）**
+
+- 当 `@Singleton` 实现类实现的是**依赖里的** `@PublicApi` 契约（klib，没有源码）时，
+  只生成 `XxxDispatcher` 与 `KeelPluginPublicApi.setup` 的声明 / 注册，不生成镜像与代理
+  （api 工件里已有）；`declare` 的 typeId 仍是契约 FQN，因此与默认实现等价、可原位替换。
 
 ### 4.4 手写逃生口与冲突
 
@@ -192,7 +201,8 @@ annotation class KeelPluginMain
 
 - `@PublicApi`：标在类型上 = 该类型进入 api 工件；标在成员上 = 类模式下只有这些成员参与共享。**不再用参数区分单例**。
 - `@Singleton`：标在实现类上 = 把它登记为它实现的所有 `@PublicApi` 类型的单例；如果类本身也是 `@PublicApi`，同时登记自己的类型。
-- `@Singleton` 不导出新类型，只决定「谁提供单例」。一个 typeId 只允许一个 `@Singleton`，重复时 Host 拒绝后到者并告警。
+  实现的契约可以来自本模块源码，也可以来自依赖（api 工件 / klib），后者只生成提供者侧分发器。
+- `@Singleton` 不导出新类型，只决定「谁提供单例」。一个 typeId 只允许一个 `@Singleton`，重复时 Host 保留首个、拒绝后到者并告警。
 - `@Singleton` 类必须至少实现一个 `@PublicApi` 类型，或自身标了 `@PublicApi`；否则生成期告警。
 - `@KeelPluginMain`：插件入口，同时语义等价于 `@PublicApi` + `@Singleton`；插件主类只写这一个注解。
 - **KSP 不会自动传播元注解**：生成器显式把带 `@KeelPluginMain` 的类当作 `@PublicApi` + `@Singleton`；扫描 `@PublicApi` / `@Singleton` 时排除 `ANNOTATION_CLASS`，避免把 `@KeelPluginMain` 自身当成可导出类型。
@@ -252,6 +262,8 @@ ctx.helloApi.greet("world")
 method = name                                  // 无重载
 method = name + "/" + 参数类型规范化串          // initialization/String、initialization/String/Int
 ```
+
+> 现状：重载**尚未实现**，生成器遇到重载会报错。线名规则保留为设计目标，实现时按上表推导。
 
 属性按 §6.3 的 `SharedVar` / `SharedVal` 处理（P2）；接口上禁止属性，改写成 `suspend fun getX()`。
 
@@ -398,6 +410,10 @@ singletons: Map<String /* typeId */, Long /* handle */>
 - 句柄由 Host 分配，随登记返回给插件。
 - 句柄是**对象级**的：一个对象一个 id；`types` 是它导出的类型集合。
 - 调用按 `typeId → declaring` 进声明方；没有跨插件子类时 `declaring == owner`，退化成点对点转发。
+- **同 typeId 冲突**：`types` 与 `singletons` 都只认**首个**提供者（按插件加载顺序）；
+  后到者照常拿到自己的句柄、可以正常工作，但不会被类型路由 / 单例查找选中，Host 打 warn。
+  插件停用时清理自己声明与注册的条目，因此「停用默认实现 → 启用第三方实现」不需要重启。
+- `plugin.json` 的 `provides`（如 `authz`）与这里同一语义：首个认领者生效，第二个直接判冲突。
 
 ### 8.2 subject
 
@@ -447,7 +463,9 @@ else                       → owner            // 纯接口直接给所有者
 | **2b** | api 全生成：镜像 / 代理 / Key / 访问器（V1 提交制） | 已完成 |
 | 2b-2 | api 生成：`@Serializable` DTO 镜像 | 已完成 |
 | 2c | 消费方子类胶水：从 api klib 读契约，生成 overrides 与 dispatcher | 已完成 |
-| 3 | v1 迁移：hello → basic-biz / rbac → 删除 `@ModuleService` | 进行中（hello / basic-biz 已完成；rbac 归 klive） |
+| 2c-2 | 提供者侧：`@Singleton` 实现依赖里的 `@PublicApi` 契约，只生成 dispatcher / 注册 | 已完成 |
+| 2d | 访问器补齐 `ctx.xxxOrNull`；Host 同 typeId / `provides` 首提供者胜出 | 已完成 |
+| 3 | v1 迁移：hello → basic-biz / rbac → 删除 `@ModuleService` | 已完成；rbac 默认实现 `keel-plugin-basic-rbac` 已落地 |
 
 2b 采用 V1 提交制：KMP 下 KSP 的 `CodeGenerator` 只能写目标 fragment，commonMain 看不到生成声明；
 因此由 impl 侧 KSP 通过 `keel.api.dir` 直接写入 `api/src/commonMain/kotlin`，产物随仓库提交。
@@ -466,7 +484,7 @@ else                       → owner            // 纯接口直接给所有者
 | 风险 / 未决 | 影响 | 处理 |
 | --- | --- | --- |
 | 镜像类型导致「跳到实现」失效 | 调试体验下降 | 生成物带 `// 对应 impl.Xxx` 注释；后续 IDEA 插件补导航 |
-| api 与 impl 漂移 | decode 失败 / 字段错位 | 契约指纹 + `keelApiCheck` |
+| api 与 impl 漂移 | decode 失败 / 字段错位 | `keelApiCheck`（重新生成 + git diff）已生效；契约指纹（§9）尚未实现 |
 | 跨工程 task 顺序（V2） | clean 后 api 报红 | 默认 V1 提交制；V2 灰度 |
 | 基类有非 `open` 成员或无法无参构造 | 影子无法覆盖 / 无法创建 | 生成期校验 |
 | 代理上的 `is` / 私有成员不可用 | 业务代码误以为是本地对象 | 生成 `isXxx()` / `typeName`；未导出成员抛错 |

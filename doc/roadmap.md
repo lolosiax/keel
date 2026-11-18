@@ -63,8 +63,8 @@ keel-router-ksp / keel-plugin-ksp（构建期，不在运行时图里）
 1. **Gradle 工具链**
    - `moe.lolosia.keel.publish`：把插件工程的原生库（按 `mingwX64` / `linuxArm64` / `linuxX64`）与 `plugin.json` 打成工件，发布到自建 Maven。
    - `moe.lolosia.keel.classpath`：把 `src/commonMain/resources` 打成 `classpath.zip`（先不做嵌入）。
-   - `moe.lolosia.keel.plugin` + `keel-plugin-ksp`：从 `@ModuleService` 接口生成客户端 / 分发器 / 访问器
-     （见 [codegen-design.md](codegen-design.md)）；DEMO 先支持单个服务、值参数 / 返回值。
+   - `moe.lolosia.keel.plugin` + `keel-plugin-ksp`：从 `@PublicApi` 契约生成 api 工件（代理 / Key / 访问器）
+     与提供者侧分发器（见 [public-api-design.md](public-api-design.md)）；DEMO 先支持单例服务、值参数 / 返回值。
    - `keel-router-ksp`：生成 `@Controller` 路由表（DEMO 先支持 GET + `@Path` / `@Query` + DTO 返回）。
 2. **插件加载器（Host）**
    - 从指定目录扫描 `*/plugin.json` + 原生库；`dlopen` / `LoadLibrary` 后取
@@ -172,7 +172,7 @@ keel-router-ksp / keel-plugin-ksp（构建期，不在运行时图里）
 3. **上下文与权限**
    - 账户、RBAC、租户等上下文进入 `Context`；插件只能看到被授权的字段。
    - core 提供 `@Permission` / `ctx.hasPermission` / `Authorizer` SPI；
-     RBAC 实现放在 `keel-plugin-rbac`，Host 在路由分发前校验，无实现时 fail closed
+     RBAC 默认实现是 `keel-plugin-basic-rbac`（可替换），Host 在路由分发前校验，无实现时 fail closed
      （见 [authz-design.md](authz-design.md)）。
 4. **隔离与健康**
    - 单插件异常不扩散：Worker 崩溃 / 队列卡死时的熔断与重启策略。

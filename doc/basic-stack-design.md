@@ -1,5 +1,11 @@
 # Keel 基础栈设计：database / rbac / basic-biz
 
+> **现状提示（2026-11-18）**：rbac 已落地为 `keel-plugin-basic-rbac`（默认实现，`id = "rbac"`、
+> `provides: ["authz"]`，契约以中性坐标 `keel-plugin-rbac-api` 发布，可原位替换）；
+> basic-biz 已落地并迁到 `@PublicApi` v2。本文中 `@ModuleService` / `ServiceKey` /
+> `ModuleDirectory` / `permissions.yaml` 相关段落属于历史方案，当前跨插件调用与权限节点目录
+> 以 [public-api-design.md](public-api-design.md) / [authz-design.md](authz-design.md) 为准。
+>
 > 本文回答一件事：把 `backend/` 里已经跑通的 **RBAC + 注解式 Router + 请求上下文 + 会话/用户体系**
 > 搬进 Keel 时，四个包分别该做成什么形态、边界怎么切、先做什么后做什么。
 >
