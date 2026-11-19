@@ -1,13 +1,11 @@
 import groovy.json.JsonSlurper
 import moe.lolosia.keel.gradle.common.*
-import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.GradleException
 import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.publish.maven.MavenPublication
 import org.gradle.api.publish.maven.tasks.PublishToMavenLocal
 import org.gradle.api.publish.maven.tasks.PublishToMavenRepository
-import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
 
 // 第三方原生库的生成侧：下载/编译上游源码 → 按 manifest 拆成 dist/<lib>/<target> →
@@ -53,25 +51,15 @@ fun artifactVersion(spec: Map<String, Any?>): String {
 
 // ---------------------------------------------------------------- 源码编译
 
-val compileCodecs = tasks.register<Exec>("compileCodecs") {
-    group = "build"
-    description = "从上游源码编译 zlib / libpng / libwebp / libjpeg-turbo / giflib / msgpack-c"
-    workingDir = projectDir
-    doFirst {
-        if (!Os.isFamily(Os.FAMILY_WINDOWS)) {
-            throw GradleException(
-                "源码编译目前只提供 Windows 脚本（gradle/build-codecs.ps1）。" +
-                    "Linux 可先在有产物的机器上执行 stageAll / publishAll，或补一份 gradle/build-codecs.sh。"
-            )
-        }
-    }
-    commandLine("powershell", "-ExecutionPolicy", "Bypass", "-File", "gradle/build-codecs.ps1")
-}
+// 实现在 gradle/codecs.gradle.kts（Kotlin 脚本插件，Windows / Linux 共用一份）：
+// 下载 manifest 里的源码包 → 解压 → 用 Kotlin/Native 自带的 clang + 三个 sysroot 交叉编译，
+// 产物落在 build/thirdparty/out/<target>/*.a 与 out/include。
+apply(from = "gradle/codecs.gradle.kts")
 
 val compileAll = tasks.register("compileAll") {
     group = "build"
-    description = "从源码编译全部库（当前为 6 个 codec）"
-    dependsOn(compileCodecs)
+    description = "从源码编译全部库（6 个 codec × 3 个目标）"
+    dependsOn("compileCodecs")
 }
 
 // ---------------------------------------------------------------- 拆分到 dist

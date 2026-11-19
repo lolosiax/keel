@@ -5,6 +5,7 @@
       "version": "1.3.1",
       "revision": 1,
       "source": {
+        "name": "zlib",
         "url": "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",
         "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
       },
@@ -24,6 +25,7 @@
       "version": "1.6.44",
       "revision": 1,
       "source": {
+        "name": "libpng",
         "url": "https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.44.tar.gz",
         "sha256": "0ef5b633d0c65f780c4fced27ff832998e71478c13b45dfb6e94f23a82f64f7c"
       },
@@ -43,6 +45,7 @@
       "version": "1.6.0",
       "revision": 1,
       "source": {
+        "name": "libwebp",
         "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
         "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
       },
@@ -62,6 +65,7 @@
       "version": "3.1.0",
       "revision": 1,
       "source": {
+        "name": "libjpeg-turbo",
         "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.0/libjpeg-turbo-3.1.0.tar.gz",
         "sha256": "9564c72b1dfd1d6fe6274c5f95a8d989b59854575d4bbee44ade7bc17aa9bc93"
       },
@@ -81,6 +85,7 @@
       "version": "5.2.2",
       "revision": 1,
       "source": {
+        "name": "giflib",
         "url": "https://deb.debian.org/debian/pool/main/g/giflib/giflib_5.2.2.orig.tar.gz",
         "sha256": "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
       },
@@ -100,6 +105,7 @@
       "version": "7.0.2",
       "revision": 1,
       "source": {
+        "name": "msgpack-c",
         "url": "https://github.com/msgpack/msgpack-c/releases/download/c-7.0.2/msgpack-c-7.0.2.tar.gz",
         "sha256": "6ae50f69612871aa01de76bec904165cd2a2fc30ff9f653f2f60a663c5c1a86c"
       },

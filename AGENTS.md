@@ -114,11 +114,11 @@ gradlew -p keel-router-ksp publish
 gradlew -p keel-plugin-ksp publish
 
 # 第三方原生库：生成侧单独构建（不进 buildAll）
-gradlew -p keel-thirdparty compileAll       # 目前只有 Windows 的 build-codecs.ps1
+gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（跨 OS，逻辑在 gradle/codecs.gradle.kts）
 gradlew -p keel-thirdparty stageAll         # 把 out/ 拆成 dist/<lib>/<target>
 gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
-# Linux 可执行 stageAll / publishAll（纯 JVM）；编译侧需补 build-codecs.sh，
-# 或用 -Pkeel.thirdparty.out=<已在别处编译好的 out 目录> 复用产物。
+# 编译侧 Windows / Linux 共用同一份 Kotlin 实现（无 shell / Python 依赖），
+# 也可用 -Pkeel.thirdparty.out=<已在别处编译好的 out 目录> 复用产物。
 ```
 
 - **改了公共 API 至少跑**：`gradlew -p keel-api build` + `gradlew -p keel-plugin-hello build`（消费方必须能编过）。
@@ -572,7 +572,7 @@ keel-thirdparty-gradle-plugin/src/main/kotlin/moe/lolosia/keel/gradle/thirdparty
   KeelThirdparty{CheckManifest,CheckLicenses,Notices,Verify,Publish,Def}Task.kt   门禁与发布
 keel-thirdparty/
   manifest.json                       库清单（moe.lolosia.keel.thirdparty）
-  gradle/toolchain.ps1 build-codecs.ps1   Windows 交叉编译（当前 6 个 codec）
+  gradle/codecs.gradle.kts            源码下载/解压 + clang/cmake 交叉编译（6 个 codec，跨 OS）
   <lib>/<lib>.def + licenses/<lib>/    随库分发的 def 与许可
   build/dist/<lib>/<target>/           生成的 staging（gitignore）
   build/thirdparty/repo/               打包后的 Maven 布局（gitignore）

@@ -183,7 +183,7 @@ keel-thirdparty/
   settings.gradle.kts
   build.gradle.kts        # compileAll / stageAll / publishAll / rebuildAndPublish
   manifest.json           # groupId = moe.lolosia.keel.thirdparty
-  gradle/                 # Windows：toolchain.ps1 + build-codecs.ps1
+  gradle/codecs.gradle.kts  # 源码下载/解压 + clang/cmake 交叉编译（Kotlin，跨 OS）
   zlib/ png/ webp/ jpeg/ gif/ msgpack/
     <lib>.def
   licenses/<lib>/         # 上游许可全文
@@ -192,12 +192,19 @@ keel-thirdparty/
   build/thirdparty/repo/  # keelThirdpartyPublish 产出的 Maven 布局
 ```
 
-- `compileAll` 负责源码编译；当前只有 Windows 脚本（用 K/N 自带的 Linux 交叉工具链，
-  一次产出 mingwX64 / linuxArm64 / linuxX64）。
-- `stageAll` / `publishAll` 是纯 JVM 任务，可在 Linux 上执行；
+- `compileAll` 负责源码编译：`gradle/codecs.gradle.kts` 按 manifest 下载源码包
+  （先自建镜像 `/sources`、再上游，校验 sha256），用 K/N 自带 clang 与各目标 sysroot
+  一次产出 mingwX64 / linuxArm64 / linuxX64。Windows 与 Linux 共用同一份实现，
+  OS 差异只在工具链定位（`llvm-*`、`msys2-mingw-w64-*`、`*-unknown-linux-gnu-gcc-*`）
+  与 CMake 生成器选择上；不依赖 PowerShell / bash / Python。
+- `manifest.json` 的每个 `source` 除了 `url` / `sha256`，还要有 `name`（上游包名，
+  如 png → `libpng`、msgpack → `msgpack-c`）：下载文件名、解压根目录与
+  `/sources/<name>/<version>/` 镜像路径都用它。
+- `stageAll` / `publishAll` 是纯 JVM 任务，任何平台都能执行；
   用 `-Pkeel.thirdparty.out=<目录>` 复用别处编译好的 `out/`。
-- 需要 Linux 原生参与编译时，补一份 `gradle/build-codecs.sh`，由 `compileCodecs`
-  按操作系统选择脚本即可；`stage` / `publish` 不需要改。
+- 单个目标可单独跑：`compileCodecsMingwX64` / `compileCodecsLinuxArm64` /
+  `compileCodecsLinuxX64`；源码缓存与 CMake 构建目录都在 `build/thirdparty/` 下（不入库），
+  重跑 `downloadCodecSources` / `extractCodecSources` 即可重建。
 
 ---
 
