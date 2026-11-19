@@ -1,0 +1,7 @@
+# giflib 绑定（GIF 编解码）。接口全部以 int* Error 返回错误，无 longjmp。
+package = moe.lolosia.keel.thirdparty.gif
+
+headers = giflib/gif_lib.h
+headerFilter = giflib/*
+
+staticLibraries = libgif.a

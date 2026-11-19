@@ -4,6 +4,7 @@ import org.gradle.api.Action
 import org.gradle.api.NamedDomainObjectContainer
 import org.gradle.api.NamedDomainObjectFactory
 import org.gradle.api.Project
+import java.io.File
 
 /**
  * `moe.lolosia.keel.thirdparty` 的配置项。
@@ -51,8 +52,8 @@ open class KeelThirdpartyExtension(private val project: Project) {
 
     fun library(name: String): KeelThirdpartyLibrary = libraries.create(name)
 
-    fun library(name: String, dir: Any): KeelThirdpartyLibrary =
-        libraries.create(name).apply { this.dir = project.file(dir).absolutePath }
+    fun library(name: String, dir: File): KeelThirdpartyLibrary =
+        libraries.create(name).apply { this.dir = dir.absolutePath }
 
     fun library(name: String, action: Action<KeelThirdpartyLibrary>): KeelThirdpartyLibrary =
         libraries.create(name).also { action.execute(it) }

@@ -89,6 +89,8 @@ class KeelThirdpartyPlugin : Plugin<Project> {
             compilation.cinterops.create(library.name) { settings ->
                 settings.definitionFile.set(definition)
                 settings.includeDirs(includeDir)
+                // 包内 def 用 staticLibraries = libz.a 这种写法，cinterop 也要能找到库目录
+                settings.extraOpts("-libraryPath", libDir.absolutePath)
                 settings.packageName = library.packageName
             }
 
@@ -140,7 +142,8 @@ class KeelThirdpartyPlugin : Plugin<Project> {
             if (configuration.dependencies.isEmpty()) {
                 project.dependencies.add(configuration.name, coordinate)
             }
-            task.from(project.zipTree(configuration))
+            // singleFile 在任务执行期解析，避免配置期就下载工件
+            task.from(project.provider { project.zipTree(configuration.singleFile) })
         }
     }
 

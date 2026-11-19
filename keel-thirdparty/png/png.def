@@ -1,0 +1,9 @@
+# libpng 绑定。只暴露 png.h 的公共 API（含 png_image 简化接口 —— 该接口把 setjmp/longjmp
+# 关在库内部，出错只回错误码，适合从 Kotlin 调用）。
+# libz.a 一并打进 klib：libpng 的引用需要它，且这样 png 绑定自带完整依赖。
+package = moe.lolosia.keel.thirdparty.png
+
+headers = libpng/png.h
+headerFilter = libpng/*
+
+staticLibraries = libpng.a libz.a

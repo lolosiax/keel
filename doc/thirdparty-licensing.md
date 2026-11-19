@@ -1,10 +1,10 @@
 # 第三方原生库：封装发布与许可合规
 
-> 状态：方案（2026-11-19，插件已落地）。本文回答两件事：
+> 状态：方案（2026-11-19，插件与首批工件已落地）。本文回答两件事：
 > keel 如何发布第三方原生库的封装；分发这些产物时如何满足许可义务。
 > `keel-thirdparty-gradle-plugin` 已实现消费接线与 check / notices / verify / publish；
-> 首个 SQLite 工件仍需在能访问上游源码的环境里生成（manifest 尚空）。
-> 与实现冲突时以代码为准，并回头修本文。
+> `keel-thirdparty/` 已迁入 6 个 codec（zlib / png / webp / jpeg / gif / msgpack），
+> SQLite 等其余库仍待补。与实现冲突时以代码为准，并回头修本文。
 
 ---
 
@@ -173,6 +173,31 @@ keel 作为插件平台，工具链插件统一在 `moe.lolosia.keel.toolchain` 
   保留为同一对象的别名，不需要改现有脚本。
 - 如果将来连一行 import 都不想要，退回「每个插件一个顶层扩展」即可，
   插件实现层面没有其他差别。
+
+### 2.8 生成侧布局（`keel/keel-thirdparty/`）
+
+生成侧是一个独立 Gradle 构建，默认不参与根 `buildAll`：
+
+```text
+keel-thirdparty/
+  settings.gradle.kts
+  build.gradle.kts        # compileAll / stageAll / publishAll / rebuildAndPublish
+  manifest.json           # groupId = moe.lolosia.keel.thirdparty
+  gradle/                 # Windows：toolchain.ps1 + build-codecs.ps1
+  zlib/ png/ webp/ jpeg/ gif/ msgpack/
+    <lib>.def
+  licenses/<lib>/         # 上游许可全文
+  build/thirdparty/out/   # 源码编译产物（include/ + <target>/）
+  build/dist/             # 按 manifest 拆出的 <lib>/<target>/{include,lib}
+  build/thirdparty/repo/  # keelThirdpartyPublish 产出的 Maven 布局
+```
+
+- `compileAll` 负责源码编译；当前只有 Windows 脚本（用 K/N 自带的 Linux 交叉工具链，
+  一次产出 mingwX64 / linuxArm64 / linuxX64）。
+- `stageAll` / `publishAll` 是纯 JVM 任务，可在 Linux 上执行；
+  用 `-Pkeel.thirdparty.out=<目录>` 复用别处编译好的 `out/`。
+- 需要 Linux 原生参与编译时，补一份 `gradle/build-codecs.sh`，由 `compileCodecs`
+  按操作系统选择脚本即可；`stage` / `publish` 不需要改。
 
 ---
 

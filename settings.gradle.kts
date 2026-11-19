@@ -19,6 +19,10 @@ rootProject.name = "keel"
 
 // 每个顶层 `keel-*` 目录都是独立的 Gradle 构建，由根构建以 composite build 的方式聚合。
 // 单独构建某个部分时：gradlew -p <目录> <任务>
+//
+// `keel-thirdparty` 是第三方原生库的生成侧（Windows 编译 + 打包发布），
+// 编译耗时长且依赖 konan 交叉工具链，默认不参与 buildAll：
+//   gradlew -p keel-thirdparty compileAll / stageAll / publishAll
 includeBuild("keel-gradle-common")
 includeBuild("keel-classpath-gradle-plugin")
 includeBuild("keel-thirdparty-gradle-plugin")

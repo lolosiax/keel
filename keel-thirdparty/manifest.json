@@ -1,0 +1,123 @@
+{
+  "groupId": "moe.lolosia.keel.thirdparty",
+  "libraries": {
+    "zlib": {
+      "version": "1.3.1",
+      "revision": 1,
+      "source": {
+        "url": "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz",
+        "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+      },
+      "headers": ["zlib"],
+      "def": "zlib.def",
+      "libs": {
+        "mingwX64": ["libz.a"],
+        "linuxArm64": ["libz.a"],
+        "linuxX64": ["libz.a"]
+      },
+      "link": "static",
+      "license": "Zlib",
+      "licenseFiles": ["licenses/zlib/LICENSE"],
+      "patches": []
+    },
+    "png": {
+      "version": "1.6.44",
+      "revision": 1,
+      "source": {
+        "url": "https://github.com/pnggroup/libpng/archive/refs/tags/v1.6.44.tar.gz",
+        "sha256": "0ef5b633d0c65f780c4fced27ff832998e71478c13b45dfb6e94f23a82f64f7c"
+      },
+      "headers": ["libpng"],
+      "def": "png.def",
+      "libs": {
+        "mingwX64": ["libpng.a", "libz.a"],
+        "linuxArm64": ["libpng.a", "libz.a"],
+        "linuxX64": ["libpng.a", "libz.a"]
+      },
+      "link": "static",
+      "license": "Libpng",
+      "licenseFiles": ["licenses/png/LICENSE"],
+      "patches": []
+    },
+    "webp": {
+      "version": "1.6.0",
+      "revision": 1,
+      "source": {
+        "url": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+        "sha256": "e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
+      },
+      "headers": ["libwebp"],
+      "def": "webp.def",
+      "libs": {
+        "mingwX64": ["libwebp.a"],
+        "linuxArm64": ["libwebp.a"],
+        "linuxX64": ["libwebp.a"]
+      },
+      "link": "static",
+      "license": "BSD-3-Clause",
+      "licenseFiles": ["licenses/webp/COPYING", "licenses/webp/PATENTS"],
+      "patches": []
+    },
+    "jpeg": {
+      "version": "3.1.0",
+      "revision": 1,
+      "source": {
+        "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.0/libjpeg-turbo-3.1.0.tar.gz",
+        "sha256": "9564c72b1dfd1d6fe6274c5f95a8d989b59854575d4bbee44ade7bc17aa9bc93"
+      },
+      "headers": ["libjpeg"],
+      "def": "jpeg.def",
+      "libs": {
+        "mingwX64": ["libturbojpeg.a", "libjpeg.a"],
+        "linuxArm64": ["libturbojpeg.a", "libjpeg.a"],
+        "linuxX64": ["libturbojpeg.a", "libjpeg.a"]
+      },
+      "link": "static",
+      "license": "IJG OR BSD-3-Clause OR Zlib",
+      "licenseFiles": ["licenses/jpeg/LICENSE.md", "licenses/jpeg/README.ijg"],
+      "patches": []
+    },
+    "gif": {
+      "version": "5.2.2",
+      "revision": 1,
+      "source": {
+        "url": "https://deb.debian.org/debian/pool/main/g/giflib/giflib_5.2.2.orig.tar.gz",
+        "sha256": "be7ffbd057cadebe2aa144542fd90c6838c6a083b5e8a9048b8ee3b66b29d5fb"
+      },
+      "headers": ["giflib"],
+      "def": "gif.def",
+      "libs": {
+        "mingwX64": ["libgif.a"],
+        "linuxArm64": ["libgif.a"],
+        "linuxX64": ["libgif.a"]
+      },
+      "link": "static",
+      "license": "MIT",
+      "licenseFiles": ["licenses/gif/COPYING"],
+      "patches": []
+    },
+    "msgpack": {
+      "version": "7.0.2",
+      "revision": 1,
+      "source": {
+        "url": "https://github.com/msgpack/msgpack-c/releases/download/c-7.0.2/msgpack-c-7.0.2.tar.gz",
+        "sha256": "6ae50f69612871aa01de76bec904165cd2a2fc30ff9f653f2f60a663c5c1a86c"
+      },
+      "headers": ["msgpack.h", "msgpack"],
+      "def": "msgpack.def",
+      "libs": {
+        "mingwX64": ["libmsgpackc.a"],
+        "linuxArm64": ["libmsgpackc.a"],
+        "linuxX64": ["libmsgpackc.a"]
+      },
+      "link": "static",
+      "license": "BSL-1.0",
+      "licenseFiles": [
+        "licenses/msgpack/COPYING",
+        "licenses/msgpack/LICENSE_1_0.txt",
+        "licenses/msgpack/NOTICE"
+      ],
+      "patches": []
+    }
+  }
+}

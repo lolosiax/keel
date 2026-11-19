@@ -1,0 +1,8 @@
+# zlib 绑定：DEFLATE / CRC 等。静态库 libz.a 由 cinterop 打进 klib，
+# 目标相关的搜索路径由 build.gradle.kts 的 -libraryPath 指向解析后的工件目录。
+package = moe.lolosia.keel.thirdparty.zlib
+
+headers = zlib/zlib.h
+headerFilter = zlib/*
+
+staticLibraries = libz.a

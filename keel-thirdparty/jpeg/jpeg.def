@@ -1,0 +1,9 @@
+# libjpeg-turbo 绑定：这里只绑 TurboJPEG 接口（turbojpeg.h）。
+# 原因：经典 libjpeg 接口的错误处理靠 setjmp/longjmp（默认 error_exit 直接 exit 进程），
+# 从 Kotlin/Native 里跨语言 longjmp 是不安全的；TurboJPEG 全程返回错误码，可由 Kotlin 捕获。
+package = moe.lolosia.keel.thirdparty.jpeg
+
+headers = libjpeg/turbojpeg.h
+headerFilter = libjpeg/*
+
+staticLibraries = libturbojpeg.a libjpeg.a

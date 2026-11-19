@@ -31,6 +31,7 @@
 | `keel-gradle-common/` | `keel-gradle-common` | 所有工具链插件共用的 `keel { }` 根容器（只按类型注册 section，不单独 apply） | 是 |
 | `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入 + Windows 版本资源插件 `moe.lolosia.keel.classpath` | 是 |
 | `keel-thirdparty-gradle-plugin/` | `keel-thirdparty-gradle-plugin` | 第三方原生库插件的消费接线与许可门禁 `moe.lolosia.keel.thirdparty` | 是 |
+| `keel-thirdparty/` | `keel-thirdparty` | 第三方原生库的生成侧（manifest / `.def` / licenses / 源码编译 / dist / 发布）；默认不进 `buildAll` | 否 |
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin`；单 exe 产出 `moe.lolosia.keel.bundle`（由前者自动 apply） | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
@@ -111,6 +112,13 @@ gradlew -p keel-logger-gradle-plugin publish
 gradlew -p keel-logger-compiler-plugin publish
 gradlew -p keel-router-ksp publish
 gradlew -p keel-plugin-ksp publish
+
+# 第三方原生库：生成侧单独构建（不进 buildAll）
+gradlew -p keel-thirdparty compileAll       # 目前只有 Windows 的 build-codecs.ps1
+gradlew -p keel-thirdparty stageAll         # 把 out/ 拆成 dist/<lib>/<target>
+gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
+# Linux 可执行 stageAll / publishAll（纯 JVM）；编译侧需补 build-codecs.sh，
+# 或用 -Pkeel.thirdparty.out=<已在别处编译好的 out 目录> 复用产物。
 ```
 
 - **改了公共 API 至少跑**：`gradlew -p keel-api build` + `gradlew -p keel-plugin-hello build`（消费方必须能编过）。
@@ -562,6 +570,12 @@ keel-thirdparty-gradle-plugin/src/main/kotlin/moe/lolosia/keel/gradle/thirdparty
   KeelThirdpartyPlugin.kt              消费接线（zip → 解包 → cinterop → linkerOpts）
   KeelThirdpartyManifest.kt            thirdparty/manifest.json 模型与解析
   KeelThirdparty{CheckManifest,CheckLicenses,Notices,Verify,Publish,Def}Task.kt   门禁与发布
+keel-thirdparty/
+  manifest.json                       库清单（moe.lolosia.keel.thirdparty）
+  gradle/toolchain.ps1 build-codecs.ps1   Windows 交叉编译（当前 6 个 codec）
+  <lib>/<lib>.def + licenses/<lib>/    随库分发的 def 与许可
+  build/dist/<lib>/<target>/           生成的 staging（gitignore）
+  build/thirdparty/repo/               打包后的 Maven 布局（gitignore）
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin
   src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
 keel-plugin-gradle-plugin/src/main/…/gradle/plugin/

@@ -1,0 +1,8 @@
+# libwebp 绑定（编解码）。libsharpyuv 是编码侧的私有依赖，已并入 libwebp.a（见 gradle/build-codecs.ps1）：
+# 分成两个归档时，链接器按归档逐个解析，顺序被重排后 libwebp.a 里的 SharpYuv* 会解析不到。
+package = moe.lolosia.keel.thirdparty.webp
+
+headers = libwebp/webp/encode.h libwebp/webp/decode.h
+headerFilter = libwebp/webp/*
+
+staticLibraries = libwebp.a
