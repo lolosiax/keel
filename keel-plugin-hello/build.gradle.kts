@@ -1,4 +1,5 @@
 import com.google.devtools.ksp.gradle.KspExtension
+import moe.lolosia.keel.gradle.common.*
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -37,13 +38,15 @@ tasks.register("keelApiCheck") {
     }
 }
 
-keelPlugin {
-    // 当前开发机先只打 mingwX64；Linux 目标在对应平台或 CI 上打
-    target("mingwX64")
-    // 联调本仓库的 Host 源码：直接用本地 debug Host，并带上它的位置表，
-    // 这样 IDE 里在 keel-host 的 .kt 行上打断点才有 locationId 可下发。
-    runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
-    runHostDebugDir = "../keel-host/build/keel-debug"
+keel {
+    plugin {
+        // 当前开发机先只打 mingwX64；Linux 目标在对应平台或 CI 上打
+        target("mingwX64")
+        // 联调本仓库的 Host 源码：直接用本地 debug Host，并带上它的位置表，
+        // 这样 IDE 里在 keel-host 的 .kt 行上打断点才有 locationId 可下发。
+        runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
+        runHostDebugDir = "../keel-host/build/keel-debug"
+    }
 }
 
 kotlin {

@@ -1,5 +1,6 @@
 package moe.lolosia.keel.gradle.logger
 
+import moe.lolosia.keel.gradle.common.KeelExtension
 import org.gradle.api.Project
 import org.gradle.api.provider.Provider
 import org.jetbrains.kotlin.gradle.plugin.*
@@ -14,7 +15,9 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeCompilation
 class KeelLoggerGradlePlugin : KotlinCompilerPluginSupportPlugin {
 
     override fun apply(target: Project) {
-        target.extensions.create("keelLogger", KeelLoggerExtension::class.java, target.objects)
+        val extension = KeelExtension.of(target).register(KeelLoggerExtension(target.objects))
+        // 兼容旧写法：keelLogger { } 与 keel { logger { } } 是同一个对象
+        target.extensions.add("keelLogger", extension)
     }
 
     override fun isApplicable(kotlinCompilation: KotlinCompilation<*>): Boolean =
@@ -28,7 +31,8 @@ class KeelLoggerGradlePlugin : KotlinCompilerPluginSupportPlugin {
     override fun applyToCompilation(kotlinCompilation: KotlinCompilation<*>): Provider<List<SubpluginOption>> {
         val project = kotlinCompilation.target.project
         return project.provider {
-            val extension = project.extensions.findByType(KeelLoggerExtension::class.java)
+            val extension = project.extensions.findByType(KeelExtension::class.java)
+                ?.find(KeelLoggerExtension::class.java)
             if (extension != null && !extension.enabled.get()) {
                 return@provider listOf(SubpluginOption("enabled", "false"))
             }
@@ -65,9 +69,16 @@ class KeelLoggerGradlePlugin : KotlinCompilerPluginSupportPlugin {
         }
     }
 
-    private fun compilerPluginVersion(): String =
-        KeelLoggerGradlePlugin::class.java.`package`?.implementationVersion
-            ?: error("[keel-logger] 编译器插件版本缺失：请从 Gradle 插件 jar 加载本插件")
+    private fun compilerPluginVersion(): String {
+        KeelLoggerGradlePlugin::class.java.`package`?.implementationVersion?.let { return it }
+        // composite 下插件从 classes 目录加载时 manifest 不可用，回退到构建期写入的资源
+        val fromResource = KeelLoggerGradlePlugin::class.java
+            .getResourceAsStream("/META-INF/keel-logger-version.txt")
+            ?.bufferedReader()
+            ?.use { it.readText().trim() }
+        if (!fromResource.isNullOrBlank()) return fromResource
+        error("[keel-logger] 编译器插件版本缺失：请从 Gradle 插件 jar 加载本插件")
+    }
 
     private companion object {
         const val PLUGIN_ID = "moe.lolosia.keel.logger"

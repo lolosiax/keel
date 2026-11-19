@@ -1,4 +1,5 @@
 import com.google.devtools.ksp.gradle.KspExtension
+import moe.lolosia.keel.gradle.common.*
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -9,16 +10,18 @@ plugins {
 group = "moe.lolosia.keel.plugins"
 version = libs.versions.keel.get()
 
-keelPlugin {
-    // 与 hello 一致：当前开发机先打 mingwX64；Linux 目标在对应平台或 CI 上打
-    target("mingwX64")
-    // 插件版本与 keel 版本不是一回事，必须显式指定，否则会去解析 0.1.0-SNAPSHOT 以外的坐标
-    keelVersion = libs.versions.keel.get()
-    // plugin.json 声明 requires: ["database"]，本地联调时把能力包一起放进运行目录
-    runPlugin("moe.lolosia.keel:keel-database-mariadb:${libs.versions.keel.get()}@keel")
-    // 联调本仓库的 Host 源码：直接用本地 debug Host（mavenLocal 里的发布版可能落后于 share 协议）
-    runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
-    runHostDebugDir = "../keel-host/build/keel-debug"
+keel {
+    plugin {
+        // 与 hello 一致：当前开发机先打 mingwX64；Linux 目标在对应平台或 CI 上打
+        target("mingwX64")
+        // 插件版本与 keel 版本不是一回事，必须显式指定
+        keelVersion = libs.versions.keel.get()
+        // plugin.json 声明 requires: ["database"]，本地联调时把能力包一起放进运行目录
+        runPlugin("moe.lolosia.keel:keel-database-mariadb:${libs.versions.keel.get()}@keel")
+        // 联调本仓库的 Host 源码：直接用本地 debug Host（mavenLocal 里的发布版可能落后于 share 协议）
+        runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
+        runHostDebugDir = "../keel-host/build/keel-debug"
+    }
 }
 
 // api 工件由 impl 侧 KSP 生成到 api/src/commonMain/kotlin（V1 提交制，产物随仓库提交）

@@ -19,7 +19,9 @@ rootProject.name = "keel"
 
 // 每个顶层 `keel-*` 目录都是独立的 Gradle 构建，由根构建以 composite build 的方式聚合。
 // 单独构建某个部分时：gradlew -p <目录> <任务>
+includeBuild("keel-gradle-common")
 includeBuild("keel-classpath-gradle-plugin")
+includeBuild("keel-thirdparty-gradle-plugin")
 includeBuild("keel-abi-gradle-plugin")
 includeBuild("keel-logger-gradle-plugin")
 includeBuild("keel-logger-compiler-plugin")

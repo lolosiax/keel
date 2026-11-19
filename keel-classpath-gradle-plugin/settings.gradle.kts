@@ -17,4 +17,7 @@ dependencyResolutionManagement {
     }
 }
 
+// 统一的 keel { } 根扩展：单独构建时从兄弟目录取，不必先发布
+includeBuild("../keel-gradle-common")
+
 rootProject.name = "keel-classpath-gradle-plugin"

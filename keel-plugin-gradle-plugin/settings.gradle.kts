@@ -13,6 +13,8 @@ pluginManagement {
 
 // 单 exe 产出复用 keel-classpath-gradle-plugin 的 Windows 资源 helper
 includeBuild("../keel-classpath-gradle-plugin")
+// 统一的 keel { } 根扩展：单独构建时从兄弟目录取，不必先发布
+includeBuild("../keel-gradle-common")
 
 dependencyResolutionManagement {
     repositories {

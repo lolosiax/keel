@@ -18,6 +18,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.SharedLibrary
 class KeelBundlePlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
+        // `keelPlugin` 别名由打包插件注册；只看根扩展是否存在无法区分是否 apply 过打包插件
         val keelPlugin = project.extensions.findByType(KeelPluginExtension::class.java)
             ?: throw GradleException(
                 "moe.lolosia.keel.bundle 需要先应用 moe.lolosia.keel.plugin"

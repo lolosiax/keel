@@ -1,4 +1,5 @@
 import moe.lolosia.keel.gradle.classpath.KeelStripTask
+import moe.lolosia.keel.gradle.common.*
 import org.gradle.api.Action
 import org.gradle.api.publish.maven.MavenPublication
 
@@ -12,12 +13,14 @@ plugins {
 }
 
 // 发行入口没有自己的内嵌资源，只借用插件的 Windows 版本信息生成。
-keelClasspath {
-    target("mingwX64")
-    embedClasspath = false
+keel {
+    classpath {
+        target("mingwX64")
+        embedClasspath = false
 
-    windows {
-        productName = "Keel Modular Web Framework"
+        windows {
+            productName = "Keel Modular Web Framework"
+        }
     }
 }
 

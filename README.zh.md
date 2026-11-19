@@ -310,6 +310,8 @@ rootProject.name = "keel-plugin-hello"
 ### 2. 配置构建脚本
 
 ```kotlin
+import moe.lolosia.keel.gradle.common.*
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     id("moe.lolosia.keel.plugin")
@@ -318,8 +320,10 @@ plugins {
 group = "moe.lolosia.keel.plugins"
 version = libs.versions.keel.get()
 
-keelPlugin {
-    target("mingwX64")
+keel {
+    plugin {
+        target("mingwX64")
+    }
 }
 
 kotlin {
@@ -545,11 +549,15 @@ Log.error("request failed", cause = exception)
 ### 资源嵌入
 
 ```kotlin
-keelClasspath {
-    target("mingwX64")
-    compressed = false
-    windows {
-        productName = "Keel Modular Web Framework"
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    classpath {
+        target("mingwX64")
+        compressed = false
+        windows {
+            productName = "Keel Modular Web Framework"
+        }
     }
 }
 ```
@@ -559,10 +567,14 @@ keelClasspath {
 ### 插件打包
 
 ```kotlin
-keelPlugin {
-    target("mingwX64")
-    buildType = "RELEASE"
-    autoAddClasspathFull = true
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    plugin {
+        target("mingwX64")
+        buildType = "RELEASE"
+        autoAddClasspathFull = true
+    }
 }
 ```
 
@@ -571,8 +583,12 @@ keelPlugin {
 ### ABI 注入
 
 ```kotlin
-keelAbi {
-    export("my_worker_entry")
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    abi {
+        export("my_worker_entry")
+    }
 }
 ```
 
@@ -581,9 +597,13 @@ keelAbi {
 ### 日志改写
 
 ```kotlin
-keelLogger {
-    enabled = true
-    exceptionTrace = true
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    logger {
+        enabled = true
+        exceptionTrace = true
+    }
 }
 ```
 

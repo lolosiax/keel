@@ -1,4 +1,5 @@
 import com.google.devtools.ksp.gradle.KspExtension
+import moe.lolosia.keel.gradle.common.*
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -9,12 +10,14 @@ plugins {
 group = "moe.lolosia.keel.plugins"
 version = libs.versions.keel.get()
 
-keelPlugin {
-    // 与其它插件一致：开发机先打 mingwX64，Linux 目标由对应平台 / CI 打
-    target("mingwX64")
-    keelVersion = libs.versions.keel.get()
-    // 默认实现依赖数据库能力包
-    runPlugin("moe.lolosia.keel:keel-database-mariadb:${libs.versions.keel.get()}@keel")
+keel {
+    plugin {
+        // 与其它插件一致：开发机先打 mingwX64，Linux 目标由对应平台 / CI 打
+        target("mingwX64")
+        keelVersion = libs.versions.keel.get()
+        // 默认实现依赖数据库能力包
+        runPlugin("moe.lolosia.keel:keel-database-mariadb:${libs.versions.keel.get()}@keel")
+    }
 }
 
 // 契约（@PublicApi 接口 / DTO / 常量）写在 impl 的 commonMain，

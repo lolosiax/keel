@@ -4,7 +4,7 @@ import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.Property
 
-/** `keelLogger { ... }` 配置。 */
+/** `keel { logger { ... } }` 配置。 */
 open class KeelLoggerExtension(objects: ObjectFactory) {
 
     /** 是否启用日志调用改写；默认开启。 */

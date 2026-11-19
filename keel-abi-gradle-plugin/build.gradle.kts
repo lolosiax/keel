@@ -14,6 +14,8 @@ kotlin {
 }
 
 dependencies {
+    // 统一的 keel { } 根扩展与各 section 类型
+    implementation("moe.lolosia.keel.toolchain:keel-gradle-common:${libs.versions.keel.get()}")
     // 需要 Kotlin MPP / Native 的 Gradle 类型来挂 linkerOpts
     implementation(libs.kotlin.gradle.plugin)
 }

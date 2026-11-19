@@ -1,4 +1,5 @@
 import com.google.devtools.ksp.gradle.KspExtension
+import moe.lolosia.keel.gradle.common.*
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -14,13 +15,15 @@ extensions.configure<KspExtension> {
     arg("keel.glue.dir", file("src/commonMain/kotlin").absolutePath)
 }
 
-keelPlugin {
-    target("mingwX64")
-    // 联调本仓库的 Host 源码：直接用本地 debug Host，并带上它的位置表
-    runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
-    runHostDebugDir = "../keel-host/build/keel-debug"
-    // animal 是另一个独立构建：先构建它，把产物塞进同一个运行目录
-    runPluginFile("../keel-plugin-animal/build/keel/keel-plugin-animal.keel")
+keel {
+    plugin {
+        target("mingwX64")
+        // 联调本仓库的 Host 源码：直接用本地 debug Host，并带上它的位置表
+        runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
+        runHostDebugDir = "../keel-host/build/keel-debug"
+        // animal 是另一个独立构建：先构建它，把产物塞进同一个运行目录
+        runPluginFile("../keel-plugin-animal/build/keel/keel-plugin-animal.keel")
+    }
 }
 
 kotlin {

@@ -1,5 +1,6 @@
 package moe.lolosia.keel.gradle.abi
 
+import moe.lolosia.keel.gradle.common.KeelExtension
 import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -23,7 +24,9 @@ import java.io.File
 class KeelAbiPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
-        val extension = project.extensions.create("keelAbi", KeelAbiExtension::class.java)
+        val extension = KeelExtension.of(project).register(KeelAbiExtension())
+        // 兼容旧写法：keelAbi { } 与 keel { abi { } } 是同一个对象
+        project.extensions.add("keelAbi", extension)
 
         project.plugins.withId("org.jetbrains.kotlin.multiplatform") {
             project.afterEvaluate {
@@ -147,7 +150,7 @@ class KeelAbiPlugin : Plugin<Project> {
         return runCatching { configuration.resolve().firstOrNull() }.getOrElse { error ->
             project.logger.warn(
                 "keel-abi: 无法解析 moe.lolosia.keel:keel-abi:$version@zip（${error.message}）；" +
-                    "先执行 gradlew -p keel publishAllToMavenLocal，或在 keelAbi { zipFile = ... } 指定路径"
+                    "先执行 gradlew -p keel publishAllToMavenLocal，或在 keel { abi { zipFile = ... } } 指定路径"
             )
             null
         }
@@ -177,7 +180,7 @@ class KeelAbiPlugin : Plugin<Project> {
          * 插件 dylib 固定对外导出的符号。
          *
          * Kotlin 侧的 Worker 入口按 `keel_abi.h` 的约定命名，所以能直接列在导出表里；
-         * 用别的名字的插件通过 `keelAbi { export("...") }` 追加。
+         * 用别的名字的插件通过 `keel { abi { export("...") } }` 追加。
          */
         val DEFAULT_EXPORTS = listOf(
             "keel_plugin_bootstrap",

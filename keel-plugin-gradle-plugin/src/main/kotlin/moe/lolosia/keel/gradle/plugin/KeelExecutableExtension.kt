@@ -41,8 +41,10 @@ open class KeelExecutableExtension(private val project: Project) {
      * ```kotlin
      * import moe.lolosia.keel.gradle.plugin.KeelDataMode
      *
-     * keelPlugin {
-     *     executable { dataMode = KeelDataMode.USERDATA }
+     * keel {
+     *     plugin {
+     *         executable { dataMode = KeelDataMode.USERDATA }
+     *     }
      * }
      * ```
      */
@@ -79,14 +81,14 @@ open class KeelExecutableExtension(private val project: Project) {
     /** 本地 launcher 路径；为空时按 `keelVersion` 从 Maven 解析。 */
     var launcher: String? = null
 
-    /** Windows 版本信息 / 图标；与 `keelClasspath.windows {}` 同形。 */
+    /** Windows 版本信息 / 图标；与 `keel { classpath { windows {} } }` 同形。 */
     val windows = KeelWindowsExtension()
 
     /** `File` / `FileCollection` 输入；工程输入取 `keelPackage` / `keelPackageRelease`。 */
-    internal val inputs: ConfigurableFileCollection = project.objects.fileCollection()
+    val inputs: ConfigurableFileCollection = project.objects.fileCollection()
 
     /** `include(project(...))` 的工程输入；等 afterEvaluate 确定 buildType 后再挑任务。 */
-    internal val projectInputs: MutableList<Project> = mutableListOf()
+    val projectInputs: MutableList<Project> = mutableListOf()
 
     private val coordinates = mutableListOf<String>()
 
@@ -106,13 +108,13 @@ open class KeelExecutableExtension(private val project: Project) {
         action.execute(windows)
     }
 
-    internal fun coordinates(): List<String> = coordinates.toList()
+    fun coordinates(): List<String> = coordinates.toList()
 
-    internal fun isRelease(): Boolean = !buildType.equals("DEBUG", ignoreCase = true)
+    fun isRelease(): Boolean = !buildType.equals("DEBUG", ignoreCase = true)
 
     /** 是否按 USERDATA 模式出包。 */
-    internal fun usesUserData(): Boolean = dataMode == KeelDataMode.USERDATA
+    fun usesUserData(): Boolean = dataMode == KeelDataMode.USERDATA
 
     /** 本工程与 `include(Project)` 使用的打包任务：release 走 `keelPackageRelease`。 */
-    internal fun packageTaskName(): String = if (isRelease()) "keelPackageRelease" else "keelPackage"
+    fun packageTaskName(): String = if (isRelease()) "keelPackageRelease" else "keelPackage"
 }

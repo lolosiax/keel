@@ -1,3 +1,4 @@
+import moe.lolosia.keel.gradle.common.*
 import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
@@ -55,11 +56,13 @@ val generateBuildInfo = tasks.register("generateBuildInfo") {
     }
 }
 
-keelClasspath {
-    target("mingwX64")
+keel {
+    classpath {
+        target("mingwX64")
 
-    windows {
-        productName = "Keel Modular Web Framework"
+        windows {
+            productName = "Keel Modular Web Framework"
+        }
     }
 }
 

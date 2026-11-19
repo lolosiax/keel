@@ -1,6 +1,6 @@
 [versions]
 # 仓库自身版本：所有独立构建共用的唯一来源
-keel = "0.1.0-SNAPSHOT"
+keel = "0.2.0-SNAPSHOT"
 
 kotlin = "2.4.20"
 ksp = "2.3.12"

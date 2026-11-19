@@ -1,4 +1,5 @@
 import java.io.File
+import moe.lolosia.keel.gradle.common.*
 import org.gradle.api.publish.maven.MavenPublication
 
 plugins {
@@ -25,11 +26,13 @@ publishing {
     }
 }
 
-keelPlugin {
-    // 控制台窗口只存在于 Windows
-    target("mingwX64")
-    // helper 只把 native/ 目录进包（RC / 目标文件留在 build/console-work）
-    resources("build/generated/console-stage")
+keel {
+    plugin {
+        // 控制台窗口只存在于 Windows
+        target("mingwX64")
+        // helper 只把 native/ 目录进包（RC / 目标文件留在 build/console-work）
+        resources("build/generated/console-stage")
+    }
 }
 
 kotlin {

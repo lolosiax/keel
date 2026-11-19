@@ -13,6 +13,11 @@ kotlin {
     jvmToolchain(21)
 }
 
+dependencies {
+    // 统一的 keel { } 根扩展与各 section 类型
+    implementation("moe.lolosia.keel.toolchain:keel-gradle-common:${libs.versions.keel.get()}")
+}
+
 gradlePlugin {
     plugins {
         create("keelPublish") {

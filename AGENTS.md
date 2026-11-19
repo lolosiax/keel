@@ -28,7 +28,9 @@
 
 | 目录 | rootProject.name | 角色 | 是否发布 |
 | --- | --- | --- | --- |
+| `keel-gradle-common/` | `keel-gradle-common` | 所有工具链插件共用的 `keel { }` 根容器（只按类型注册 section，不单独 apply） | 是 |
 | `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入 + Windows 版本资源插件 `moe.lolosia.keel.classpath` | 是 |
+| `keel-thirdparty-gradle-plugin/` | `keel-thirdparty-gradle-plugin` | 第三方原生库插件的消费接线与许可门禁 `moe.lolosia.keel.thirdparty` | 是 |
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin`；单 exe 产出 `moe.lolosia.keel.bundle`（由前者自动 apply） | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
@@ -99,7 +101,9 @@ gradlew -p keel-idea-plugin buildPlugin
 gradlew -p keel-idea-plugin runIde
 
 # 工具链发布到自建 Maven
+gradlew -p keel-gradle-common publish
 gradlew -p keel-classpath-gradle-plugin publish
+gradlew -p keel-thirdparty-gradle-plugin publish
 gradlew -p keel-plugin-gradle-plugin publish
 gradlew -p keel-publish-gradle-plugin publish
 gradlew -p keel-abi-gradle-plugin publish
@@ -145,14 +149,21 @@ gradlew -p keel-plugin-ksp publish
 | `keel-plugin-basic-rbac` | rbac 默认实现（`plugin.json` 的 `id = "rbac"`，`provides: ["authz"]`），可被第三方 `.keel` 原位替换 |
 | `keel-plugin-<id>` | 功能插件，`<id>` 与 `plugin.json` 的 `id` 一致 |
 | `keel-database-<driver>` | `kind: capability` 的数据库驱动包（`keel-database-mariadb` / `-pgsql` …），丢进 `plugins/` |
-| `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` | 构建期 Gradle 插件 |
+| `keel-gradle-common` | `keel { }` 根容器；section 类型随各自插件分发 |
+| `keel-classpath-gradle-plugin` / `keel-plugin-gradle-plugin` / `keel-publish-gradle-plugin` / `keel-abi-gradle-plugin` / `keel-logger-gradle-plugin` / `keel-thirdparty-gradle-plugin` | 构建期 Gradle 插件 |
 | `keel-logger-compiler-plugin` | Kotlin 编译器插件（由 `moe.lolosia.keel.logger` 挂载，不单独 apply） |
 | `keel-router-ksp` / `keel-plugin-ksp` | 构建期 KSP 处理器 |
 
 - `keel-idea-plugin` 是 IntelliJ IDEA 插件（IntelliJ Platform Gradle Plugin 2.x，目标社区版），
   只消费运行目录，不发布 Maven 工件；根 `buildAll` 显式跳过它。
 
-- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.bundle`、`moe.lolosia.keel.abi`、`moe.lolosia.keel.logger`。
+- Gradle 插件 ID 统一 `moe.lolosia.keel.<能力>`：`moe.lolosia.keel.publish`、`moe.lolosia.keel.classpath`、`moe.lolosia.keel.plugin`、`moe.lolosia.keel.bundle`、`moe.lolosia.keel.abi`、`moe.lolosia.keel.logger`、`moe.lolosia.keel.thirdparty`。
+- **配置入口统一为根容器 `keel { }`**：`keel { plugin { } / classpath { } / abi { } / logger { } / publish { } / thirdparty { } }`。
+  `keel-gradle-common` 只提供 `KeelExtension` 容器（`register` / `find` / `get`），**不知道任何 section 类型**；
+  每个插件 apply 时注册自己的 section，并在 `moe.lolosia.keel.gradle.common` 包里提供 DSL 扩展函数。
+  因此 build 脚本需要一行 `import moe.lolosia.keel.gradle.common.*`；应用了哪个插件，classpath 里才存在哪个 section。
+  旧的顶层扩展名（`keelPlugin` / `keelClasspath` / `keelAbi` / `keelLogger` / `keelPublish` / `keelThirdparty`）保留为同一对象的别名。
+  新增 section 不需要改 common，插件可独立升级；只有容器 API 变化时才需要同步所有工具链插件版本。
 - `keel-router-ksp` / `keel-plugin-ksp` 是 **KSP 处理器**，不是 Gradle 插件，没有插件 ID。
 
 ## 4. 代码风格
@@ -259,7 +270,7 @@ ABI 头文件在 [`keel-abi/src/nativeCpp/keel_abi.h`](keel-abi/src/nativeCpp/ke
 
 - 每个插件是顶层 `keel-plugin-<id>/` 目录下的**独立 Gradle 构建**。
   - **当前形态（单项目）**：`build.gradle.kts` 里 `plugins { id("moe.lolosia.keel.plugin") }`，
-    用 `keelPlugin { target("mingwX64") }` 选择打包目标；`plugin.json` 放在
+    用 `keel { plugin { target("mingwX64") } }` 选择打包目标；`plugin.json` 放在
     `src/commonMain/resources/plugin.json`，由打包插件复制到 `.keel` 根部。
   - **契约与 api 工件**：契约与实现同在 `src/commonMain`（`@PublicApi` 接口 + `@Serializable` DTO；
     `@Singleton` 实现由 KSP 登记）。需要给外部消费时加 `api/` 子工程，`keel.api.dir` 指向它，
@@ -274,7 +285,7 @@ ABI 头文件在 [`keel-abi/src/nativeCpp/keel_abi.h`](keel-abi/src/nativeCpp/ke
 ```
 keel-plugin-<id>/
   settings.gradle.kts                          # 独立构建；按需 includeBuild 依赖的 Gradle 插件
-  build.gradle.kts                             # plugins { id("moe.lolosia.keel.plugin") } + keelPlugin { target(...) }
+  build.gradle.kts                             # plugins { id("moe.lolosia.keel.plugin") } + keel { plugin { target(...) } }
   src/commonMain/kotlin/.../XxxPlugin.kt       # 实现（@KeelPluginMain）
   src/commonMain/resources/plugin.json         # 部署清单（id / name / logTag / version / entry / lib / resources / requires / color）
 ```
@@ -284,7 +295,7 @@ keel-plugin-<id>/
   **当前落地**：`plugin.json` 由开发者手写在 `src/commonMain/resources/`；KSP 已生成 Worker 入口、
   `@PublicApi` 注册表与 api 工件，依赖解析和发布配置仍手写。
 - 消费方使用生成的 `ctx.<契约>` / `ctx.<契约>OrNull`；可替换能力按 `OrNull` 缺席降级。
-  目前还没有 `keelPlugin { requires(...) }` 的自动接线。
+  目前还没有 `keel { plugin { requires(...) } }` 的自动接线。
 - 新增插件 = 在顶层新建 `keel-plugin-<id>/` + 在根 `settings.gradle.kts` 加一行 `includeBuild`；不要塞进某个聚合目录。
 
 - **运行任务分层**：`keelPrepareHost` 只解出 Host，`keelPrepareRun` 只打包 / 拷贝 `.keel` 与配置，
@@ -327,20 +338,24 @@ keel-plugin-<id>/
 - 默认关闭；开启后同一工程同时产出 `.keel` 与单文件，产物在 `build/keel/<target>/<name>[.exe]`。
 
 ```kotlin
-keelPlugin {
-    executable {
-        enabled = true                                   // 默认 false
-        name = "myapp"                                   // 默认 project.name；Windows 自动补 .exe
-        appId = "myapp"                                  // 用户目录名，默认 project.name；与 exe 文件名解耦
-        console = true                                   // false = 桌面应用（Windows GUI 子系统）
-        dataMode = KeelDataMode.PROGRAM                  // PROGRAM（默认）/ USERDATA（用户目录）
-        include(file("libs/keel-database-mariadb-0.1.0.keel"))
-        include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖对应的打包任务
-        launcher = null                                  // 可选：本地 launcher，便于调试
-        buildType = "RELEASE"                            // DEBUG = keelPackage + launcher-dev；RELEASE = keelPackageRelease + launcher
-        compression = "zstd"                             // bundle 容器：zstd（默认）/ deflate
-        compressionLevel = 19                            // zstd 级别
-        windows { productName = "My App"; icon = "app.ico" }   // 与 keelClasspath.windows {} 同形
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    plugin {
+        executable {
+            enabled = true                                   // 默认 false
+            name = "myapp"                                   // 默认 project.name；Windows 自动补 .exe
+            appId = "myapp"                                  // 用户目录名，默认 project.name；与 exe 文件名解耦
+            console = true                                   // false = 桌面应用（Windows GUI 子系统）
+            dataMode = KeelDataMode.PROGRAM                  // PROGRAM（默认）/ USERDATA（用户目录）
+            include(file("libs/keel-database-mariadb-0.1.0.keel"))
+            include(project(":keel-plugin-hello"))           // 同构建工程，自动依赖对应的打包任务
+            launcher = null                                  // 可选：本地 launcher，便于调试
+            buildType = "RELEASE"                            // DEBUG = keelPackage + launcher-dev；RELEASE = keelPackageRelease + launcher
+            compression = "zstd"                             // bundle 容器：zstd（默认）/ deflate
+            compressionLevel = 19                            // zstd 级别
+            windows { productName = "My App"; icon = "app.ico" }   // 与 keel { classpath { windows {} } } 同形
+        }
     }
 }
 ```
@@ -391,7 +406,7 @@ keel.password=<password>
 - 自建 Maven 通常是内网 HTTP 或自签 HTTPS，仓库配置需 `isAllowInsecureProtocol = true`（各 `keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` 的 `build.gradle.kts` 与各构建的 `settings.gradle.kts` 已处理）。
 - **凭据、内网地址、口令一律不入库**，包括本文档与 `doc/`；用占位符。
 - 构建期工具各自在自己的 `build.gradle.kts` 里配置发布仓库，没有统一入口；功能插件用 `moe.lolosia.keel.publish` 插件，不要在业务构建里手写 `publishing {}`。
-- 发布顺序：`keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` → `keel-abi` → `keel-classpath` → `keel-api` → `keel-classpath-full` → `keel-host` → `keel-plugin-*` → `keel-launcher`。改了 `keel-api` 必须确认消费方重新编译。
+- 发布顺序：`keel-gradle-common` → `keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` → `keel-abi` → `keel-classpath` → `keel-api` → `keel-classpath-full` → `keel-host` → `keel-plugin-*` → `keel-launcher`。改了 `keel-api` 必须确认消费方重新编译。
 
 ## 8. Monorepo 与 Sparse Checkout
 
@@ -430,6 +445,7 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/记忆/验证记录.md](doc/记忆/验证记录.md) | **历史冒烟快照**（原任务记忆 §4）；归档材料，平时不用读 |
 | [doc/记忆/踩坑.md](doc/记忆/踩坑.md) | **踩坑记录**（原任务记忆 §7），按构建 / KSP / ABI / 日志 / HTTP / 控制台 / 运行期分组 |
 | [doc/roadmap.md](doc/roadmap.md) | DEMO / P0 / P1 / P2 的目标、交付物、验收标准与待决问题 |
+| [doc/thirdparty-licensing.md](doc/thirdparty-licensing.md) | **第三方原生库**：manifest、封装工件布局、`keel-native` 消费方式、许可允许列表与声明生成 |
 | [doc/logo/](doc/logo/) | **图标源文件**：`keel-icon-hollow.svg`（≥40px）、`keel-icon-solid.svg`（<40px）、`generate-icon.py`。构建用的 `keel-icon.ico` 由脚本生成到 `keel-classpath-gradle-plugin/src/main/resources/moe/lolosia/keel/gradle/classpath/`，作为没配 `windows { icon = … }` 时的默认应用图标；不要手工编辑 `.ico`，改 SVG 后重跑脚本 |
 
 ## 10. 当前待确认
@@ -537,6 +553,15 @@ keel-abi/src/nativeCpp/
   keel_queue.c / keel_event.c / keel_plugin.c / keel_console.c
 keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（@Controller / @GET → KeelPluginRoutes）
 keel-plugin-ksp/src/main/…/ksp/plugin/KeelPluginWorkerProcessor.kt        @KeelPluginMain → Worker 入口；@PublicApi / @Singleton → api 工件 + 分发器
+keel-gradle-common/src/main/kotlin/moe/lolosia/keel/gradle/common/
+  KeelExtension.kt                     keel { } 根容器（register / find / get），不依赖任何 section 类型
+keel-<plugin>-gradle-plugin/src/main/kotlin/moe/lolosia/keel/gradle/
+  <section>/*Extension.kt              该插件自己的 section 数据类型
+  common/Keel<Section>Dsl.kt           该插件注册到根容器的 DSL 扩展函数（import moe.lolosia.keel.gradle.common.*）
+keel-thirdparty-gradle-plugin/src/main/kotlin/moe/lolosia/keel/gradle/thirdparty/
+  KeelThirdpartyPlugin.kt              消费接线（zip → 解包 → cinterop → linkerOpts）
+  KeelThirdpartyManifest.kt            thirdparty/manifest.json 模型与解析
+  KeelThirdparty{CheckManifest,CheckLicenses,Notices,Verify,Publish,Def}Task.kt   门禁与发布
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin
   src/main/…/gradle/                   各自一个 Gradle 插件（classpath / plugin / publish / abi / logger）
 keel-plugin-gradle-plugin/src/main/…/gradle/plugin/

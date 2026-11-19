@@ -14,6 +14,8 @@ kotlin {
 }
 
 dependencies {
+    // 统一的 keel { } 根扩展与各 section 类型
+    implementation("moe.lolosia.keel.toolchain:keel-gradle-common:${libs.versions.keel.get()}")
     // 需要 KMP / Native 的 Gradle 类型与 KotlinCompilerPluginSupportPlugin
     implementation(libs.kotlin.gradle.plugin)
 }
@@ -27,7 +29,28 @@ gradlePlugin {
     }
 }
 
-// getPluginArtifact() 需要在运行期知道编译器插件版本；从插件 jar 的 manifest 读
+// getPluginArtifact() 需要在运行期知道编译器插件版本。
+// composite 下插件可能直接以 classes 目录加载，manifest 不可靠，所以同时写一份资源。
+val loggerVersionDir = layout.buildDirectory.dir("generated/keel-logger-version")
+val loggerVersion = tasks.register("keelLoggerVersion") {
+    val outputDir = loggerVersionDir
+    val version = project.version.toString()
+    outputs.dir(outputDir)
+    doLast {
+        val file = outputDir.get().file("META-INF/keel-logger-version.txt").asFile
+        file.parentFile.mkdirs()
+        file.writeText("$version\n")
+    }
+}
+
+sourceSets.main {
+    resources.srcDir(loggerVersionDir)
+}
+
+tasks.named("processResources") {
+    dependsOn(loggerVersion)
+}
+
 tasks.jar {
     manifest {
         attributes["Implementation-Version"] = project.version

@@ -310,6 +310,8 @@ When developing inside this repository, also add the new directory to the `inclu
 ### 2. Configure the build script
 
 ```kotlin
+import moe.lolosia.keel.gradle.common.*
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     id("moe.lolosia.keel.plugin")
@@ -318,8 +320,10 @@ plugins {
 group = "moe.lolosia.keel.plugins"
 version = libs.versions.keel.get()
 
-keelPlugin {
-    target("mingwX64")
+keel {
+    plugin {
+        target("mingwX64")
+    }
 }
 
 kotlin {
@@ -545,11 +549,15 @@ Log.error("request failed", cause = exception)
 ### Resource embedding
 
 ```kotlin
-keelClasspath {
-    target("mingwX64")
-    compressed = false
-    windows {
-        productName = "Keel Modular Web Framework"
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    classpath {
+        target("mingwX64")
+        compressed = false
+        windows {
+            productName = "Keel Modular Web Framework"
+        }
     }
 }
 ```
@@ -559,10 +567,14 @@ Executables, dynamic libraries, and shared libraries use this path. Plugins do n
 ### Plugin packaging
 
 ```kotlin
-keelPlugin {
-    target("mingwX64")
-    buildType = "RELEASE"
-    autoAddClasspathFull = true
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    plugin {
+        target("mingwX64")
+        buildType = "RELEASE"
+        autoAddClasspathFull = true
+    }
 }
 ```
 
@@ -571,8 +583,12 @@ keelPlugin {
 ### ABI injection
 
 ```kotlin
-keelAbi {
-    export("my_worker_entry")
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    abi {
+        export("my_worker_entry")
+    }
 }
 ```
 
@@ -581,9 +597,13 @@ The default exports are `keel_plugin_bootstrap`, `keel_plugin_shutdown`, and `ke
 ### Log transformation
 
 ```kotlin
-keelLogger {
-    enabled = true
-    exceptionTrace = true
+import moe.lolosia.keel.gradle.common.*
+
+keel {
+    logger {
+        enabled = true
+        exceptionTrace = true
+    }
 }
 ```
 

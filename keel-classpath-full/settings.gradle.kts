@@ -9,6 +9,8 @@ pluginManagement {
 
 dependencyResolutionManagement {
     repositories {
+        // 本地开发：先 publishAllToMavenLocal，再单独构建本目录
+        mavenLocal()
         maven("https://maven.aliyun.com/repository/public")
         mavenCentral()
     }

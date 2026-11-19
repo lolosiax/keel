@@ -1,3 +1,5 @@
+import moe.lolosia.keel.gradle.common.*
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
@@ -15,11 +17,13 @@ plugins {
  *
  * 桥接层需要的帧改用 `Debug.enterBridge(Log.site())` 记「命名帧」：名字 / 文件 / 行随帧自带。
  */
-keelLogger {
-    debug = false
-    // 类型展开实现要生成：keel-api 的模型（插件清单、日志记录等）在调试器里也要能展开
-    debugValues = true
-    exceptionTrace = false
+keel {
+    logger {
+        debug = false
+        // 类型展开实现要生成：keel-api 的模型（插件清单、日志记录等）在调试器里也要能展开
+        debugValues = true
+        exceptionTrace = false
+    }
 }
 
 group = "moe.lolosia.keel"

@@ -19,7 +19,9 @@ tasks.register("buildAll") {
  * `keel-abi` 发布的是 zip（静态库 + 头文件），其余是 klib / jar / Gradle 插件 marker。
  */
 val publishableBuilds = listOf(
+    "keel-gradle-common",
     "keel-classpath-gradle-plugin",
+    "keel-thirdparty-gradle-plugin",
     "keel-abi-gradle-plugin",
     "keel-logger-gradle-plugin",
     "keel-logger-compiler-plugin",

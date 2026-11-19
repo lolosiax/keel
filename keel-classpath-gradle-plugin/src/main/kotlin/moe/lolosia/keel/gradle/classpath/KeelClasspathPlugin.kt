@@ -1,5 +1,6 @@
 package moe.lolosia.keel.gradle.classpath
 
+import moe.lolosia.keel.gradle.common.KeelExtension
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.Action
 import org.gradle.api.Plugin
@@ -28,7 +29,9 @@ import java.io.File
 class KeelClasspathPlugin : Plugin<Project> {
 
     override fun apply(project: Project) {
-        val extension = project.extensions.create("keelClasspath", KeelClasspathExtension::class.java)
+        val extension = KeelExtension.of(project).register(KeelClasspathExtension())
+        // 兼容旧写法：keelClasspath { } 与 keel { classpath { } } 是同一个对象
+        project.extensions.add("keelClasspath", extension)
 
         project.plugins.withId("org.jetbrains.kotlin.multiplatform") {
             project.afterEvaluate {

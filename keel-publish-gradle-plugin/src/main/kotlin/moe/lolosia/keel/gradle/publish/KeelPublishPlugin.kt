@@ -1,5 +1,6 @@
 package moe.lolosia.keel.gradle.publish
 
+import moe.lolosia.keel.gradle.common.KeelExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.publish.PublishingExtension
@@ -11,10 +12,12 @@ import org.gradle.api.publish.PublishingExtension
  *
  * ```
  * plugins { id("moe.lolosia.keel.publish") }
- * keelPublish {
- *     url = "http://<maven-host>/repository/keel"
- *     username = "..."
- *     password = "..."
+ * keel {
+ *     publish {
+ *         url = "http://<maven-host>/repository/keel"
+ *         username = "..."
+ *         password = "..."
+ *     }
  * }
  * ```
  *
@@ -28,10 +31,19 @@ class KeelPublishPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         project.pluginManager.apply("maven-publish")
 
-        val extension = project.extensions.create("keelPublish", KeelPublishExtension::class.java)
-        extension.url = project.findProperty("keel.repo") as String? ?: ""
-        extension.username = project.findProperty("keel.username") as String? ?: ""
-        extension.password = project.findProperty("keel.password") as String? ?: ""
+        val extension = KeelExtension.of(project).register(KeelPublishExtension())
+        // 兼容旧写法：keelPublish { } 与 keel { publish { } } 是同一个对象
+        project.extensions.add("keelPublish", extension)
+        // 没显式配置时从 -P / local.properties 读取
+        if (extension.url.isBlank()) {
+            extension.url = project.findProperty("keel.repo") as String? ?: ""
+        }
+        if (extension.username.isBlank()) {
+            extension.username = project.findProperty("keel.username") as String? ?: ""
+        }
+        if (extension.password.isBlank()) {
+            extension.password = project.findProperty("keel.password") as String? ?: ""
+        }
 
         project.afterEvaluate {
             val publishing = project.extensions.getByType(PublishingExtension::class.java)

@@ -3,6 +3,7 @@ package moe.lolosia.keel.gradle.plugin
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
 import moe.lolosia.keel.gradle.classpath.KeelStripTask
+import moe.lolosia.keel.gradle.common.KeelExtension
 import moe.lolosia.keel.gradle.logger.KeelLoggerExtension
 import moe.lolosia.keel.gradle.logger.KeelLoggerGradlePlugin
 import org.gradle.api.Action
@@ -40,14 +41,15 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         // 日志调用改写：插件工程不手动加 id("moe.lolosia.keel.logger")
         project.plugins.apply(KeelLoggerGradlePlugin::class.java)
 
-        val extension = project.extensions.create("keelPlugin", KeelPluginExtension::class.java, project)
+        val root = KeelExtension.of(project)
+        val extension = root.register(KeelPluginExtension(project))
+        // 兼容旧写法：keelPlugin { } 与 keel { plugin { } } 是同一个对象
+        project.extensions.add("keelPlugin", extension)
         val manifest = project.file(extension.manifest)
 
         // 位置表首行必须与运行期 HELLO 的模块名一致：插件运行期只拿得到 manifest id，
         // 所以编译期的 debugModule 也用它，而不是 Gradle 工程名。
-        project.extensions.configure(KeelLoggerExtension::class.java) { logger ->
-            logger.debugModule.set(readManifestId(manifest) ?: project.name)
-        }
+        root.get(KeelLoggerExtension::class.java).debugModule.set(readManifestId(manifest) ?: project.name)
 
         // 构建期把 git sha / 提交时间合并进 plugin.json；不改仓库里的源文件
         val processedManifest = project.layout.buildDirectory.file("generated/keel/plugin.json")

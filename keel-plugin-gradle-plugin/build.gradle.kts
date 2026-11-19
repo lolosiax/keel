@@ -14,10 +14,12 @@ kotlin {
 }
 
 dependencies {
-    // 需要 Kotlin MPP / Native 的 Gradle 类型来定位 sharedLib 产物
-    implementation(libs.kotlin.gradle.plugin)
+    // 统一的 keel { } 根扩展与各 section 类型
+    implementation("moe.lolosia.keel.toolchain:keel-gradle-common:${libs.versions.keel.get()}")
     // 插件工程自动带上 ABI 静态库注入；composite 下由 includeBuild 替换成本地工程
     implementation("moe.lolosia.keel.toolchain:keel-abi-gradle-plugin:${libs.versions.keel.get()}")
+    // 需要 Kotlin MPP / Native 的 Gradle 类型来定位 sharedLib 产物
+    implementation(libs.kotlin.gradle.plugin)
     // 单 exe 产出复用 classpath 插件的 Windows 资源脚本 / windres 定位
     implementation("moe.lolosia.keel.toolchain:keel-classpath-gradle-plugin:${libs.versions.keel.get()}")
     // 插件工程自动 apply KSP，并接入 Worker 入口生成器
