@@ -127,7 +127,7 @@ class KeelBundlePlugin : Plugin<Project> {
                     val artifact = if (executable.buildType.equals("DEBUG", ignoreCase = true)) {
                         "keel-launcher-dev-${target.name}"
                     } else {
-                        "keel-launcher-${target.name}"
+                        "keel-launcher-bin-${target.name}"
                     }
                     project.dependencies.add(
                         config.name,

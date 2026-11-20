@@ -62,7 +62,7 @@ kotlin {
 
 // ——— 预编译 launcher 发行包 ———
 // `moe.lolosia.keel.plugin` 的单 exe 产出按 target / buildType 解析这里的包：
-// DEBUG → keel-launcher-dev-<target>，RELEASE → keel-launcher-<target>。
+// DEBUG → keel-launcher-dev-<target>，RELEASE → keel-launcher-bin-<target>。
 val launcherTargets = listOf("mingwX64", "linuxArm64", "linuxX64")
 
 fun registerLauncherPackage(target: String, release: Boolean): TaskProvider<Zip> {
@@ -126,7 +126,9 @@ publishing {
                 artifact(launcherPackages.getValue(target))
             }
             create<MavenPublication>("launcherRelease$suffix") {
-                artifactId = "keel-launcher-$target"
+                // Windows 文件系统大小写不敏感，`keel-launcher-<target>` 会和 KMP 目标发布
+                // （`keel-launcher-mingwx64`）撞同一目录，模块元数据对不上；加 -bin 区分。
+                artifactId = "keel-launcher-bin-$target"
                 artifact(launcherReleasePackages.getValue(target))
             }
         }

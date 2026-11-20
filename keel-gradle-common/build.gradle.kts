@@ -28,6 +28,13 @@ fun configValue(key: String): String? =
     (rootProject.findProperty(key) as String?) ?: localProperties.getProperty(key)
 
 publishing {
+    // 只应用 maven-publish 不会自动建 publication；这里显式发布 jar，
+    // 否则别的仓库从 mavenLocal 解析 keel-plugin-gradle-plugin 时会缺这个依赖。
+    publications {
+        create<org.gradle.api.publish.maven.MavenPublication>("maven") {
+            from(components["java"])
+        }
+    }
     repositories {
         val repoUrl = configValue("keel.repo").orEmpty()
         if (repoUrl.isNotBlank()) {

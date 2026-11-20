@@ -62,7 +62,7 @@ open class KeelExecutableExtension(private val project: Project) {
      * 取哪个构建类型的产物：`DEBUG` / `RELEASE`。
      *
      * `RELEASE` 时本工程用 `keelPackageRelease`（release sharedLib、已 strip），
-     * launcher 也解析 `keel-launcher-<target>`；`DEBUG` 保持原来的调试语义。
+     * launcher 也解析 `keel-launcher-bin-<target>`；`DEBUG` 保持原来的调试语义。
      * 可用 `-Pkeel.buildType=RELEASE` 覆盖。
      */
     var buildType: String = "DEBUG"
