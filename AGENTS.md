@@ -626,6 +626,7 @@ keel-thirdparty/
   manifest.json                       库清单（moe.lolosia.keel.thirdparty）
   gradle/codecs.gradle.kts            源码下载/解压 + clang/cmake 交叉编译（6 个 codec，跨 OS）
   <lib>/<lib>.def + licenses/<lib>/    随库分发的 def 与许可
+  bcrypt/keel_bcrypt.{c,h}            bcrypt 的 C 适配层（上游 crypt_blowfish，跨目标统一 int 接口）
   build/dist/<lib>/<target>/           生成的 staging（gitignore）
   build/thirdparty/repo/               打包后的 Maven 布局（gitignore）
 keel-classpath-gradle-plugin / keel-plugin-gradle-plugin / keel-publish-gradle-plugin / keel-abi-gradle-plugin / keel-logger-gradle-plugin

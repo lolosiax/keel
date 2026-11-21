@@ -1,0 +1,10 @@
+# crypt_blowfish 绑定：bcrypt 口令哈希。
+#
+# 只暴露 keel 适配层的两个重入函数（见 keel_bcrypt.h）；wrapper.c 的 crypt(3)
+# 接口不编译，避免与 libc 的 crypt 符号冲突。
+package = moe.lolosia.keel.thirdparty.bcrypt
+
+headers = bcrypt/keel_bcrypt.h
+headerFilter = bcrypt/keel_bcrypt.h
+
+staticLibraries = libcrypt_blowfish.a

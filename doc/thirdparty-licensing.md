@@ -272,6 +272,7 @@ Host 会整目录物化，用户可原位替换该动态库。
 | 库 | 许可 | 建议 |
 | --- | --- | --- |
 | SQLite | Public Domain | 静态，附来源说明 |
+| crypt_blowfish | Public Domain | 静态，附来源说明 |
 | zlib | Zlib | 静态，附许可证 |
 | libpng | libpng License v2 | 静态；打 patch 时注明修改版 |
 | libjpeg-turbo | IJG + BSD-3 + Zlib | 静态，合并列出 |

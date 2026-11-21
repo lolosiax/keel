@@ -59,13 +59,16 @@ apply(from = "gradle/codecs.gradle.kts")
 apply(from = "gradle/sqlite.gradle.kts")
 // MariaDB Connector/C：CMake 工程，构建共享库 libmariadb（当前仅 mingwX64）
 apply(from = "gradle/mariadb.gradle.kts")
+// crypt_blowfish：bcrypt 口令哈希，单文件 C，三个目标交叉编译
+apply(from = "gradle/bcrypt.gradle.kts")
 
 val compileAll = tasks.register("compileAll") {
     group = "build"
-    description = "从源码编译全部库（6 个 codec + sqlite + mariadb，按 manifest 的目标）"
+    description = "从源码编译全部库（6 个 codec + sqlite + mariadb + bcrypt，按 manifest 的目标）"
     dependsOn("compileCodecs")
     dependsOn("compileSqliteAll")
     dependsOn("compileMariadbAll")
+    dependsOn("compileBcryptAll")
 }
 
 // ---------------------------------------------------------------- 拆分到 dist
@@ -125,6 +128,9 @@ tasks.matching { it.name.startsWith("stageSqlite") }.configureEach {
 }
 tasks.matching { it.name.startsWith("stageMariadb") }.configureEach {
     dependsOn(tasks.matching { it.name.startsWith("compileMariadb") })
+}
+tasks.matching { it.name.startsWith("stageBcrypt") }.configureEach {
+    dependsOn(tasks.matching { it.name.startsWith("compileBcrypt") })
 }
 
 // 所有 stage 任务都读 out/include 与 out/<target>；MariaDB 也写这两个目录的

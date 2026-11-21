@@ -1,0 +1,8 @@
+# crypt_blowfish 的重入接口（静态库来自 keel-thirdparty 的 bcrypt 工件）。
+# 头文件与 libbcrypt.a 由 build.gradle.kts 的 keelBcryptUnpack<target> 解到 build/thirdparty/bcrypt/<target>。
+package = moe.lolosia.keel.thirdparty.bcrypt
+
+headers = bcrypt/keel_bcrypt.h
+headerFilter = bcrypt/keel_bcrypt.h
+
+staticLibraries = libcrypt_blowfish.a

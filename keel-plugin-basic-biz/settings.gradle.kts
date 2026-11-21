@@ -42,6 +42,13 @@ dependencyResolutionManagement {
 
 rootProject.name = "keel-plugin-basic-biz"
 
+// 仓库内开发：把第三方原生库的生成侧纳入 composite，bcrypt 的交叉编译与 staging
+// 会随本构建的 `build` 自动跑；单独 clone 本目录时没有兄弟目录，退回 Maven 工件。
+val thirdpartyDir = file("../keel-thirdparty")
+if (thirdpartyDir.isDirectory) {
+    includeBuild(thirdpartyDir)
+}
+
 // api 工件与插件同属一个构建：目录叫 api，工程名保持发布坐标 `keel-plugin-basic-biz-api`
 include(":keel-plugin-basic-biz-api")
 project(":keel-plugin-basic-biz-api").projectDir = file("api")
