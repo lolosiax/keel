@@ -1955,11 +1955,11 @@ internal class KeelPublicApiGenerator(
         when {
             result.list -> appendLine(
                 "${indent}ServiceWire.encode(ListSerializer(SharedRef.serializer()), " +
-                    "value.map { SharedRef(directory.handleOf(it)) })"
+                    "value.mapNotNull { directory.handleOfOrNull(it)?.let { h -> SharedRef(h) } })"
             )
             result.nullable -> appendLine(
                 "${indent}ServiceWire.encode(SharedRef.serializer(), " +
-                    "if (value == null) SharedRef(0) else SharedRef(directory.handleOf(value)))"
+                    "SharedRef(value?.let { directory.handleOfOrNull(it) } ?: 0))"
             )
             else -> appendLine(
                 "${indent}ServiceWire.encode(SharedRef.serializer(), " +

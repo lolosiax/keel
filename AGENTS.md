@@ -522,6 +522,8 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
                ClasspathNames / ClasspathOp / ClasspathRequest / ClasspathReply
   messaging/   Message / Messenger
   service/     ServiceWire（CBOR）；跨模块调用见 share/ 的 @PublicApi
+  share/       PublicApiDirectory / PublicApiDispatcher / PublicApiType / PublicApiKey / PublicApiBridge
+               SharedRef / SharedProxy / SharedExport（跨界时自动登记）/ SharedCall 等共享对象线格式
   storage/     PluginStorage / StorageOp / StorageRequest / StorageReply
   web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody
                UserSnapshot / RouteDescriptor / Routes / GeneratedRoutes / PermissionNode / ApiResult

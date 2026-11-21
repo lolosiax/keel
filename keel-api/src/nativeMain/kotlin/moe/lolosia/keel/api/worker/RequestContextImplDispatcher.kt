@@ -24,13 +24,13 @@ internal class RequestContextImplDispatcher(
     ): ByteArray = when (method) {
         "components" -> {
             val value = impl.components()
-            ServiceWire.encode(ListSerializer(SharedRef.serializer()), value.map { SharedRef(directory.handleOf(it)) })
+            ServiceWire.encode(ListSerializer(SharedRef.serializer()), value.mapNotNull { directory.handleOfOrNull(it)?.let { h -> SharedRef(h) } })
         }
 
         "component" -> {
             val id = ServiceWire.decode(serializer<String>(), payload)
             val value = impl.component(id)
-            ServiceWire.encode(SharedRef.serializer(), if (value == null) SharedRef(0) else SharedRef(directory.handleOf(value)))
+            ServiceWire.encode(SharedRef.serializer(), SharedRef(value?.let { directory.handleOfOrNull(it) } ?: 0))
         }
 
         "addComponent" -> {
@@ -42,7 +42,7 @@ internal class RequestContextImplDispatcher(
         "removeComponent" -> {
             val id = ServiceWire.decode(serializer<String>(), payload)
             val value = impl.removeComponent(id)
-            ServiceWire.encode(SharedRef.serializer(), if (value == null) SharedRef(0) else SharedRef(directory.handleOf(value)))
+            ServiceWire.encode(SharedRef.serializer(), SharedRef(value?.let { directory.handleOfOrNull(it) } ?: 0))
         }
 
         "destroy" -> {
@@ -52,7 +52,7 @@ internal class RequestContextImplDispatcher(
 
         "webRequest" -> {
             val value = impl.webRequest()
-            ServiceWire.encode(SharedRef.serializer(), if (value == null) SharedRef(0) else SharedRef(directory.handleOf(value)))
+            ServiceWire.encode(SharedRef.serializer(), SharedRef(value?.let { directory.handleOfOrNull(it) } ?: 0))
         }
 
         else -> throw IllegalArgumentException("RequestContextImpl 没有方法 $method")

@@ -139,6 +139,8 @@ internal object PublicApiObjects : PublicApiDirectory, PublicApiBridge.Remote {
     override fun handleOf(instance: Any): Long =
         locals.firstOrNull { it.instance === instance }?.handle
             ?: (instance as? SharedProxy)?.sharedHandle?.takeIf { it != 0L }
+            // 本地对象第一次跨过插件边界时自动登记，业务代码不需要显式调用 shareHandle
+            ?: (instance as? SharedExport)?.sharedRef(this)?.handle
             ?: throw IllegalArgumentException("对象尚未登记为 @PublicApi 共享对象")
 
     override fun release(instance: Any) {

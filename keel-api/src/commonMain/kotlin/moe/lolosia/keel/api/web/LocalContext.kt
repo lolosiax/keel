@@ -31,8 +31,9 @@ interface LocalContext : Context {
     /**
      * 把本 Context 登记为跨运行时共享对象，返回句柄；重复调用返回同一个句柄。
      *
-     * 只在 Context 真的要传给其它插件时调用。`destroy()` 会负责释放句柄，
-     * 释放后其它持有者的调用得到 “shared object closed”。
+     * 一般不需要直接调用：Context 作为参数传给其它插件时，生成的代理会在编码参数时
+     * 自动登记（见 `SharedExport`）。这里保留给需要句柄本身的高级场景。
+     * `destroy()` 会负责释放句柄，释放后其它持有者的调用得到 “shared object closed”。
      */
     suspend fun shareHandle(): SharedRef
 }

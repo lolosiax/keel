@@ -17,7 +17,17 @@
 > `RequestContextImplDispatcher` / `RequestContextImplProvider.register(...)`。
 > 释放语义已落地：`PublicApiDirectory.release` + `PUBLIC_API_RELEASE` + `HostShared.release`；
 > `LocalContext.shareHandle()` 按需登记，`Context.destroy()` 释放句柄。
-> 挂载组件的跨界登记、真正的跨插件 Context 传递示例**尚未接线**。
+> 挂载组件的跨界登记已接线：`WebRequestComponentImpl` 标 `@PublicApiProvider`，core 模式生成
+> `WebRequestComponentImplDispatcher` / `...Provider`；`shareHandle()` 首次登记时同时登记已挂载组件，
+> `addComponent` 在已共享时补登记，`removeComponent` / `destroy` 释放。
+> 未提供 `@PublicApiProvider` 的自定义组件不导出，`components()` 用
+> `PublicApiDirectory.handleOfOrNull` 在跨插件视图里略过它。
+> 跨界登记已内化：`SharedExport.sharedRef(directory)` + `PublicApiObjects.handleOf` 自动登记，
+> 业务代码把 `Context` 作为参数传给另一个插件时不需要 `shareHandle()` / 手工构造代理；
+> Context 的生命周期由创建方（`PluginRoutes` 的 try/finally）负责，`destroy()` 释放句柄。
+> 端到端冒烟见 `doc/记忆/验证记录.md`（`GET /api/hello/context` 走本地写法，
+> `GET /api/hello/context-bridge` 经 Host 回环拿到 `keel.web.request` 组件与请求路径，
+> 随后按 4 → 3 的逆序释放句柄）。
 
 ## 0. 决策摘要
 

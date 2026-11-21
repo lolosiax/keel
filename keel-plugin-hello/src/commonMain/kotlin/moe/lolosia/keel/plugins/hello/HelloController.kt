@@ -56,4 +56,37 @@ object HelloController {
         val saved = ctx.config.read<HelloConfig>()
         return Greeting(saved.greeting, ctx.userId(), "repeat=${saved.repeat}")
     }
+
+    /** `GET /api/hello/context`：直接使用本地 Context，与普通业务写法一致。 */
+    @GET("/context")
+    suspend fun context(ctx: Context): Greeting {
+        val componentIds = mutableListOf<String>()
+        for (component in ctx.components()) componentIds += component.id()
+        return Greeting(
+            "context",
+            ctx.userId(),
+            "components=${componentIds.joinToString(",")}",
+        )
+    }
+
+    /**
+     * `GET /api/hello/context-bridge`：跨界冒烟自检，不是业务写法。
+     *
+     * 用 `handleOf(ctx)` 模拟「另一个插件拿到的 Context」：登记由 `handleOf` 自动完成，
+     * 之后的 `components()` / `webRequest()` 都经 Host 回环，覆盖代理编解码与句柄释放。
+     * 真实业务里把 `ctx` 传给另一个插件的 API 时，这套动作由生成的代理完成。
+     */
+    @GET("/context-bridge")
+    suspend fun contextBridge(ctx: Context): Greeting {
+        val directory = ctx.plugin.publicApi
+        val proxy = WebContextProxy(directory.handleOf(ctx), directory)
+        val componentIds = mutableListOf<String>()
+        for (component in proxy.components()) componentIds += component.id()
+        val path = proxy.webRequest()?.request()?.path
+        return Greeting(
+            "context-bridge",
+            ctx.userId(),
+            "handle=${directory.handleOf(ctx)} components=${componentIds.joinToString(",")} path=$path",
+        )
+    }
 }

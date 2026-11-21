@@ -67,6 +67,14 @@ interface PublicApiDirectory {
     fun handleOf(instance: Any): Long
 
     /**
+     * 本地对象或代理的句柄；两者都不是时返回 null。
+     *
+     * 用于「可以缺席」的共享结果：例如上下文里尚未登记为共享对象的组件，
+     * 跨插件视图里直接略过，而不是让整次调用失败。
+     */
+    fun handleOfOrNull(instance: Any): Long? = runCatching { handleOf(instance) }.getOrNull()
+
+    /**
      * 释放本插件登记的实例。
      *
      * 只有登记方可以释放；未登记或不属于本插件时是空操作。
