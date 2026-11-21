@@ -26,8 +26,6 @@ dependencies {
     implementation("com.google.devtools.ksp:symbol-processing-gradle-plugin:${libs.versions.ksp.get()}")
     // 插件工程自动带日志调用改写
     implementation("moe.lolosia.keel.toolchain:keel-logger-gradle-plugin:${libs.versions.keel.get()}")
-    // requires 里有 database 时自动挂 ORM / 数据库接线
-    implementation("moe.lolosia.keel.toolchain:keel-database-gradle-plugin:${libs.versions.keel.get()}")
     // Windows PE 资源注入（单 exe 的版本 / 图标 / 内嵌 bundle）
     implementation(libs.jna.platform)
     // bundle 的 zstd 压缩（构建期；运行期解码在 Host 的 keel-abi 静态库里）

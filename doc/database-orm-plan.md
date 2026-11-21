@@ -37,7 +37,8 @@
 > `moe.lolosia.keel.database` 已落地：`keel { database { dialect = "sqlite" } }`，
 > 自动挂 `keel-orm-ksp`、加 `keel-orm` / `keel-database-api`、下发
 > `keel.orm.dialect` / `keel.orm.dir` / `keel.orm.enabled`；
-> `requires: ["database"]` 的插件由 `moe.lolosia.keel.plugin` 自动 apply，也可显式 apply。
+> 由插件工程**显式** `id("moe.lolosia.keel.database")`（不按 `requires` 自动 apply，
+> 避免给暂未使用 ORM 的数据库插件生成空引导器）。
 > `keel-plugin-ksp` 生成的 Worker 入口在 `keel.orm.enabled=true` 时先调用
 > `OrmMetaBootstrap.install()`。
 > `keel-plugin-hello` 用 `HellUser` 跑通垂直切片：
@@ -836,8 +837,8 @@ keel {
 }
 ```
 
-- **独立插件**，由 `moe.lolosia.keel.plugin` 在 `requires: ["database"]` 时自动 apply，
-  也可以显式 apply；与 `abi` / `logger` 的自动挂载方式一致。
+- **独立插件**，由插件工程显式 apply（`id("moe.lolosia.keel.database")`）；
+  与 `abi` / `logger` 的自动挂载不同，不按 `requires` 自动 apply。
 - **不把驱动编译塞进这个插件**：SQLite / MariaDB 的 C 构建属于各自的
   `keel-database-*` 构建，原生库来自 `keel-thirdparty`（源码或 zip + `.a`）。
 - **不在 Gradle 任务里生成查询代码**；KSP 负责生成，Gradle 只负责挂载和依赖。
@@ -845,9 +846,11 @@ keel {
 **落地形态（2026-11-21）**：`keel-database-gradle-plugin` 提供
 `moe.lolosia.keel.database`，注册 `keel { database { dialect, outputDir } }`，做三件事：
 挂 `keel-orm-ksp`、给 `nativeMain` 加 `keel-orm` / `keel-database-api`、
-把方言与生成物目录作为 KSP 参数下发。`requires: ["database"]` 的插件由
-`moe.lolosia.keel.plugin` 自动 apply；`keel-plugin-ksp` 在 `keel.orm.enabled=true` 时
-把 `OrmMetaBootstrap.install()` 插进 Worker 入口，不需要业务手写安装代码。
+把方言与生成物目录作为 KSP 参数下发。插件工程**显式** apply（与 `abi` / `logger`
+的自动挂载不同）：按 `requires: ["database"]` 自动 apply 会给暂未使用 ORM 的
+basic-biz / rbac 也生成空引导器，收益不抵噪音，所以不做。
+`keel-plugin-ksp` 在 `keel.orm.enabled=true` 时把 `OrmMetaBootstrap.install()`
+插进 Worker 入口，不需要业务手写安装代码。
 `orm { enabled = false }` 这类**晚期开关没有落地**：处理器必须在 `ksp<target>`
 配置创建时就挂上，因此「不用 ORM」的插件不 apply 这个插件即可。
 - 如果暂时不做独立插件，至少不要把 ORM / 数据库逻辑继续塞进
@@ -1054,9 +1057,10 @@ keel 统一 `MutableList` + 默认空列表；排序用显式 order 列 + `order
 11. **跨模块实体限制**
     - `EntityMetas` 只聚合当前 KSP 模块的实体；跨模块共享实体需要在声明方生成 meta / serializer，
       消费方通过 api 工件获得。
-    - 还要确认实体放 `commonMain` 还是 `nativeMain`：注解与查询 AST 必须跟实体同源集可见；
-      `keel-database-api` 目前是 nativeMain，若实体进 commonMain，需要拆注解 / AST 到 commonMain。
-    - 这两点在 D1 前定。
+    - **已定（2026-11-21）**：实体与查询代码放 `nativeMain`。多 native 目标下 `nativeMain`
+      参与 metadata 编译，而 KSP 只输出到各目标的编译目录；因此 ORM 生成物直接写进
+      `src/nativeMain/kotlin`（`keel.orm.dir`，V1 提交制）并随源码提交，
+      与 `api/` 生成物的约定一致。跨模块实体仍按「声明方生成」处理，D2 再展开。
 12. **测试**
     - C 级 conformance（SQLite / MariaDB 各一套）；
     - ORM 最小测试插件（实体 + 查询 + 分页 + 事务），不依赖 basic-biz 迁移。

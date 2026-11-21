@@ -31,6 +31,18 @@ private const val BOOTSTRAP_PACKAGE = "moe.lolosia.keel.orm.generated"
 private const val DIALECT_OPTION = "keel.orm.dialect"
 
 /**
+ * 生成物落点；存在时直接写进源码目录（V1 提交制），而不是 KSP 输出目录。
+ *
+ * 多 native 目标下，`nativeMain` 会参与 metadata 编译，而 KSP 只把生成物放进
+ * 各目标的编译输出；只有写进 `src/nativeMain/kotlin`（或同等共享源集）才能被
+ * 元数据编译与所有目标同时看到。`moe.lolosia.keel.database` 默认就会传这个参数。
+ */
+private const val ORM_DIR_OPTION = "keel.orm.dir"
+
+/** 生成物首行；写进源码目录时用它区分「生成文件」与用户手写文件。 */
+private const val HEADER = "// 由 keel-orm-ksp 生成，不要手改。"
+
+/**
  * 实体生成器：`@Table` → `<Entity>Meta`、`<Entity>Columns`、`OrmMetaBootstrap`。
  *
  * 生成的列扩展落在实体所在包，查询代码与实体同包时不需要额外 import。
@@ -39,7 +51,11 @@ private const val DIALECT_OPTION = "keel.orm.dialect"
 class KeelOrmProcessorProvider : SymbolProcessorProvider {
 
     override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        KeelOrmProcessor(environment.codeGenerator, environment.logger, environment.options)
+        KeelOrmProcessor(
+            codeGenerator = environment.codeGenerator,
+            logger = environment.logger,
+            options = environment.options,
+        )
 }
 
 private class KeelOrmProcessor(
@@ -49,6 +65,9 @@ private class KeelOrmProcessor(
 ) : SymbolProcessor {
 
     private var generated = false
+
+    private val outputDir: java.io.File? =
+        options[ORM_DIR_OPTION]?.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
 
     override fun process(resolver: Resolver): List<KSAnnotated> {
         if (generated) return emptyList()
@@ -229,12 +248,66 @@ private class KeelOrmProcessor(
     }
 
     private fun writeFile(pkg: String, name: String, text: String, containing: KSFile?) {
+        write(pkg, name, text, listOfNotNull(containing), aggregating = false)
+    }
+
+    private fun write(
+        pkg: String,
+        name: String,
+        text: String,
+        sources: List<KSFile>,
+        aggregating: Boolean,
+    ) {
+        val dir = outputDir
+        if (dir != null) {
+            writeSourceFile(dir, pkg, name, text)
+            return
+        }
         val file = codeGenerator.createNewFile(
-            dependencies = Dependencies(false, *listOfNotNull(containing).toTypedArray()),
+            dependencies = Dependencies(aggregating, *sources.toTypedArray()),
             packageName = pkg,
             fileName = name,
         )
         file.write(text.encodeToByteArray())
+    }
+
+    /**
+     * V1 提交制：直接写进共享源码目录。
+     *
+     * 已存在但不是生成物时不动它，避免覆盖用户手写的同名文件。
+     */
+    private fun writeSourceFile(root: java.io.File, pkg: String, name: String, text: String) {
+        val dir = java.io.File(root, pkg.replace('.', '/'))
+        dir.mkdirs()
+        val file = java.io.File(dir, "$name.kt")
+        if (file.isFile && !file.readText().startsWith(HEADER)) {
+            logger.warn("ORM 生成物已存在且不是生成文件，跳过：${file.path}")
+            return
+        }
+        // 多个 KSP 任务 / 并行构建可能同时写同一份生成物；用进程间文件锁串行化
+        val lock = java.io.File(
+            System.getProperty("java.io.tmpdir"),
+            "keel-orm-${root.absolutePath.hashCode()}.lock",
+        )
+        java.nio.channels.FileChannel.open(
+            lock.toPath(),
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.WRITE,
+        ).use { channel ->
+            channel.lock().use {
+                // 清理上一次被中断留下的临时文件
+                dir.listFiles { entry ->
+                    entry.isFile && entry.name.startsWith("$name") && entry.name.endsWith(".tmp")
+                }?.forEach { it.delete() }
+                val tmp = java.io.File.createTempFile(name, ".tmp", dir)
+                tmp.writeText(text)
+                java.nio.file.Files.move(
+                    tmp.toPath(),
+                    file.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                )
+            }
+        }
     }
 
     private fun metaText(entity: EntityModel): String {
@@ -249,8 +322,8 @@ private class KeelOrmProcessor(
 
         fun writes(fields: List<FieldModel>): String = fields.joinToString(",\n") { field ->
             val expression = if (field.nullable) {
-                "if (value.${field.property} == null) DbValue.Null " +
-                    "else ${field.ormType}.encode(value.${field.property})"
+                // 实体列是 var，不能直接 smart cast；用 let 取值
+                "value.${field.property}?.let { ${field.ormType}.encode(it) } ?: DbValue.Null"
             } else {
                 "${field.ormType}.encode(value.${field.property})"
             }
@@ -339,12 +412,7 @@ private class KeelOrmProcessor(
         """.trimMargin()
 
         val sources = entities.mapNotNull { it.declaration.containingFile }
-        val file = codeGenerator.createNewFile(
-            dependencies = Dependencies(aggregating = true, *sources.toTypedArray()),
-            packageName = BOOTSTRAP_PACKAGE,
-            fileName = "OrmMetaBootstrap",
-        )
-        file.write(text.encodeToByteArray())
+        write(BOOTSTRAP_PACKAGE, "OrmMetaBootstrap", text, sources, aggregating = true)
     }
 
     private fun KSAnnotated.hasAnnotation(fqn: String): Boolean =

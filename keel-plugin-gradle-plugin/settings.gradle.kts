@@ -15,8 +15,6 @@ pluginManagement {
 includeBuild("../keel-classpath-gradle-plugin")
 // 统一的 keel { } 根扩展：单独构建时从兄弟目录取，不必先发布
 includeBuild("../keel-gradle-common")
-// requires: ["database"] 时自动 apply 数据库接线插件（实现依赖）
-includeBuild("../keel-database-gradle-plugin")
 
 dependencyResolutionManagement {
     repositories {

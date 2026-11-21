@@ -29,8 +29,10 @@ val publishableBuilds = listOf(
     "keel-logger-compiler-plugin",
     "keel-plugin-gradle-plugin",
     "keel-publish-gradle-plugin",
+    "keel-database-gradle-plugin",
     "keel-router-ksp",
     "keel-plugin-ksp",
+    "keel-orm-ksp",
     "keel-classpath",
     "keel-abi",
     "keel-classpath-full",
@@ -38,6 +40,7 @@ val publishableBuilds = listOf(
     "keel-host",
     "keel-launcher",
     "keel-database-api",
+    "keel-orm",
     "keel-database-mariadb",
     "keel-database-sqlite",
 )
