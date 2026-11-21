@@ -48,7 +48,15 @@ internal class CapabilityLoader(private val cacheRoot: String) {
         val bytes = entry.read(libPath)
             ?: throw IllegalArgumentException("包内缺少动态库：$libPath")
 
-        val libraryPath = installLibrary(cacheRoot, manifest, libPath, bytes)
+        // 能力包允许把依赖库放在同一个 lib/<target>/ 目录里（MariaDB / OpenSSL），
+        // 必须整目录落盘，加载时才能在入口库旁边解析到它们。
+        val targetDir = libPath.substringBeforeLast('/')
+        val paths = entry.list("$targetDir/")
+        val files = paths.map { path ->
+            path to (entry.read(path)
+                ?: throw IllegalArgumentException("包内条目读取失败：$path"))
+        }
+        val libraryPath = installLibrarySet(cacheRoot, manifest, targetDir, libPath, files)
         val result = InstalledCapability(manifest, entry.origin, libraryPath)
         installed[manifest.id] = result
         return result

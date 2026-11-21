@@ -12,8 +12,19 @@ class Row internal constructor(private val values: List<DbValue>) {
 
     operator fun get(index: Int): DbValue = values[index]
 
-    /** 文本列；NULL 返回 null。 */
-    fun text(index: Int): String? = (values[index] as? DbValue.Text)?.value
+    /**
+     * 文本列；NULL 返回 null。
+     *
+     * DECIMAL / JSON / UUID 也按文本返回：它们的规范表示就是字符串，
+     * ORM 的 Decimal / JSON 映射不需要再区分驱动返回的是哪种文本类型。
+     */
+    fun text(index: Int): String? = when (val value = values[index]) {
+        is DbValue.Text -> value.value
+        is DbValue.Decimal -> value.value
+        is DbValue.Json -> value.value
+        is DbValue.Uuid -> value.value
+        else -> null
+    }
 
     /** 整数列；NULL 或类型不符返回 null。 */
     fun longOrNull(index: Int): Long? = (values[index] as? DbValue.Integer)?.value
@@ -24,8 +35,15 @@ class Row internal constructor(private val values: List<DbValue>) {
 
     fun int(index: Int): Int = long(index).toInt()
 
-    /** 浮点列；NULL 或类型不符返回 null。 */
-    fun doubleOrNull(index: Int): Double? = (values[index] as? DbValue.Decimal)?.value
+    /** 浮点列；NULL 或类型不符返回 null。DECIMAL 文本也接受。 */
+    fun doubleOrNull(index: Int): Double? = when (val value = values[index]) {
+        is DbValue.Float -> value.value
+        is DbValue.Decimal -> value.value.toDoubleOrNull()
+        else -> null
+    }
+
+    /** 时间戳列（epoch 微秒）；NULL 或类型不符返回 null。 */
+    fun timestampOrNull(index: Int): Long? = (values[index] as? DbValue.Timestamp)?.micros
 
     /** 浮点列；NULL 或类型不符抛 [IllegalStateException]。 */
     fun double(index: Int): Double = doubleOrNull(index)

@@ -84,6 +84,29 @@ class KeelDatabase internal constructor(
         }
     }
 
+    /**
+     * 最近一次写入生成的自增主键。
+     *
+     * 以当前线程的最近一次 `exec` 为准；连接池下不要再用
+     * `select last_insert_id()` 回查，那条语句可能落到另一条连接上。
+     */
+    fun lastInsertId(): Long = memScoped {
+        val out = alloc<ULongVar>()
+        val status = bridgeLastInsertId(api, handle, out.ptr)
+        if (status != STATUS_OK) throw failure(status.toInt(), "last_insert_id")
+        out.value.toLong()
+    }
+
+    /**
+     * 连通性检查。
+     *
+     * @throws DatabaseException 连接不可用
+     */
+    fun ping() {
+        val status = bridgePing(api, handle)
+        if (status != STATUS_OK) throw failure(status.toInt(), "ping")
+    }
+
     /** 最近一次失败的文本；没有错误时为空串。 */
     val lastError: String get() = memScoped {
         val buffer = allocArray<ByteVar>(ERROR_BUFFER_SIZE)
@@ -111,8 +134,17 @@ class KeelDatabase internal constructor(
 
                 is DbValue.Text -> writeBytes(array, index, KEEL_DB_TEXT, value.value.encodeToByteArray())
                 is DbValue.Integer -> writeBytes(array, index, KEEL_DB_INT, encodeLong(value.value))
-                is DbValue.Decimal ->
+                is DbValue.Float ->
                     writeBytes(array, index, KEEL_DB_FLOAT, encodeLong(value.value.toRawBits()))
+
+                is DbValue.Decimal ->
+                    writeBytes(array, index, KEEL_DB_DECIMAL, value.value.encodeToByteArray())
+
+                is DbValue.Timestamp ->
+                    writeBytes(array, index, KEEL_DB_TIMESTAMP, encodeLong(value.micros))
+
+                is DbValue.Json -> writeBytes(array, index, KEEL_DB_JSON, value.value.encodeToByteArray())
+                is DbValue.Uuid -> writeBytes(array, index, KEEL_DB_UUID, value.value.encodeToByteArray())
 
                 is DbValue.Bool ->
                     writeBytes(array, index, KEEL_DB_BOOL, byteArrayOf(if (value.value) 1 else 0))

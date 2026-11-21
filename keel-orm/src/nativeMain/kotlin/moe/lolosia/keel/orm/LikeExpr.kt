@@ -14,6 +14,6 @@ class LikeExpr(
 
     override fun render(out: SqlRender): String {
         val operator = if (negate) "not like" else "like"
-        return "${out.quote(col.name)} $operator ${out.bind(OrmTypes.TEXT.encode(pattern))} escape '\\'"
+        return "${out.quote(col.name)} $operator ${out.bind(OrmTypes.TEXT.encode(pattern))} escape ${out.dialect.likeEscape}"
     }
 }

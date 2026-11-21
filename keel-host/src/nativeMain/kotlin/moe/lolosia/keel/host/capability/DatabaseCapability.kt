@@ -72,6 +72,8 @@ internal class DatabaseCapability private constructor(
                 config.password = settings.password?.cstr?.ptr
                 config.max_connections = settings.maxConnections.toUInt()
                 config.connect_timeout_ms = settings.connectTimeoutMs.toUInt()
+                config.option_count = 0u
+                config.options = null
 
                 val instanceOut = alloc<COpaquePointerVar>()
                 val apiOut = alloc<COpaquePointerVar>()
@@ -94,6 +96,12 @@ internal class DatabaseCapability private constructor(
                 database.close()
                 throw IllegalStateException(
                     "${manifest.id} 的 db ABI 版本是 ${database.api.abi_version}，Host 支持 $KEEL_DB_ABI_VERSION"
+                )
+            }
+            if (database.api.struct_size < sizeOf<KeelDbApi>().toUInt()) {
+                database.close()
+                throw IllegalStateException(
+                    "${manifest.id} 的 db 函数表过小：${database.api.struct_size}"
                 )
             }
             return database

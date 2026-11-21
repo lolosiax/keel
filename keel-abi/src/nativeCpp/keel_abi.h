@@ -253,6 +253,21 @@ typedef struct KeelHostApi {
      */
     void *database;
     void *database_handle;
+
+    /*
+     * database 的方言与能力标签（v2 追加）。
+     *
+     * dialect 来自被选中能力包 `plugin.json` 的 `dialect`；features 是同一份清单里的
+     * 字符串数组。两者只在插件运行期间有效，由 Host 持有，插件不得释放。
+     * ORM 用 dialect 选择 SqlDialect，业务代码不需要知道底层驱动。
+     */
+    const char *database_dialect;
+    const char *const *database_features;
+    uint32_t database_feature_count;
+
+    /* 多数据源预留；当前恒为 NULL / 0。 */
+    void *databases;
+    uint32_t database_count;
 } KeelHostApi;
 
 /* 插件能力表：Host 在 bootstrap 后读取，之后只通过 inbox 投递。 */

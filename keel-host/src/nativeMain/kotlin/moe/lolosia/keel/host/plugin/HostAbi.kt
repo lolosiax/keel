@@ -110,16 +110,58 @@ internal val hostAbi: CPointer<KeelHostApi> = nativeHeap.alloc<KeelHostApi>().al
     // database 能力由 HostCapabilities 在启动时填；没有安装能力包时保持 null
     api.database = null
     api.database_handle = null
+    api.database_dialect = null
+    api.database_features = null
+    api.database_feature_count = 0u
+    api.databases = null
+    api.database_count = 0u
 }.ptr
+
+/** 方言与能力标签的稳定副本：插件运行期间一直有效，撤销时释放。 */
+private var databaseDialectValue: CPointer<ByteVar>? = null
+private var databaseFeaturesArray: CPointer<CPointerVar<ByteVar>>? = null
+private var databaseFeaturesValues: List<CPointer<ByteVar>> = emptyList()
+
+private fun stableCString(value: String): CPointer<ByteVar> {
+    val bytes = value.encodeToByteArray()
+    val pointer = nativeHeap.allocArray<ByteVar>(bytes.size + 1)
+    bytes.forEachIndexed { index, byte -> pointer[index] = byte }
+    pointer[bytes.size] = 0
+    return pointer
+}
 
 /**
  * 把已打开的 database 能力下发 / 撤销。
  *
  * 必须在启动任何 native 插件之前调用；插件在 `worker_main` 里一次性读取。
+ * [dialect] / [features] 来自被选中能力包的 `plugin.json`，会复制成稳定字符串，
+ * 由 Host 持有到下一次撤销。
  */
-internal fun setHostDatabase(api: COpaquePointer?, handle: COpaquePointer?) {
+internal fun setHostDatabase(
+    api: COpaquePointer?,
+    handle: COpaquePointer?,
+    dialect: String? = null,
+    features: List<String> = emptyList(),
+) {
+    databaseDialectValue?.let { nativeHeap.free(it) }
+    databaseFeaturesArray?.let { nativeHeap.free(it) }
+    databaseFeaturesValues.forEach { nativeHeap.free(it) }
+
+    databaseDialectValue = dialect?.takeIf { it.isNotBlank() }?.let(::stableCString)
+    databaseFeaturesValues = features.filter { it.isNotBlank() }.map(::stableCString)
+    databaseFeaturesArray = if (databaseFeaturesValues.isEmpty()) {
+        null
+    } else {
+        nativeHeap.allocArray<CPointerVar<ByteVar>>(databaseFeaturesValues.size).also { array ->
+            databaseFeaturesValues.forEachIndexed { index, value -> array[index] = value }
+        }
+    }
+
     hostAbi.pointed.database = api
     hostAbi.pointed.database_handle = handle
+    hostAbi.pointed.database_dialect = databaseDialectValue
+    hostAbi.pointed.database_features = databaseFeaturesArray
+    hostAbi.pointed.database_feature_count = databaseFeaturesValues.size.toUInt()
 }
 
 /**

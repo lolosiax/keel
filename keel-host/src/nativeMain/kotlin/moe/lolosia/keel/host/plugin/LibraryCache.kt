@@ -34,3 +34,40 @@ internal fun installLibrary(
         }
     }
 }
+
+/**
+ * 把能力包一个 `lib/<target>/` 目录整体落到缓存目录。
+ *
+ * 能力包可能带同目录依赖（例如 `libmariadb.dll`），加载器必须保留相对布局；
+ * 返回入口库的绝对路径。任一文件被占用时整组换到 `<version>.1` 等代次目录，
+ * 不能只给入口库换名 —— 依赖文件名与导入表都写死了。
+ */
+internal fun installLibrarySet(
+    cacheRoot: String,
+    manifest: KeelPackageManifest,
+    targetDir: String,
+    entryPath: String,
+    files: List<Pair<String, ByteArray>>,
+): String {
+    val base = "$cacheRoot/${manifest.id}/${manifest.version}"
+    val prefix = "$targetDir/"
+    val entryName = entryPath.removePrefix(prefix)
+    require(entryName != entryPath) { "入口库 $entryPath 不在 $targetDir 下" }
+
+    var attempt = 0
+    while (true) {
+        val dir = if (attempt == 0) base else "$base.$attempt"
+        try {
+            files.forEach { (path, bytes) ->
+                val relative = path.removePrefix(prefix)
+                val target = "$dir/$targetDir/$relative"
+                mkdirs(target.substringBeforeLast('/'))
+                PluginFs.writeBytes(target, bytes)
+            }
+            return "$dir/$targetDir/$entryName"
+        } catch (e: Throwable) {
+            attempt++
+            if (attempt > 8) throw e
+        }
+    }
+}

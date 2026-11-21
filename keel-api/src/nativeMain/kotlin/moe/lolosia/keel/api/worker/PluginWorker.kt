@@ -76,6 +76,12 @@ object PluginWorker {
         PluginWorker.inbox = api.pointed.inbox
         PluginCapabilities.databaseApi = host?.pointed?.database
         PluginCapabilities.databaseHandle = host?.pointed?.database_handle
+        PluginCapabilities.databaseDialect = host?.pointed?.database_dialect?.toKString()
+        val features = host?.pointed?.database_features
+        val featureCount = host?.pointed?.database_feature_count?.toInt() ?: 0
+        PluginCapabilities.databaseFeatures =
+            if (features == null || featureCount <= 0) emptyList()
+            else (0 until featureCount).mapNotNull { index -> features[index]?.toKString() }
         val logger = NativePluginLogger(api.pointed.host, pluginId)
         Log.install(logger)
         Log.installHistory(PluginLogSource)
@@ -156,6 +162,8 @@ object PluginWorker {
         authorizer = null
         PluginCapabilities.databaseApi = null
         PluginCapabilities.databaseHandle = null
+        PluginCapabilities.databaseDialect = null
+        PluginCapabilities.databaseFeatures = emptyList()
         PluginRoutes.reset()
         PublicApiObjects.reset()
         LogSubscriptions.reset()

@@ -16,13 +16,14 @@
  * 3. 调用方拥有参数，只在本函数调用期间有效；结果集与错误串由能力包拥有，按函数说明释放。
  * 4. 未连接 / 连不上数据库时，查询返回 `KEEL_ERR_FAILED`，用 `last_error` 取原因；
  *    业务侧映射为 503，不阻断 Host 启动。
+ * 5. v2 只追加字段与方法：旧字段偏移不变，版本由 `abi_version` 严格校验。
  */
 
 #include <stdint.h>
 
 #include "keel_abi.h"
 
-#define KEEL_DB_ABI_VERSION 1u
+#define KEEL_DB_ABI_VERSION 2u
 
 /* 值的类型；参数与结果行共用。 */
 typedef enum KeelDbType {
@@ -31,15 +32,19 @@ typedef enum KeelDbType {
     KEEL_DB_INT = 2,
     KEEL_DB_FLOAT = 3,
     KEEL_DB_BOOL = 4,
-    KEEL_DB_BLOB = 5
+    KEEL_DB_BLOB = 5,
+    KEEL_DB_DECIMAL = 6,    /* 规范十进制文本（UTF-8），不经过 double */
+    KEEL_DB_TIMESTAMP = 7,  /* 8 字节小端 int64，epoch 微秒（UTC） */
+    KEEL_DB_JSON = 8,       /* UTF-8 JSON 文本 */
+    KEEL_DB_UUID = 9        /* 36 字符文本 */
 } KeelDbType;
 
 /*
  * 一个值。
  *
  * bytes 的编码按 type 区分：
- * - TEXT / BLOB：原始字节，不算结尾 '\0'；
- * - INT：8 字节小端二进制补码；
+ * - TEXT / BLOB / DECIMAL / JSON / UUID：原始字节，不算结尾 '\0'；
+ * - INT / TIMESTAMP：8 字节小端二进制补码（TIMESTAMP 是 epoch 微秒）；
  * - FLOAT：8 字节小端 IEEE-754；
  * - BOOL：1 字节，0 为假；
  * - NULL：bytes 与 len 都被忽略。
@@ -50,7 +55,17 @@ typedef struct KeelDbValue {
     const uint8_t *bytes;
 } KeelDbValue;
 
-/* `open` 的配置；字段由 Host 从 `database:` 配置段填好。 */
+/* 驱动私有配置项；例如 `busy_timeout` / `sslmode` / `charset`。 */
+typedef struct KeelDbOption {
+    const char *key;
+    const char *value;
+} KeelDbOption;
+
+/*
+ * `open` 的配置；字段由 Host 从 `database:` 配置段填好。
+ *
+ * 字符串与 [options] 数组只在 `open` 调用期间有效，能力包需要时自行复制。
+ */
 typedef struct KeelDbConfig {
     uint32_t struct_size;   /* sizeof(KeelDbConfig) */
     const char *url;        /* mysql://host:port/db */
@@ -58,6 +73,8 @@ typedef struct KeelDbConfig {
     const char *password;
     uint32_t max_connections;
     uint32_t connect_timeout_ms;
+    uint32_t option_count;          /* [options] 数组长度，可为 0 */
+    const KeelDbOption *options;
 } KeelDbConfig;
 
 /*
@@ -136,6 +153,23 @@ typedef struct KeelDbApi {
      * @return KEEL_OK 表示写入了非空文本；KEEL_ERR_INVALID 表示没有错误或缓冲太小
      */
     KeelStatus (*last_error)(KeelDbHandle *handle, char *buf, uint32_t capacity);
+
+    /*
+     * 最近一次写入生成的自增主键。
+     *
+     * 以**调用线程**的最近一次 exec 为准：连接池下不能用
+     * `select last_insert_id()` 回查，那条语句可能落到另一条连接上。
+     * 没有写入过时返回 KEEL_OK 与 0。
+     */
+    KeelStatus (*last_insert_id)(KeelDbHandle *handle, uint64_t *out);
+
+    /*
+     * 连通性检查。
+     *
+     * 池句柄会借出一条连接执行 ping；事务句柄只检查当前连接。
+     * 失败时用 last_error 取原因。
+     */
+    KeelStatus (*ping)(KeelDbHandle *handle);
 } KeelDbApi;
 
 #endif /* KEEL_DATABASE_H */

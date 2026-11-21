@@ -55,3 +55,11 @@ internal expect fun bridgeLastError(
     buffer: CPointer<ByteVar>,
     capacity: UInt,
 ): UInt
+
+internal expect fun bridgeLastInsertId(
+    api: CPointer<KeelDbApi>,
+    handle: CPointer<KeelDbHandle>,
+    out: CPointer<ULongVar>?,
+): UInt
+
+internal expect fun bridgePing(api: CPointer<KeelDbApi>, handle: CPointer<KeelDbHandle>): UInt

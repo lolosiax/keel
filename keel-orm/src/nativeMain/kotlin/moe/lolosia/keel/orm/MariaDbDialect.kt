@@ -7,5 +7,8 @@ object MariaDbDialect : SqlDialect {
 
     override fun quote(name: String): String = "`" + name.replace("`", "``") + "`"
 
+    /** SQL 文本是 `escape '\\'`：MariaDB 会把 `'\'` 当成未闭合字符串。 */
+    override val likeEscape: String = "'\\\\'"
+
     override val lastInsertIdSql: String = "select last_insert_id()"
 }

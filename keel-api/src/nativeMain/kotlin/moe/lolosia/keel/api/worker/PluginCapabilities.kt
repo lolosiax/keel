@@ -17,4 +17,12 @@ object PluginCapabilities {
     /** database 能力实例（连接池）；与 [databaseApi] 同生命周期。 */
     var databaseHandle: COpaquePointer? = null
         internal set
+
+    /** 能力包声明的方言 id（`sqlite` / `mariadb`）；没有能力包时为 null。 */
+    var databaseDialect: String? = null
+        internal set
+
+    /** 能力包声明的能力标签；没有能力包时为空。 */
+    var databaseFeatures: List<String> = emptyList()
+        internal set
 }

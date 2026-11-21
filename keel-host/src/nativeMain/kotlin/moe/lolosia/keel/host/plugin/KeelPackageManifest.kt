@@ -23,6 +23,8 @@ data class PluginBuildInfo(
  * @property kind `native`（默认）或 `capability`
  * @property provides capability 声明的能力名；业务插件的 `requires` 按这里匹配
  * @property schemes capability 支持的 URL scheme（当前用于 database）
+ * @property dialect capability 声明的方言 id（`sqlite` / `mariadb`），由 Host 下发给插件
+ * @property features capability 声明的能力标签，由 Host 下发给插件
  */
 @Serializable
 data class KeelPackageManifest(
@@ -36,6 +38,8 @@ data class KeelPackageManifest(
     val kind: String = KIND_NATIVE,
     val provides: List<String> = emptyList(),
     val schemes: List<String> = emptyList(),
+    val dialect: String? = null,
+    val features: List<String> = emptyList(),
     val lib: Map<String, String> = emptyMap(),
     val resources: String = "resources/",
     val requires: List<String> = emptyList(),

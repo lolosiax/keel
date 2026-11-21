@@ -81,22 +81,6 @@ fun <T : Any> KeelDatabase.delete(meta: EntityMeta<T>, value: T): Long {
     )
 }
 
-/**
- * 读取本连接上一次插入的自增主键。
- *
- * SQLite 的取值是连接级的；MariaDB 在真实驱动补齐后需要 ABI 返回 `last_insert_id`，
- * 当前实现只对单连接驱动（SQLite）可靠。
- */
-fun KeelDatabase.lastInsertId(): Long {
-    val dialect = OrmRuntime.dialectOrThrow()
-    val sql = dialect.lastInsertIdSql
-        ?: error("方言 ${dialect.id} 不支持 last_insert_id")
-    return query(sql).use { result ->
-        if (!result.next()) error("last_insert_id 没有返回行")
-        result.row?.long(0) ?: error("last_insert_id 返回 NULL")
-    }
-}
-
 /** Web 入口：控制器继续只写 `ctx.query<SysUser> { ... }`。 */
 inline fun <reified T : Any> Context.query(
     noinline block: QueryScope<T>.() -> Unit,

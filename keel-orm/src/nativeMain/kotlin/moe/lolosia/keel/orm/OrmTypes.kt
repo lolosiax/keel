@@ -10,10 +10,10 @@ import kotlin.time.Instant
 /**
  * 内置类型映射表。
  *
- * 约定（与 ABI v1 对齐）：
- * - `Instant` 存 epoch 毫秒（INT）；
- * - `Decimal` 存规范十进制文本（TEXT），不经过 Double；
- * - JSON 存 UTF-8 文本（TEXT）；
+ * 约定（与 ABI v2 对齐）：
+ * - `Instant` 写入用 epoch 毫秒（INT）；读取同时接受 TIMESTAMP（epoch 微秒）与 INT（毫秒）；
+ * - `Decimal` 存规范十进制文本，不经过 Double；
+ * - JSON 存 UTF-8 文本；
  * - 枚举按名称存字符串；SQLite 的布尔列读回来是 INT，[BOOL] 已兼容。
  *
  * 生成物直接引用这里的实例（`OrmTypes.TEXT` 等），业务代码不要手写新的映射。
@@ -36,7 +36,7 @@ object OrmTypes {
     }
 
     val REAL: OrmType<Double> = object : OrmType<Double> {
-        override fun encode(value: Double): DbValue = DbValue.Decimal(value)
+        override fun encode(value: Double): DbValue = DbValue.Float(value)
         override fun decode(row: Row, index: Int): Double = row.doubleOrNull(index) ?: 0.0
     }
 
@@ -52,8 +52,12 @@ object OrmTypes {
 
     val INSTANT: OrmType<Instant> = object : OrmType<Instant> {
         override fun encode(value: Instant): DbValue = DbValue.Integer(value.toEpochMilliseconds())
-        override fun decode(row: Row, index: Int): Instant =
-            Instant.fromEpochMilliseconds(row.longOrNull(index) ?: 0L)
+
+        override fun decode(row: Row, index: Int): Instant {
+            val micros = row.timestampOrNull(index)
+            if (micros != null) return Instant.fromEpochMilliseconds(micros / 1000)
+            return Instant.fromEpochMilliseconds(row.longOrNull(index) ?: 0L)
+        }
     }
 
     val DECIMAL: OrmType<Decimal> = object : OrmType<Decimal> {

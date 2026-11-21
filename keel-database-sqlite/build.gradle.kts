@@ -229,6 +229,8 @@ val generateManifest = tasks.register("keelDatabaseManifest") {
               "entry": "keel_capability_entry",
               "provides": ["database"],
               "schemes": ["sqlite"],
+              "dialect": "sqlite",
+              "features": ["transactions", "prepared", "last_insert_id"],
               "lib": {
             $entries
               },

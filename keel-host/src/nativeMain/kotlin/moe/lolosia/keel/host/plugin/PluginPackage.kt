@@ -24,4 +24,7 @@ interface PluginPackage {
 
     /** 读取包内条目（相对包根，如 `lib/mingwX64/x.dll`）。 */
     fun read(path: String): ByteArray?
+
+    /** 列出包内以 [prefix] 开头的条目（`/` 分隔、相对包根）。 */
+    fun list(prefix: String): List<String>
 }

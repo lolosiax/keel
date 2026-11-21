@@ -94,10 +94,16 @@ internal object HostCapabilities {
         try {
             val opened = DatabaseCapability.open(selected, settings)
             database = opened
-            setHostDatabase(opened.apiPointer, opened.handle)
+            setHostDatabase(
+                opened.apiPointer,
+                opened.handle,
+                selected.manifest.dialect,
+                selected.manifest.features,
+            )
             active += "database"
             Log.info(
-                "database: ${selected.manifest.id}（scheme=${settings.scheme}, url=${settings.url}）",
+                "database: ${selected.manifest.id}（scheme=${settings.scheme}," +
+                    " dialect=${selected.manifest.dialect ?: "?"}, url=${settings.url}）",
                 tag = "Loader",
             )
         } catch (e: Exception) {

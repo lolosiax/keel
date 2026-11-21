@@ -46,8 +46,20 @@
 > `keel-plugin-hello` 用 `HellUser` 跑通垂直切片：
 > `orm: insert=1/2, first=alice, page=[alice]/2, total=2, filtered=1, nullEmails=1,
 > updatedNull=1, delete=1->1, rollback=1`（SQLite）。
-> ABI v2（`options` / `last_insert_id` / DECIMAL·TIMESTAMP·JSON·UUID）、
-> MariaDB 真实驱动仍未做；关联 / `Children<T>` / `saveGraph` / 序列化属 D2。
+> **2026-11-21 续：ABI v2 与 MariaDB 真实后端已落地（mingwX64）**——
+> `keel_database.h` 升到 `KEEL_DB_ABI_VERSION=2`：新增 DECIMAL / TIMESTAMP / JSON / UUID
+> 值类型、`last_insert_id`、`ping`、`KeelDbConfig.options`；`KeelHostApi` 追加
+> `database_dialect` / `database_features`，由能力包 `plugin.json` 的 `dialect` / `features` 下发。
+> Host 对 DB ABI 严格校验 v2；能力包的 `lib/<target>/` 整目录物化到缓存，
+> Windows 用 `LoadLibraryExW` + `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR` 解析同目录依赖。
+> `keel-database-mariadb` 已链接本机 MariaDB Connector/C（3.3.8 / 服务器 10.11.6），
+> 实现连接池、预处理、事务、线程局部错误与 `last_insert_id`；
+> SQLite 与 MariaDB 的 exec / query / 参数 / 事务 / ORM 垂直切片都已跑通。
+> ORM 方言改为优先读能力包下发的 `dialect`（构建期值只作回落），
+> `lastInsertId()` 走 ABI 而不是方言 SQL。
+> 剩余：Connector/C 尚未迁到 `keel-thirdparty` 源码构建（当前取本机安装），
+> Linux 目标与 TLS（OpenSSL / Schannel 之外）未验证；关联 / `Children<T>` /
+> `saveGraph` / 序列化仍属 D2。
 
 ---
 
@@ -87,13 +99,13 @@ SQLite 只用于驱动 / ORM conformance 与测试，`basic-biz` 仍以 MariaDB 
 
 | 模块 | 已具备 | 主要缺口 |
 | --- | --- | --- |
-| `keel-database-api` | C ABI 头、`KeelDatabase` / `Row` / `QueryResult` / `DbValue`、事务、结果集、三目标 cinterop；`Context.database` / `transaction` / `execute` / `query(sql)`；`Row` 的空安全访问器 | 只有 ABI v1：没有 `last_insert_id` / `ping` / 列元数据 / `options`；`Decimal` 仍是 `Double`（精确十进制由 ORM 的 `Decimal` 文本承担）；并发下 `last_error` 有竞态 |
+| `keel-database-api` | ABI v2 头（DECIMAL / TIMESTAMP / JSON / UUID、`last_insert_id`、`ping`、`options`）、`KeelDatabase` / `Row` / `QueryResult` / `DbValue`、事务、结果集、三目标 cinterop；`Context.database` / `transaction` / `execute` / `query(sql)`；`currentDialect()` / `currentFeatures()`；`Row` 的空安全访问器与 `timestampOrNull` | 列元数据（`column_name/type`）未加；`options` 已过边界但 Host 尚未从配置填值 |
 | `keel-orm` | `@Table` / `@Id` / `@Generated` / `@Column` / `@Transient`；`EntityMeta` / `EntityMetas`；`SqlDialect`（sqlite/mariadb）；查询 DSL（where/and/or、比较、IN、BETWEEN、LIKE）；`findList/findFirst/findCount/findPage`；`insert/update/delete/lastInsertId` | 关联 / `Children<T>` / `withChildren` / `saveGraph` / `deleteGraph`、软删除、审计字段、序列化（D2） |
 | `keel-orm-ksp` | `@Table` → `<Entity>Meta`（列顺序 / read / writeInsert / writeUpdate / idOf）、`<Entity>Columns`、`OrmMetaBootstrap`；superclass 链字段收集、camel→snake；生成到 `build/generated/keel/orm` | 跨模块实体、`has*` 访问器（IR 插件，D2） |
-| `keel-database-mariadb` | `.keel` 打包、`keel_capability_entry`、池 / 事务 / 结果集骨架、`select 1` | **没有链接 libmariadb**；`backend_exec` / `backend_query` 是 stub，除 `select 1` 全返回 `KEEL_ERR_UNSUPPORTED` |
+| `keel-database-mariadb` | 真实后端：连接池、`mysql_stmt_*` 预处理、事务、类型映射、线程局部错误、`last_insert_id` / `ping`；`.keel` 带 `libmariadb.dll` 与 LGPL 许可文本 | 当前用本机 Connector/C（`-Pkeel.mariadb.home` / `MARIADB_HOME`）；尚未迁到 `keel-thirdparty` 源码构建；Linux / TLS 未验证 |
 | `keel-database-sqlite` | 已完成：amalgamation 静态并入，exec / query / 参数 / 事务 / NULL / BLOB / Unicode 与 ORM 切片通过；构建经 composite 自动拉起 sqlite 编译 | 仅作为 conformance / 测试库 |
 | `keel-thirdparty` | 6 个 codec 的源码编译 / stage / publish；`sqlite` 条目与 A 类 native 消费模式（驱动构建直接读 `build/dist`） | `mariadb` / `openssl` 条目未接入 |
-| Host 能力加载 | 发现、scheme 匹配、ABI 校验、`open` / `close`、`requires` 校验 | `database` 配置仍只读环境变量；没有 dialect / features 下发；没有健康检查 / 重连 / 热替换；没有池指标 |
+| Host 能力加载 | 发现、scheme 匹配、ABI v2 严格校验、`open` / `close`、`requires` 校验；`lib/<target>/` 整目录物化；`dialect` / `features` 经 `KeelHostApi` 下发 | `database` 配置仍只读环境变量；没有健康检查 / 重连 / 热替换；没有池指标 |
 | rbac / biz | 手写 SQL 仓库、幂等建表、真实接口 | 大量位置映射样板；建表 SQL 内嵌且是 MariaDB 方言；basic-biz 未迁 ORM / 多库兼容后置；没有版本化迁移 |
 | 构建接线 | `moe.lolosia.keel.database` 已落地：`keel { database { dialect, outputDir } }`，挂 KSP、加依赖、下发参数 | `requires: ["database"]` 仍只解析运行期 `.keel`，不做编译期接线（已定为显式 apply） |
 
@@ -1041,19 +1053,24 @@ router KSP 的 `DbContext` 清理、ORM 三件套（`keel-orm` / `keel-orm-ksp` 
 
 按依赖顺序剩余：
 
-1. **MariaDB 真实驱动**
-   - Connector/C 的动态库部署（`lib/<target>/` 整目录物化 + `$ORIGIN` / DLL 搜索路径）；
-   - 连接池 / 预处理语句 / `utf8mb4` / 线程初始化；
-   - 错误缓冲线程局部化；`exec` 返回 affected rows、结果集持有连接直到 `result_free`。
-2. **ABI v2 的 Host/插件接线**
-   - `KeelDbConfig.options`、`KeelHostApi` 的 `dialect` / `features` / `databases`；
-   - `KeelDbValue` 增加 DECIMAL / TIMESTAMP / JSON / UUID；
-   - `plugin.json` 增加 `dialect` / `features`，Host 解析并下发；
-   - 版本协商改为「接受 1..CURRENT + `struct_size` 探测」。
-3. **Host `CapabilityLoader` 的目录物化**
-   - 当前只复制入口库；MariaDB 需要把整个 `lib/<target>/` 复制到缓存目录。
+1. **MariaDB 真实驱动（已完成 mingwX64，剩生产化）**
+   - 已完成：连接池 / 预处理 / `utf8mb4` / 线程初始化 / 线程局部错误 /
+     `last_insert_id` / `ping`；`.keel` 带 `libmariadb.dll`；Host 整目录物化；
+   - 剩余：把 Connector/C 迁到 `keel-thirdparty` 源码构建（当前读本机安装，
+     缺失时任务 `onlyIf` 跳过、不影响 `buildAll`），
+     Linux 的 OpenSSL / rpath 与 TLS 开关，以及连接池指标 / 重连。
+2. **ABI v2 的 Host/插件接线（已完成）**
+   - `KeelDbConfig.options`、`KeelHostApi` 的 `dialect` / `features`；
+   - `KeelDbValue` 的 DECIMAL / TIMESTAMP / JSON / UUID；
+   - `plugin.json` 的 `dialect` / `features` 解析与下发；
+   - 版本策略：仓库尚未发布，本轮直接要求 v2；`struct_size` 已做下界校验，
+     发布后再改为「接受 1..CURRENT + 探测」。
+3. **Host `CapabilityLoader` 的目录物化（已完成）**
+   - `installLibrarySet` 把 `lib/<target>/` 整组落盘；Windows 用
+     `LoadLibraryExW` + `LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR`（路径必须是反斜杠）。
 4. **配置切到 `application.yaml`**
    - `DatabaseSettings` 从 Host 配置读取，环境变量保留为覆盖；日志不打印含密码的 URL。
+   - `options` 的配置入口（WAL / charset / sslmode）也在这里接。
 5. **D2：关联与图写入**
    - `Children<T>`（`MutableList` + `loaded`）、`withChildren` / `withRef`（1+N 批量）；
    - `saveGraph` / `deleteGraph`、软删除、审计字段（`@WhenCreated` / `@WhenModified`）；

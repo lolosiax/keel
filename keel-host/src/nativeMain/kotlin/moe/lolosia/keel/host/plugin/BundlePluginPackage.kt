@@ -23,4 +23,6 @@ internal class BundlePluginPackage(
     override val bundled: Boolean get() = true
 
     override fun read(path: String): ByteArray? = scoped.read(path)
+
+    override fun list(prefix: String): List<String> = scoped.list(prefix)
 }

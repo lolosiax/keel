@@ -23,3 +23,13 @@ fun currentDatabase(): KeelDatabase? {
     cachedHandle = handle
     return database
 }
+
+/**
+ * 当前能力包声明的方言 id（`sqlite` / `mariadb`），没有能力包时为 null。
+ *
+ * ORM 用它选择 `SqlDialect`；业务代码不需要直接读。
+ */
+fun currentDialect(): String? = PluginCapabilities.databaseDialect
+
+/** 当前能力包声明的能力标签，供业务做可选降级。 */
+fun currentFeatures(): Set<String> = PluginCapabilities.databaseFeatures.toSet()

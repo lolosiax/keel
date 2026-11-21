@@ -68,9 +68,13 @@ private fun KeelDbValue.toDbValue(): DbValue = when (type) {
     KEEL_DB_NULL -> DbValue.Null
     KEEL_DB_TEXT -> DbValue.Text(readText())
     KEEL_DB_INT -> DbValue.Integer(readLong())
-    KEEL_DB_FLOAT -> DbValue.Decimal(Double.fromBits(readLong()))
+    KEEL_DB_FLOAT -> DbValue.Float(Double.fromBits(readLong()))
     KEEL_DB_BOOL -> DbValue.Bool(readBytes(1)?.firstOrNull() != 0.toByte())
     KEEL_DB_BLOB -> DbValue.Blob(readBytes(len.toInt()) ?: ByteArray(0))
+    KEEL_DB_DECIMAL -> DbValue.Decimal(readText())
+    KEEL_DB_TIMESTAMP -> DbValue.Timestamp(readLong())
+    KEEL_DB_JSON -> DbValue.Json(readText())
+    KEEL_DB_UUID -> DbValue.Uuid(readText())
     else -> throw DatabaseException("未知的结果列类型：$type")
 }
 

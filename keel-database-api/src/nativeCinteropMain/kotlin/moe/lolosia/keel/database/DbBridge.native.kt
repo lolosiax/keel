@@ -54,3 +54,12 @@ internal actual fun bridgeLastError(
     buffer: CPointer<ByteVar>,
     capacity: UInt,
 ): UInt = api.pointed.last_error!!(handle, buffer, capacity)
+
+internal actual fun bridgeLastInsertId(
+    api: CPointer<KeelDbApi>,
+    handle: CPointer<KeelDbHandle>,
+    out: CPointer<ULongVar>?,
+): UInt = api.pointed.last_insert_id!!(handle, out)
+
+internal actual fun bridgePing(api: CPointer<KeelDbApi>, handle: CPointer<KeelDbHandle>): UInt =
+    api.pointed.ping!!(handle)

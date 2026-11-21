@@ -23,4 +23,6 @@ internal class FilePluginPackage(
     override val bundled: Boolean get() = false
 
     override fun read(path: String): ByteArray? = zip.read(path)
+
+    override fun list(prefix: String): List<String> = zip.list(prefix)
 }

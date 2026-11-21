@@ -5,8 +5,8 @@
  * 连接模型是单连接 + 互斥：SQLite 本身单写，查询结果在 result_free 之前独占连接；
  * 事务句柄由 begin 取锁，commit / rollback 释放，v1 不支持嵌套事务。
  *
- * 只实现 keel_database.h 的 ABI（v1）：exec / query / next / result_free / begin /
- * commit / rollback / last_error。头文件里没有 last_insert_id 与 ping，驱动侧不自行扩展。
+ * 实现 keel_database.h 的 ABI v2：exec / query / next / result_free / begin /
+ * commit / rollback / last_error / last_insert_id / ping。
  */
 
 #include <stdint.h>
@@ -357,6 +357,30 @@ static KeelStatus db_rollback(KeelDbHandle *handle) {
     return finish_transaction(handle, "ROLLBACK", 8);
 }
 
+static KeelStatus db_last_insert_id(KeelDbHandle *handle, uint64_t *out) {
+    DbHandleBase *base = base_of(handle);
+    DbPool *pool = pool_of(base);
+    if (pool == NULL || out == NULL) return KEEL_ERR_INVALID;
+
+    int lock = base->kind == DB_KIND_POOL;
+    if (lock) keel_mutex_lock(&pool->lock);
+    *out = (uint64_t) sqlite3_last_insert_rowid(pool->db);
+    if (lock) keel_mutex_unlock(&pool->lock);
+    return KEEL_OK;
+}
+
+static KeelStatus db_ping(KeelDbHandle *handle) {
+    DbHandleBase *base = base_of(handle);
+    DbPool *pool = pool_of(base);
+    if (pool == NULL) return KEEL_ERR_INVALID;
+
+    int lock = base->kind == DB_KIND_POOL;
+    if (lock) keel_mutex_lock(&pool->lock);
+    KeelStatus status = exec_locked(pool, "select 1", 8, NULL, 0, NULL);
+    if (lock) keel_mutex_unlock(&pool->lock);
+    return status;
+}
+
 static KeelStatus db_last_error(KeelDbHandle *handle, char *buf, uint32_t capacity) {
     DbHandleBase *base = base_of(handle);
     DbPool *pool = pool_of(base);
@@ -434,6 +458,8 @@ static KeelStatus db_open(const KeelHostApi *host, const void *config, uint32_t 
     pool->api.commit = db_commit;
     pool->api.rollback = db_rollback;
     pool->api.last_error = db_last_error;
+    pool->api.last_insert_id = db_last_insert_id;
+    pool->api.ping = db_ping;
 
     *instance = pool;
     *api = &pool->api;

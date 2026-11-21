@@ -4,10 +4,10 @@ import moe.lolosia.keel.api.Log
 import moe.lolosia.keel.database.DbValue
 import moe.lolosia.keel.database.KeelDatabase
 import moe.lolosia.keel.database.currentDatabase
+import moe.lolosia.keel.database.currentDialect
 import moe.lolosia.keel.orm.Decimal
 import moe.lolosia.keel.orm.delete
 import moe.lolosia.keel.orm.insert
-import moe.lolosia.keel.orm.lastInsertId
 import moe.lolosia.keel.orm.query
 import moe.lolosia.keel.orm.update
 import kotlin.time.Instant
@@ -39,6 +39,7 @@ internal actual fun checkDatabase() {
 }
 
 private fun conformance(database: KeelDatabase) {
+    val dialect = currentDialect()
     val ping = database.query("select 1").use { result ->
         if (!result.next()) error("select 1 没有返回行")
         result.row?.long(0)
@@ -46,33 +47,36 @@ private fun conformance(database: KeelDatabase) {
 
     database.exec("drop table if exists keel_check")
     database.exec(
-        "create table keel_check(" +
-            "id integer primary key, name text, score real, flag integer, data blob)"
+        if (dialect == "mariadb") {
+            "create table keel_check(" +
+                "id bigint auto_increment primary key, name text, score double, " +
+                "flag tinyint, data blob)"
+        } else {
+            "create table keel_check(" +
+                "id integer primary key, name text, score real, flag integer, data blob)"
+        }
     )
     val inserted = database.exec(
         "insert into keel_check(name, score, flag, data) values (?, ?, ?, ?)",
         listOf(
             DbValue.Text("中文🙂"),
-            DbValue.Decimal(1.5),
+            DbValue.Float(1.5),
             DbValue.Bool(true),
             DbValue.Blob(byteArrayOf(1, 2, 3)),
         ),
     )
-    val rowId = database.query("select last_insert_rowid()").use { result ->
-        if (!result.next()) error("last_insert_rowid 没有返回行")
-        result.row?.long(0) ?: error("last_insert_rowid 为空")
-    }
+    val rowId = database.lastInsertId()
 
     val read = database.query("select name, score, flag, data from keel_check where id = ?", listOf(DbValue.Integer(rowId)))
         .use { result ->
             if (!result.next()) error("按 id 查询没有返回行")
             val row = result.row ?: error("结果行缺失")
-            Triple(row.text(0), (row[1] as? DbValue.Decimal)?.value, row.bytes(3))
+            Triple(row.text(0), (row[1] as? DbValue.Float)?.value, row.bytes(3))
         }
 
     database.exec(
         "insert into keel_check(name, score, flag, data) values (?, ?, ?, ?)",
-        listOf(DbValue.Null, DbValue.Decimal(0.0), DbValue.Bool(false), DbValue.Null),
+        listOf(DbValue.Null, DbValue.Float(0.0), DbValue.Bool(false), DbValue.Null),
     )
     val nullName = database.query("select name from keel_check where name is null").use { result ->
         if (!result.next()) error("NULL 行没有返回")
@@ -88,12 +92,16 @@ private fun conformance(database: KeelDatabase) {
     }
     val after = count(database)
 
-    val journal = database.query("pragma journal_mode").use { result ->
-        if (!result.next()) error("journal_mode 没有返回行")
-        result.row?.text(0) ?: "?"
+    val journal = if (dialect == "mariadb") {
+        "-"
+    } else {
+        database.query("pragma journal_mode").use { result ->
+            if (!result.next()) error("journal_mode 没有返回行")
+            result.row?.text(0) ?: "?"
+        }
     }
     Log.info(
-        "database: select 1 -> $ping, insert -> $inserted, id=$rowId, " +
+        "database[$dialect]: select 1 -> $ping, insert -> $inserted, id=$rowId, " +
             "read=${read.first}/${read.second}/${read.third?.size}, null=${nullName == null}, " +
             "rollback=${before}->$after, journal=$journal",
     )
@@ -110,11 +118,18 @@ private fun count(database: KeelDatabase): Long =
  * 更新为 NULL → 删除 → 事务回滚。
  */
 private fun ormConformance(database: KeelDatabase) {
+    val dialect = currentDialect()
     database.exec("drop table if exists hell_user")
     database.exec(
-        "create table hell_user(" +
-            "id integer primary key autoincrement, user_name text not null, email text, " +
-            "is_use integer not null default 1, score text, created_at integer)"
+        if (dialect == "mariadb") {
+            "create table hell_user(" +
+                "id bigint auto_increment primary key, user_name varchar(255) not null, email text, " +
+                "is_use tinyint not null default 1, score text, created_at bigint)"
+        } else {
+            "create table hell_user(" +
+                "id integer primary key autoincrement, user_name text not null, email text, " +
+                "is_use integer not null default 1, score text, created_at integer)"
+        }
     )
 
     val alice = HellUser().apply {

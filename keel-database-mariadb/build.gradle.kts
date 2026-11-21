@@ -87,6 +87,53 @@ val targets: List<String> =
 
 val sources = cppDir.asFile.listFiles { file -> file.extension == "c" }.orEmpty()
 
+/**
+ * MariaDB Connector/C 的安装位置。
+ *
+ * 本轮先用本机安装的 Connector/C 打通真实后端：取 `include/mysql/mysql.h`、
+ * 导入库与运行期动态库。可用 `-Pkeel.mariadb.home=<dir>` 或环境变量
+ * `MARIADB_HOME` 覆盖；后续再迁到 `keel-thirdparty` 的源码构建。
+ */
+val mariadbHome: File? = (findProperty("keel.mariadb.home") as String?)?.let(::file)
+    ?: System.getenv("MARIADB_HOME")?.let(::file)
+    ?: listOf("C:/Program Files/MariaDB", "D:/Program Files/MariaDB", "/usr")
+        .map(::file)
+        .firstOrNull { home ->
+            listOf("include/mysql", "include/mariadb").any { File(home, "$it/mysql.h").isFile } &&
+                listOf("lib/libmariadb.lib", "lib/libmariadb.dll.a", "lib/libmariadb.a", "lib/libmariadb.so")
+                    .any { File(home, it).isFile }
+        }
+
+val mariadbInclude: File? = mariadbHome?.let { home ->
+    listOf("include/mysql", "include/mariadb")
+        .map { File(home, it) }
+        .firstOrNull { File(it, "mysql.h").isFile }
+}
+
+val mariadbLink: File? = mariadbHome?.let { home ->
+    listOf("lib/libmariadb.lib", "lib/libmariadb.dll.a", "lib/libmariadb.a", "lib/libmariadb.so")
+        .map { File(home, it) }
+        .firstOrNull { it.isFile }
+}
+
+/** 需要随 `.keel` 一起分发、和入口库放在同一目录的运行期动态库。 */
+val mariadbRuntime: File? = mariadbHome?.let { home ->
+    listOf("lib/libmariadb.dll", "bin/libmariadb.dll", "lib/libmariadb.so")
+        .map { File(home, it) }
+        .firstOrNull { it.isFile }
+}
+
+/** 没有 Connector/C 时跳过能力包构建，避免 `buildAll` 被本机环境卡住。 */
+val mariadbAvailable: Boolean =
+    mariadbHome != null && mariadbInclude != null && mariadbLink != null
+
+if (!mariadbAvailable) {
+    logger.warn(
+        "keel-database-mariadb: 未找到 MariaDB Connector/C，跳过能力包构建；" +
+            "用 -Pkeel.mariadb.home=<dir> 或 MARIADB_HOME 指定安装目录。"
+    )
+}
+
 val libraryTasks = targets.associateWith { target ->
     tasks.register<Exec>("keelDatabaseLibrary$target") {
         group = "keel"
@@ -97,26 +144,50 @@ val libraryTasks = targets.associateWith { target ->
         val library = outDir.map { File(it, libraryName(target)) }
 
         inputs.files(sources.toList() + listOf(dbAbiDir.file("keel_database.h").asFile, keelAbiDir.file("keel_abi.h").asFile))
-        outputs.file(library)
+        mariadbInclude?.let { inputs.dir(it) }
+        mariadbLink?.let { inputs.file(it) }
+        mariadbRuntime?.let { inputs.file(it) }
+        outputs.dir(outDir)
+        onlyIf { mariadbAvailable }
 
         environment(
             "PATH",
             "${toolchain.binDir.absolutePath}${File.pathSeparator}${System.getenv("PATH")}",
         )
-        doFirst { outDir.get().mkdirs() }
-        commandLine(
-            buildList {
-                add(toolchain.gcc)
-                add("-shared")
-                if (!target.startsWith("mingw")) add("-fPIC")
-                addAll(listOf("-O2", "-std=c99", "-Wall", "-Wextra"))
-                add("-I${dbAbiDir.asFile.absolutePath}")
-                add("-I${keelAbiDir.asFile.absolutePath}")
-                add("-o")
-                add(library.get().absolutePath)
-                addAll(sources.map { it.absolutePath })
+        doFirst {
+            val include = mariadbInclude!!
+            val link = mariadbLink!!
+            outDir.get().mkdirs()
+            commandLine(
+                buildList {
+                    add(toolchain.gcc)
+                    add("-shared")
+                    if (!target.startsWith("mingw")) add("-fPIC")
+                    addAll(listOf("-O2", "-std=c99", "-Wall", "-Wextra"))
+                    add("-I${dbAbiDir.asFile.absolutePath}")
+                    add("-I${keelAbiDir.asFile.absolutePath}")
+                    add("-I${include.absolutePath}")
+                    add("-o")
+                    add(library.get().absolutePath)
+                    addAll(sources.map { it.absolutePath })
+                    if (target.startsWith("mingw")) {
+                        // 能力包必须自带运行时依赖：静态并入 libgcc / winpthread，
+                        // 否则 LoadLibraryExW 在插件目录 / System32 里找不到这些 DLL。
+                        add("-static")
+                        add(link.absolutePath)
+                        addAll(listOf("-lws2_32"))
+                    } else {
+                        add("-L${link.parentFile.absolutePath}")
+                        addAll(listOf("-lmariadb", "-lpthread", "-ldl", "-lm"))
+                    }
+                }
+            )
+        }
+        doLast {
+            mariadbRuntime?.let { runtime ->
+                runtime.copyTo(File(outDir.get(), runtime.name), overwrite = true)
             }
-        )
+        }
     }
 }
 
@@ -143,6 +214,8 @@ val generateManifest = tasks.register("keelDatabaseManifest") {
               "entry": "keel_capability_entry",
               "provides": ["database"],
               "schemes": ["mysql", "mariadb"],
+              "dialect": "mariadb",
+              "features": ["transactions", "prepared", "last_insert_id", "ping"],
               "lib": {
             $entries
               },
@@ -159,6 +232,7 @@ val keelDatabasePackage by tasks.registering(Zip::class) {
     description = "把能力包打成 .keel（plugin.json + lib/<target>）"
     dependsOn(libraryTasks.values)
     dependsOn(generateManifest)
+    onlyIf { mariadbAvailable }
 
     archiveFileName.set("keel-database-mariadb-$version.keel")
     destinationDirectory.set(outputRoot)
@@ -166,6 +240,8 @@ val keelDatabasePackage by tasks.registering(Zip::class) {
     isReproducibleFileOrder = true
 
     from(generateManifest.map { layout.buildDirectory.file("keel/plugin.json") }) { into("") }
+    // LGPL：随包携带许可文本，动态库可被用户替换
+    from(layout.projectDirectory.dir("licenses")) { into("licenses") }
     targets.forEach { target ->
         from(outputRoot.map { it.dir("lib/$target") }) { into("lib/$target") }
     }
