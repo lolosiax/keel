@@ -18,8 +18,11 @@
 > 自动触发 sqlite 的编译与 staging，单独 clone 该目录时退回 Maven 工件）；
 > `keel-plugin-hello` 的数据库自检扩成 exec / query / 参数绑定 / NULL / BLOB / Unicode /
 > 事务回滚，`KEEL_DB_URL=sqlite://./check.db` 下已通过。
+> `Context.database` / `Context.transaction` / `Context.execute` / `Context.query(sql)` 扩展已加，
+> `requireDatabase()` 在缺包 / 未配置 / open 失败时抛 status = -2 的 `DatabaseException`；
+> `Row` 补齐 `longOrNull` / `doubleOrNull` / `booleanOrNull`（布尔兼容 SQLite 的 INT）。
 > ABI v2（`options` / `last_insert_id` / DECIMAL·TIMESTAMP·JSON·UUID）、
-> MariaDB 真实驱动、`Context.database` 扩展与 ORM 仍未做。
+> MariaDB 真实驱动与 ORM 仍未做。
 
 ---
 
