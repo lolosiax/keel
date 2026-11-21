@@ -3,8 +3,8 @@
 > 状态：方案（2026-11-21）。本文回答两件事：
 > keel 如何发布第三方原生库的封装；分发这些产物时如何满足许可义务。
 > `keel-thirdparty-gradle-plugin` 已实现消费接线与 check / notices / verify / publish；
-> `keel-thirdparty/` 已迁入 6 个 codec（zlib / png / webp / jpeg / gif / msgpack），
-> SQLite 等其余库仍待补。本次补充了 A 类的源码 / `.a` 消费与
+> `keel-thirdparty/` 已迁入 6 个 codec（zlib / png / webp / jpeg / gif / msgpack）
+> 以及 sqlite / mariadb / bcrypt / zstd。本次补充了 A 类的源码 / `.a` 消费与
 > `NATIVE` / `KLIB` / `BOTH` 发布形态。与实现冲突时以代码为准，并回头修本文。
 
 ---
@@ -225,6 +225,9 @@ keel-thirdparty/
 - 单个目标可单独跑：`compileCodecsMingwX64` / `compileCodecsLinuxArm64` /
   `compileCodecsLinuxX64`；源码缓存与 CMake 构建目录都在 `build/thirdparty/` 下（不入库），
   重跑 `downloadCodecSources` / `extractCodecSources` 即可重建。
+- `sqlite` / `mariadb` / `bcrypt` / `zstd` 各有一份独立生成脚本（`gradle/<lib>.gradle.kts`），
+  产物布局与 codec 一致，同样只下载上游源码、不 vendor 进仓库；`zstd` 只编
+  `lib/common` + `lib/decompress`，由 `keel-abi` 静态并入 `libkeel_abi.a`。
 
 ---
 
@@ -273,6 +276,7 @@ Host 会整目录物化，用户可原位替换该动态库。
 | --- | --- | --- |
 | SQLite | Public Domain | 静态，附来源说明 |
 | crypt_blowfish | Public Domain | 静态，附来源说明 |
+| zstd | BSD-3-Clause | 静态；bundle 解压（只编 common + decompress） |
 | zlib | Zlib | 静态，附许可证 |
 | libpng | libpng License v2 | 静态；打 patch 时注明修改版 |
 | libjpeg-turbo | IJG + BSD-3 + Zlib | 静态，合并列出 |

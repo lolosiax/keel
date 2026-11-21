@@ -1,0 +1,4 @@
+# zstd 解压实现：keel-abi 把 libzstd.a 静态并入自己的静态库，不生成 cinterop。
+# 保留本文件是为了满足第三方发布工件的统一定义（def/<lib>.def）。
+headers = zstd.h
+staticLibraries = libzstd.a

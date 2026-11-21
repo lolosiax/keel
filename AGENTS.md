@@ -122,7 +122,7 @@ gradlew -p keel-router-ksp publish
 gradlew -p keel-plugin-ksp publish
 
 # 第三方原生库：生成侧单独构建（不进 buildAll）
-gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（codecs / sqlite / mariadb）
+gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（codecs / sqlite / mariadb / bcrypt / zstd）
 gradlew -p keel-thirdparty stageAll         # 把 out/ 拆成 dist/<lib>/<target>
 gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
 # MariaDB Connector/C 走 CMake + Ninja（当前只编 mingwX64）
@@ -607,8 +607,7 @@ keel-host/src/{linux,mingwX64}Main/…/host/plugin/     NativeLibrary / PluginFs
 keel-launcher/src/commonMain/…/launcher/Main.kt       单文件发行版入口
 keel-abi/src/nativeCpp/
   keel_abi.h                          唯一 ABI 布局来源（不透明句柄 + KEEL_CINTEROP 占位分支）
-  keel_zstd.h                         bundle 解压的最小声明面（实现见 zstddeclib.c）
-  zstddeclib.c                        zstd 单文件解码器（v1.5.6，随静态库编入；插件不引用则不链接）
+  keel_zstd.h                         bundle 解压的最小声明面（实现由 keel-thirdparty 从上游源码编译后并进静态库）
   keel_platform.h                     线程 / 同步原语（不导出、不进 Kotlin）
   keel_queue.c / keel_event.c / keel_plugin.c / keel_console.c
 keel-router-ksp/src/main/…/gradle/router/KeelRouterProcessorProvider.kt   路由处理器（@Controller / @GET → KeelPluginRoutes）
@@ -625,6 +624,7 @@ keel-thirdparty-gradle-plugin/src/main/kotlin/moe/lolosia/keel/gradle/thirdparty
 keel-thirdparty/
   manifest.json                       库清单（moe.lolosia.keel.thirdparty）
   gradle/codecs.gradle.kts            源码下载/解压 + clang/cmake 交叉编译（6 个 codec，跨 OS）
+  gradle/{sqlite,mariadb,bcrypt,zstd}.gradle.kts   其余库的独立生成脚本（同样只下载、不 vendor 上游源码）
   <lib>/<lib>.def + licenses/<lib>/    随库分发的 def 与许可
   bcrypt/keel_bcrypt.{c,h}            bcrypt 的 C 适配层（上游 crypt_blowfish，跨目标统一 int 接口）
   build/dist/<lib>/<target>/           生成的 staging（gitignore）

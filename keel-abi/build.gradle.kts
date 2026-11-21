@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import org.gradle.api.publish.maven.MavenPublication
 
 /**
@@ -199,25 +200,135 @@ val objectTasks = compiledTargets.associateWith { target ->
     }
 }
 
+// ---------------------------------------------------------------------------
+// zstd 解压实现（keel-thirdparty）
+// ---------------------------------------------------------------------------
+
+/**
+ * zstd 解压库来自 `keel-thirdparty` 的上游源码构建：只编 `common/` 与 `decompress/`，
+ * 产物 `libzstd.a` 在这里解出目标文件后并入 `libkeel_abi.a`，消费方仍然只链一份静态库。
+ *
+ * 版本以 manifest 的 `version` + `revision` 为准；单独 clone（没有兄弟目录）时退回
+ * 同一坐标的已发布工件。
+ */
+val zstdVersion: String = run {
+    val fallback = "1.5.6-keel.1"
+    val manifest = file("../keel-thirdparty/manifest.json")
+    if (!manifest.isFile) return@run fallback
+    @Suppress("UNCHECKED_CAST")
+    val root = JsonSlurper().parse(manifest) as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST")
+    val spec = (root["libraries"] as? Map<String, Any?>)?.get("zstd") as? Map<String, Any?>
+    val version = spec?.get("version")?.toString().orEmpty()
+    val revision = (spec?.get("revision") as? Number)?.toInt() ?: 1
+    if (version.isBlank()) fallback else "$version-keel.$revision"
+}
+
+val thirdpartyProjectDir = layout.projectDirectory.dir("../keel-thirdparty").asFile
+
+/** 仓库内开发直接读 `keel-thirdparty/build/dist`；可用 `-Pkeel.thirdparty.dist=<dir>` 覆盖。 */
+val thirdpartyDist: File? =
+    (findProperty("keel.thirdparty.dist") as String?)?.let(::file)
+        ?: File(thirdpartyProjectDir, "build/dist").takeIf { thirdpartyProjectDir.isDirectory }
+
+private fun targetSuffix(target: String): String = target.replaceFirstChar { it.uppercaseChar() }
+
+val zstdConfigs = compiledTargets.associateWith { target ->
+    val name = "keelZstd${targetSuffix(target)}"
+    val configuration = configurations.create(name) {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        isTransitive = false
+        description = "zstd 解压静态库（$target）"
+    }
+    dependencies.add(name, "moe.lolosia.keel.thirdparty:zstd-$target:$zstdVersion@zip")
+    configuration
+}
+
+val zstdUnpackTasks = compiledTargets.associateWith { target ->
+    tasks.register("keelAbiZstdUnpack$target") {
+        group = "keel"
+        description = "解出 zstd 的 include/ 与 libzstd.a（$target）"
+        val output = layout.buildDirectory.dir("thirdparty/zstd/$target")
+        outputs.dir(output)
+        if (thirdpartyProjectDir.isDirectory) {
+            dependsOn(gradle.includedBuild("keel-thirdparty").task(":stageZstd${targetSuffix(target)}"))
+        }
+        doLast {
+            val out = output.get().asFile
+            out.deleteRecursively()
+            out.mkdirs()
+            if (thirdpartyDist != null) {
+                val source = File(thirdpartyDist, "zstd/$target")
+                check(source.isDirectory) {
+                    "keel.thirdparty.dist 里没有 zstd/$target：${source.absolutePath}"
+                }
+                copy { from(File(source, "lib")); into(File(out, "lib")) }
+            } else {
+                // 发布 zip 的布局是 lib/<target>/libzstd.a，规整成 lib/
+                val zip = zstdConfigs.getValue(target).singleFile
+                copy { from(zipTree(zip)); into(out) }
+                val nested = File(out, "lib/$target")
+                if (nested.isDirectory) {
+                    nested.listFiles().orEmpty().forEach { file ->
+                        file.renameTo(File(File(out, "lib"), file.name))
+                    }
+                    nested.deleteRecursively()
+                }
+            }
+        }
+    }
+}
+
+val zstdObjectTasks = compiledTargets.associateWith { target ->
+    tasks.register<Exec>("keelAbiZstdObjects$target") {
+        group = "keel"
+        description = "从 libzstd.a 解出目标文件，供归档并进 libkeel_abi.a（$target）"
+
+        val archive = layout.buildDirectory.file("thirdparty/zstd/$target/lib/libzstd.a")
+        val objDir = abiBuildDir.map { it.dir("$target/zstd-obj").asFile }
+        dependsOn(zstdUnpackTasks.getValue(target))
+        inputs.file(archive)
+        outputs.dir(objDir)
+        workingDir = objDir.get()
+        doFirst {
+            val out = objDir.get()
+            out.deleteRecursively()
+            out.mkdirs()
+        }
+        commandLine(toolchainFor(target).ar, "x", archive.get().asFile.absolutePath)
+    }
+}
+
 val archiveTasks = compiledTargets.associateWith { target ->
     tasks.register<Exec>("keelAbiArchive$target") {
         group = "keel"
         description = "把目标文件归档成 libkeel_abi.a（$target）"
 
-        dependsOn(objectTasks.getValue(target))
+        dependsOn(objectTasks.getValue(target), zstdObjectTasks.getValue(target))
         val toolchain = toolchainFor(target)
         val outDir = abiBuildDir.map { it.dir("$target").asFile }
-        val objects = cppDir.asFile.listFiles { file -> file.extension == "c" }
-            .orEmpty()
-            .map { "obj/${it.nameWithoutExtension}.o" }
+        val zstdObjDir = abiBuildDir.map { it.dir("$target/zstd-obj").asFile }
 
         outputs.file(outDir.map { File(it, "libkeel_abi.a") })
         // 没有输入声明时，改 .c 只会重编对象、归档保持旧文件
         inputs.dir(outDir.map { File(it, "obj") })
+        inputs.dir(zstdObjDir)
         workingDir = outDir.get()
 
-        doFirst { outDir.get().mkdirs() }
-        commandLine(listOf(toolchain.ar, "rcs", "libkeel_abi.a") + objects)
+        doFirst {
+            val out = outDir.get()
+            out.mkdirs()
+            // ar 只增不删：先删掉旧归档，否则删掉的成员会一直留在里面
+            File(out, "libkeel_abi.a").delete()
+            // 只归档当前源码对应的目标文件，避免删掉源码后残留的旧 .o 被一并打进去
+            val own = cppDir.asFile.listFiles { file -> file.extension == "c" }.orEmpty()
+                .map { File(File(out, "obj"), it.nameWithoutExtension + ".o") }
+            // zstd 的目标文件由 libzstd.a 解出（该目录每次执行前会清空）
+            val zstd = zstdObjDir.get().listFiles { file -> file.extension == "o" }.orEmpty().asList()
+            val objects = (own + zstd).sortedBy { it.name }
+            commandLine(listOf(toolchain.ar, "rcs", "libkeel_abi.a") + objects.map { it.absolutePath })
+        }
     }
 }
 
@@ -231,7 +342,7 @@ val keelAbiPackage by tasks.registering(Zip::class) {
         from(abiBuildDir.map { it.file("$target/libkeel_abi.a") }) { into("lib/$target") }
     }
     from(cppDir.file("keel_abi.h")) { into("include") }
-    // bundle 的 zstd 解压声明；实现（zstddeclib.c）已随静态库编入
+    // bundle 的 zstd 解压声明；实现（keel-thirdparty 编译的 libzstd.a）已并进静态库
     from(cppDir.file("keel_zstd.h")) { into("include") }
 }
 

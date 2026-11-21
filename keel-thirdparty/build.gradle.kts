@@ -61,14 +61,17 @@ apply(from = "gradle/sqlite.gradle.kts")
 apply(from = "gradle/mariadb.gradle.kts")
 // crypt_blowfish：bcrypt 口令哈希，单文件 C，三个目标交叉编译
 apply(from = "gradle/bcrypt.gradle.kts")
+// zstd：bundle 解压器（只编 common + decompress），静态并入 keel-abi
+apply(from = "gradle/zstd.gradle.kts")
 
 val compileAll = tasks.register("compileAll") {
     group = "build"
-    description = "从源码编译全部库（6 个 codec + sqlite + mariadb + bcrypt，按 manifest 的目标）"
+    description = "从源码编译全部库（6 个 codec + sqlite + mariadb + bcrypt + zstd，按 manifest 的目标）"
     dependsOn("compileCodecs")
     dependsOn("compileSqliteAll")
     dependsOn("compileMariadbAll")
     dependsOn("compileBcryptAll")
+    dependsOn("compileZstdAll")
 }
 
 // ---------------------------------------------------------------- 拆分到 dist
@@ -131,6 +134,9 @@ tasks.matching { it.name.startsWith("stageMariadb") }.configureEach {
 }
 tasks.matching { it.name.startsWith("stageBcrypt") }.configureEach {
     dependsOn(tasks.matching { it.name.startsWith("compileBcrypt") })
+}
+tasks.matching { it.name.startsWith("stageZstd") }.configureEach {
+    dependsOn(tasks.matching { it.name.startsWith("compileZstd") })
 }
 
 // 所有 stage 任务都读 out/include 与 out/<target>；MariaDB 也写这两个目录的

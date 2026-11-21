@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /*
- * zstd 解压入口（实现见 zstddeclib.c，随 keel-abi 静态库一起链接）。
+ * zstd 解压入口（实现由 keel-thirdparty 从上游源码编译，随 keel-abi 静态库一起链接）。
  *
  * 只暴露内嵌 bundle 解包需要的最小面；Kotlin 侧由 keelabi 的 cinterop 生成到
  * `moe.lolosia.keel.abi.c`。压缩只在构建期做（Gradle 插件用 zstd-jni），
