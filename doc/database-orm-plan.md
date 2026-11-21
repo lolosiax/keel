@@ -21,8 +21,15 @@
 > `Context.database` / `Context.transaction` / `Context.execute` / `Context.query(sql)` 扩展已加，
 > `requireDatabase()` 在缺包 / 未配置 / open 失败时抛 status = -2 的 `DatabaseException`；
 > `Row` 补齐 `longOrNull` / `doubleOrNull` / `booleanOrNull`（布尔兼容 SQLite 的 INT）。
+> `keel-orm` 运行时已落地：`@Table` / `@Id` / `@Generated` / `@Column` / `@Transient`、
+> `EntityMeta` + `EntityMetas` 注册表、`SqlDialect`（`sqlite` / `mariadb`）、
+> `OrmType` / `OrmTypes`（Text / Int / Real / Bool / Blob / Instant(毫秒) / Decimal / Json / 枚举）、
+> `QueryScope` 的 `where` / `and` / `or` / `eq` / `ne` / `gt` / `ge` / `lt` / `le` /
+> `isNull` / `isIn` / `between` / `like` / `contains` / `orderBy` / `limit` / `offset`，
+> 以及 `findList` / `findFirst` / `findCount` / `findPage`、`insert` / `update` / `delete` /
+> `lastInsertId`。
 > ABI v2（`options` / `last_insert_id` / DECIMAL·TIMESTAMP·JSON·UUID）、
-> MariaDB 真实驱动与 ORM 仍未做。
+> MariaDB 真实驱动、`keel-orm-ksp` 与 Gradle 接线仍未做。
 
 ---
 
@@ -469,8 +476,10 @@ inline fun Database.query(block: QSysUser.() -> Unit): Query<SysUser> =
   列本身只是这些字段的初始值，真正的状态在 `QueryScope` / `QueryRoot` 里。
 - 泛型入口之所以能「不用 new」，是因为把状态搬进了 per-query 的 `QueryScope`，
   `QueryScope<T>.列名` 只是按列名取值的无状态访问器。
-- 两种重载不冲突：`T` 无法从 lambda 体推断，`db.query { … }` 只命中 Q 入口；
-  写 `db.query<SysUser> { … }` 才会命中泛型入口。
+- **落地差异（2026-11-21）**：`QSysUser` 实例入口已取消。多个实体时
+  `db.query { ... }` 的 lambda 接收者无法从参数推断，会产生重载歧义；
+  只保留泛型入口 `db.query<SysUser> { ... }` + 生成的 `QueryScope<SysUser>.列`
+  扩展属性。列的声明仍是受控值（`Col<T>` 携带 `OrmType`），不接受字符串列名。
 
 事务：
 
