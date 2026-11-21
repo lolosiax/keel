@@ -32,8 +32,10 @@
 > idOf）、`<Entity>Columns`（`QueryScope<T>.列`）、`OrmMetaBootstrap`（方言 + 实体登记，
 > 固定包 `moe.lolosia.keel.orm.generated`）；支持 superclass 链字段收集、camel→snake、
 > `@Column(name)`、`@Generated` 主键，未知类型直接报错。
-> 多 native 目标下 `nativeMain` 参与 metadata 编译，因此生成物默认直接写进
-> `src/nativeMain/kotlin`（`keel.orm.dir`，V1 提交制，需随源码提交）。
+> 多 native 目标下 `nativeMain` 参与 metadata 编译，而 KSP2 只输出到各目标编译目录、
+> 也不支持 commonMain / intermediate 源集。因此由 Gradle 插件参与：ORM KSP 只挂到一个
+> native 目标，生成到 `build/generated/keel/orm`，插件把该目录挂进 `nativeMain` 源码集
+> 并让 metadata / 各目标编译依赖那个 KSP 任务；**生成物不进 `src/`、不被 git 追踪**。
 > `moe.lolosia.keel.database` 已落地：`keel { database { dialect = "sqlite" } }`，
 > 自动挂 `keel-orm-ksp`、加 `keel-orm` / `keel-database-api`、下发
 > `keel.orm.dialect` / `keel.orm.dir` / `keel.orm.enabled`；
@@ -1057,10 +1059,11 @@ keel 统一 `MutableList` + 默认空列表；排序用显式 order 列 + `order
 11. **跨模块实体限制**
     - `EntityMetas` 只聚合当前 KSP 模块的实体；跨模块共享实体需要在声明方生成 meta / serializer，
       消费方通过 api 工件获得。
-    - **已定（2026-11-21）**：实体与查询代码放 `nativeMain`。多 native 目标下 `nativeMain`
-      参与 metadata 编译，而 KSP 只输出到各目标的编译目录；因此 ORM 生成物直接写进
-      `src/nativeMain/kotlin`（`keel.orm.dir`，V1 提交制）并随源码提交，
-      与 `api/` 生成物的约定一致。跨模块实体仍按「声明方生成」处理，D2 再展开。
+    - **已定（2026-11-21）**：实体与查询代码放 `nativeMain`。KSP2 不处理 commonMain /
+      intermediate 源集，而 `nativeMain` 参与 metadata 编译；因此 `keel-database-gradle-plugin`
+      只在一个 native 目标上跑 ORM KSP，生成到 `build/generated/keel/orm`，再把该目录
+      挂进 `nativeMain` 源码集并接好任务依赖。生成物不提交、不污染 `src/`。
+      跨模块实体仍按「声明方生成」处理，D2 再展开。
 12. **测试**
     - C 级 conformance（SQLite / MariaDB 各一套）；
     - ORM 最小测试插件（实体 + 查询 + 分页 + 事务），不依赖 basic-biz 迁移。

@@ -350,7 +350,8 @@ keel-plugin-<id>/
   `keel { database { dialect = "sqlite" } }`（不按 `requires` 自动 apply）。
   实体用 `@Table` / `@Id` / `@Column` 写在 `nativeMain`，
   `keel-orm-ksp` 生成 `<Entity>Meta` / `QueryScope<T>.列` / `OrmMetaBootstrap`，
-  生成物默认写进 `src/nativeMain/kotlin`（`keel.orm.dir`，V1 提交制，必须随源码提交）。
+  生成物写到 `build/generated/keel/orm`（`keel { database { outputDir } }` 可改），
+  由插件挂进 `nativeMain` 源码集并接好 KSP 任务依赖；**不进 `src/`、不被 git 追踪**。
   Worker 入口在 `keel.orm.enabled=true` 时自动调用 `OrmMetaBootstrap.install()`。
   查询用 `db.query<T> { where { ... }; orderBy(...); limit(n).offset(m) }.findPage()`，
   写用 `insert` / `update` / `delete` 与 `lastInsertId()`；DDL 仍走版本化 SQL，不交给 ORM。

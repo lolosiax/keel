@@ -18,10 +18,9 @@ open class KeelDatabaseExtension {
     /**
      * ORM 生成物落点；相对工程目录。
      *
-     * 多 native 目标下 `nativeMain` 会参与 metadata 编译，而 KSP 只把生成物放进
-     * 各目标的编译输出；所以默认写进共享源码目录（V1 提交制），生成物需要提交。
+     * 默认在 `build/` 下，由插件挂进 `nativeMain` 源码集，不进 `src/`、不被 git 追踪。
      */
-    var outputDir: String = "src/nativeMain/kotlin"
+    var outputDir: String = "build/generated/keel/orm"
 
     /** 自动添加的工件版本；默认取 project.version。 */
     var keelVersion: String? = null

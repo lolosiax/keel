@@ -134,6 +134,12 @@ impl 源码
 
 V1 先跑通，再把落点切到 V2；两者使用同一个生成器，切换只是改输出目录与 sourceSet 挂载。
 
+> **2026-11-21 决定**：生成代码不应随 git 提交，也不应写进用户源码树；V1 提交制
+> 只是过渡。后续把 api 生成也切到 V2，做法与 `keel-database-gradle-plugin` 现在的
+> ORM 接线一致：生成到 `build/` 下的固定目录，由插件挂进对应 sourceSet，并让编译任务
+> 依赖生成任务（KSP2 不支持 commonMain / intermediate 源集，必须由 Gradle 参与排序）。
+> 切换后 `keelApiCheck` 退役，改为 CI 直接构建校验。
+
 ### 4.3 生成物清单
 
 **impl 侧（`KeelPluginPublicApi`）**

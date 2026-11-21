@@ -31,15 +31,15 @@ private const val BOOTSTRAP_PACKAGE = "moe.lolosia.keel.orm.generated"
 private const val DIALECT_OPTION = "keel.orm.dialect"
 
 /**
- * 生成物落点；存在时直接写进源码目录（V1 提交制），而不是 KSP 输出目录。
+ * 生成物落点；存在时直接写进该目录，而不是 KSP 输出目录。
  *
- * 多 native 目标下，`nativeMain` 会参与 metadata 编译，而 KSP 只把生成物放进
- * 各目标的编译输出；只有写进 `src/nativeMain/kotlin`（或同等共享源集）才能被
- * 元数据编译与所有目标同时看到。`moe.lolosia.keel.database` 默认就会传这个参数。
+ * `moe.lolosia.keel.database` 会把它设成 `build/generated/keel/orm` 并挂进
+ * `nativeMain` 源码集：KSP2 不处理 commonMain / intermediate 源集，而 `nativeMain`
+ * 参与 metadata 编译，所以生成物必须落在能被共享源集直接看到、又不在 `src/` 里的目录。
  */
 private const val ORM_DIR_OPTION = "keel.orm.dir"
 
-/** 生成物首行；写进源码目录时用它区分「生成文件」与用户手写文件。 */
+/** 生成物首行；写进普通目录时用它区分「生成文件」与用户手写文件。 */
 private const val HEADER = "// 由 keel-orm-ksp 生成，不要手改。"
 
 /**
@@ -272,7 +272,7 @@ private class KeelOrmProcessor(
     }
 
     /**
-     * V1 提交制：直接写进共享源码目录。
+     * 直接写进 Gradle 指定的生成目录（默认 `build/generated/keel/orm`）。
      *
      * 已存在但不是生成物时不动它，避免覆盖用户手写的同名文件。
      */
