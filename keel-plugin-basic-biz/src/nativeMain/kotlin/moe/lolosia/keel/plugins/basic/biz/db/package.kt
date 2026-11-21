@@ -2,6 +2,7 @@ package moe.lolosia.keel.plugins.basic.biz.db
 
 import moe.lolosia.keel.api.web.ApiException
 import moe.lolosia.keel.database.*
+import moe.lolosia.keel.plugins.basic.biz.*
 
 /**
  * 取当前插件的数据库；没有安装 database 能力包时按 503 处理。
@@ -48,3 +49,16 @@ internal fun Row.boolOrNull(index: Int): Boolean? = when (val value = this[index
 
 /** `is_use` 这类接口上的 `1` / `0`。 */
 internal fun Row.flagOrNull(index: Int): Int? = boolOrNull(index)?.let { if (it) 1 else 0 }
+
+/**
+ * 时间列的原始值：MariaDB 驱动把 `timestamp` 读成 [DbValue.Timestamp]（epoch 微秒），
+ * SQLite 给文本。这里统一成 UTC 墙钟文本，交给 [displayTime] 做展示时区转换。
+ */
+internal fun Row.dbTimeText(index: Int): String? =
+    timestampOrNull(index)?.let { epochMsToDbText(it / 1000) } ?: text(index)
+
+/**
+ * 时间列的展示值：UTC 的 epoch 微秒 / UTC 文本统一转成东八区的 `yyyy-MM-dd HH:mm:ss`。
+ */
+internal fun Row.displayTime(index: Int): String? =
+    timestampOrNull(index)?.let { epochMsToDisplay(it / 1000) } ?: displayTime(text(index))

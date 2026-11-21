@@ -2,6 +2,8 @@ package moe.lolosia.keel.plugins.rbac.db
 
 import moe.lolosia.keel.api.web.ApiException
 import moe.lolosia.keel.database.*
+import moe.lolosia.keel.plugins.rbac.displayTime
+import moe.lolosia.keel.plugins.rbac.epochMsToDisplay
 
 /**
  * 取当前插件的数据库；没有安装 database 能力包时按 503 处理。
@@ -45,3 +47,10 @@ internal fun Row.boolOrNull(index: Int): Boolean? = when (val value = this[index
     is DbValue.Integer -> value.value != 0L
     else -> null
 }
+
+/**
+ * 时间列的统一读法：MariaDB 驱动把 `timestamp` 读成 [DbValue.Timestamp]（epoch 微秒），
+ * SQLite 给文本；两者都转成 `yyyy-MM-dd HH:mm:ss`（东八区）。
+ */
+internal fun Row.displayTime(index: Int): String? =
+    timestampOrNull(index)?.let { epochMsToDisplay(it / 1000) } ?: displayTime(text(index))

@@ -5,7 +5,7 @@ import moe.lolosia.keel.database.DbValue
 import moe.lolosia.keel.plugins.basic.biz.api.dto.*
 import moe.lolosia.keel.plugins.basic.biz.crypto.BCrypt
 import moe.lolosia.keel.plugins.basic.biz.newIdentifier
-import moe.lolosia.keel.plugins.basic.biz.nowDisplay
+import moe.lolosia.keel.plugins.basic.biz.nowDb
 import moe.lolosia.keel.plugins.basic.biz.ROLE_ID_USER
 import moe.lolosia.keel.plugins.basic.biz.ROLE_TYPE_USER
 
@@ -89,7 +89,7 @@ internal object UserRepository {
 
         val id = newIdentifier()
         val password = req.password?.takeIf { it.isNotEmpty() }?.let { BCrypt.hashpw(it, BCrypt.gensalt()) }
-        val now = nowDisplay()
+        val now = nowDb()
 
         execute(
             "INSERT INTO sys_user (id, user_name, password, real_name, phone, email, is_use, " +
@@ -133,7 +133,7 @@ internal object UserRepository {
                 textParam(req.phone ?: existing.phone),
                 textParam(req.email ?: existing.email),
                 intParam(req.isUse ?: existing.isUse ?: 1),
-                textParam(nowDisplay()),
+                textParam(nowDb()),
                 textParam(operatorId),
                 textParam(req.id),
             ),
@@ -144,7 +144,7 @@ internal object UserRepository {
 
     /** 软删用户与其组绑定；会话由 [AccountRepository] 一并吊销。 */
     fun softDelete(ids: List<String>, operatorId: String?) {
-        val now = nowDisplay()
+        val now = nowDb()
         ids.forEach { id ->
             execute(
                 "UPDATE sys_user SET deleted = 1, updated_at = ?, updated_by = ? WHERE id = ?",
@@ -167,12 +167,12 @@ internal object UserRepository {
         if (target.isEmpty()) throw ApiException(400, "新密码不能为空")
         execute(
             "UPDATE sys_user SET password = ?, updated_at = ? WHERE id = ? AND deleted = 0",
-            listOf(textParam(BCrypt.hashpw(target, BCrypt.gensalt())), textParam(nowDisplay()), textParam(userId)),
+            listOf(textParam(BCrypt.hashpw(target, BCrypt.gensalt())), textParam(nowDb()), textParam(userId)),
         )
     }
 
     fun bindRole(userId: String, roleId: Long, operatorId: String?) {
-        val now = nowDisplay()
+        val now = nowDb()
         execute(
             "UPDATE sys_user_roles SET deleted = 1, updated_at = ?, updated_by = ? " +
                 "WHERE user_id = ? AND deleted = 0",
@@ -229,13 +229,13 @@ internal object UserRepository {
     fun updateAvatar(userId: String, fileName: String, operatorId: String?) {
         execute(
             "UPDATE sys_user SET avatar = ?, updated_at = ?, updated_by = ? WHERE id = ? AND deleted = 0",
-            listOf(textParam(fileName), textParam(nowDisplay()), textParam(operatorId), textParam(userId)),
+            listOf(textParam(fileName), textParam(nowDb()), textParam(operatorId), textParam(userId)),
         )
     }
 
     private fun keywordClause(keyword: String?): Pair<String, List<DbValue>> {
         val value = keyword?.trim().orEmpty()
-        if (value.isEmpty()) return "" to emptyList()
+        if (value.isEmpty()) return "WHERE u.deleted = 0" to emptyList()
         val like = "%$value%"
         return "WHERE u.deleted = 0 AND (u.user_name LIKE ? OR u.real_name LIKE ? OR " +
             "u.phone LIKE ? OR u.email LIKE ? OR r.role_name LIKE ?)" to
@@ -251,8 +251,8 @@ internal object UserRepository {
         email = text(4),
         avatar = text(5),
         isUse = flagOrNull(6) ?: intOrNull(6),
-        createdAt = displayTime(text(7)),
-        updatedAt = displayTime(text(8)),
+        createdAt = displayTime(7),
+        updatedAt = displayTime(8),
         roleId = longOrNull(9),
         roleName = text(10),
         type = text(11),

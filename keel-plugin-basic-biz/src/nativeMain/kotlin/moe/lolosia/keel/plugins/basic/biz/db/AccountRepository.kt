@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import moe.lolosia.keel.plugins.basic.biz.newIdentifier
-import moe.lolosia.keel.plugins.basic.biz.nowDisplay
+import moe.lolosia.keel.plugins.basic.biz.nowDb
 import moe.lolosia.keel.plugins.basic.biz.nowEpochMs
 
 /**
@@ -21,7 +21,7 @@ internal object AccountRepository {
 
     fun create(userId: String, ttlSeconds: Long): String {
         val token = newIdentifier()
-        val now = nowDisplay()
+        val now = nowDb()
         val data = json.encodeToString(
             SessionData.serializer(),
             SessionData(nowEpochMs() + ttlSeconds.coerceAtLeast(60L) * 1000L),
@@ -55,14 +55,14 @@ internal object AccountRepository {
     fun revoke(token: String) {
         execute(
             "UPDATE sys_sessions SET deleted = 1, updated_at = ? WHERE id = ? AND deleted = 0",
-            listOf(textParam(nowDisplay()), textParam(token)),
+            listOf(textParam(nowDb()), textParam(token)),
         )
     }
 
     fun revokeByUser(userId: String) {
         execute(
             "UPDATE sys_sessions SET deleted = 1, updated_at = ? WHERE user_id = ? AND deleted = 0",
-            listOf(textParam(nowDisplay()), textParam(userId)),
+            listOf(textParam(nowDb()), textParam(userId)),
         )
     }
 

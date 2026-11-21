@@ -2,7 +2,7 @@ package moe.lolosia.keel.plugins.basic.biz.db
 
 import moe.lolosia.keel.database.Row
 import moe.lolosia.keel.plugins.basic.biz.api.dto.UserRow
-import moe.lolosia.keel.plugins.basic.biz.epochMsToDisplay
+import moe.lolosia.keel.plugins.basic.biz.displayTime
 
 /**
  * `sys_user` 的完整一行（含密码哈希）。
@@ -35,19 +35,12 @@ internal fun Row.toUserRecord(): UserRecord = UserRecord(
     email = text(5),
     avatar = text(6),
     isUse = flagOrNull(7) ?: intOrNull(7),
-    createdAt = text(8),
+    createdAt = dbTimeText(8),
     createdBy = text(9),
-    updatedAt = text(10),
+    updatedAt = dbTimeText(10),
     updatedBy = text(11),
     deleted = boolOrNull(12) ?: false,
 )
-
-/** epoch 毫秒 → 展示时间；库里已经是字符串时原样返回。 */
-internal fun displayTime(raw: String?): String? {
-    if (raw.isNullOrBlank()) return null
-    val epoch = raw.toLongOrNull() ?: return raw
-    return epochMsToDisplay(epoch)
-}
 
 internal fun UserRecord.toRow(): UserRow = UserRow(
     id = id,

@@ -7,7 +7,7 @@ import moe.lolosia.keel.plugins.rbac.DefaultGroups
 import moe.lolosia.keel.plugins.rbac.api.*
 import moe.lolosia.keel.plugins.rbac.api.dto.*
 import moe.lolosia.keel.plugins.rbac.displayTime
-import moe.lolosia.keel.plugins.rbac.nowDisplay
+import moe.lolosia.keel.plugins.rbac.nowDb
 
 /**
  * 组、组规则、用户直授规则的仓库（手写 SQL）。
@@ -118,7 +118,7 @@ internal object RbacRepository {
             ?: throw ApiException(400, "组名不能为空")
         val type = req.type?.trim()?.takeIf { it.isNotEmpty() }
             ?: throw ApiException(400, "组类型（type）不能为空")
-        val now = nowDisplay()
+        val now = nowDb()
         execute(
             "INSERT INTO sys_role (role_name, type, parent_id, created_at, created_by, updated_at, updated_by, deleted) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
@@ -156,7 +156,7 @@ internal object RbacRepository {
             params += longParam(it)
         }
         sets += "updated_at = ?"
-        params += textParam(nowDisplay())
+        params += textParam(nowDb())
         sets += "updated_by = ?"
         params += textParam(operatorId)
         execute(
@@ -175,7 +175,7 @@ internal object RbacRepository {
         if (bindings > 0) throw ApiException(400, "组仍绑定着 $bindings 个用户，不能删除")
         execute(
             "UPDATE sys_role SET deleted = 1, updated_at = ?, updated_by = ? WHERE id = ? AND deleted = 0",
-            listOf(textParam(nowDisplay()), textParam(operatorId), longParam(id)),
+            listOf(textParam(nowDb()), textParam(operatorId), longParam(id)),
         )
     }
 
@@ -184,7 +184,7 @@ internal object RbacRepository {
         roleById(roleId) ?: throw ApiException(400, "组不存在：$roleId")
         val canonical = canonicalRules(rules)
         database().transaction { tx ->
-            val now = nowDisplay()
+            val now = nowDb()
             tx.exec(
                 "UPDATE sys_role_permission SET deleted = 1, updated_at = ?, updated_by = ? " +
                     "WHERE role_id = ? AND deleted = 0",
@@ -212,7 +212,7 @@ internal object RbacRepository {
         if (userId.isBlank()) throw ApiException(400, "userId 不能为空")
         val canonical = canonicalRules(rules)
         database().transaction { tx ->
-            val now = nowDisplay()
+            val now = nowDb()
             tx.exec(
                 "UPDATE sys_user_permission SET deleted = 1, updated_at = ?, updated_by = ? " +
                     "WHERE user_id = ? AND deleted = 0",
@@ -245,7 +245,7 @@ internal object RbacRepository {
         ) { it.longOrNull(0) }
         if (current != null) return
 
-        val now = nowDisplay()
+        val now = nowDb()
         database().transaction { tx ->
             tx.exec(
                 "UPDATE sys_user_roles SET deleted = 1, updated_at = ?, updated_by = ? " +
@@ -271,7 +271,7 @@ internal object RbacRepository {
         execute(
             "UPDATE sys_user_roles SET deleted = 1, updated_at = ?, updated_by = ? " +
                 "WHERE user_id = ? AND deleted = 0",
-            listOf(textParam(nowDisplay()), textParam(operatorId), textParam(userId)),
+            listOf(textParam(nowDb()), textParam(operatorId), textParam(userId)),
         )
     }
 
@@ -305,9 +305,9 @@ internal object RbacRepository {
         roleName = text(1),
         type = text(2),
         parentId = longOrNull(3),
-        createdAt = displayTime(text(4)),
+        createdAt = displayTime(4),
         createdBy = text(5),
-        updatedAt = displayTime(text(6)),
+        updatedAt = displayTime(6),
         updatedBy = text(7),
         deleted = boolOrNull(8) ?: false,
     )
