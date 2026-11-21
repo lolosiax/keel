@@ -4,6 +4,8 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.ListProperty
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.Optional
@@ -40,6 +42,11 @@ abstract class KeelThirdpartyPublishTask : DefaultTask() {
     @get:Internal
     abstract val projectDir: DirectoryProperty
 
+    /** 只发布这些库（逗号分隔的 manifest 键）；为空表示全部。 */
+    @get:Input
+    @get:Optional
+    abstract val libraries: ListProperty<String>
+
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
@@ -51,14 +58,21 @@ abstract class KeelThirdpartyPublishTask : DefaultTask() {
         if (document.libraries.isEmpty()) {
             throw GradleException("manifest 里没有库，没有可发布的工件：$file")
         }
+        val selected = libraries.getOrElse(emptyList())
+        val targets = document.libraries.filterKeys { selected.isEmpty() || it in selected }
+        if (targets.isEmpty()) {
+            throw GradleException("keel.thirdparty.libs=${selected.joinToString()} 没有匹配的库：$file")
+        }
 
         val sourceRoot = file.parentFile
         val from = publishFrom.get().asFile
         val project = projectDir.get().asFile
         val output = outputDirectory.get().asFile
         val problems = mutableListOf<String>()
+        // 通知 / SBOM 只列本次发布的库，避免写进未发布的依赖
+        val published = document.copy(libraries = targets)
 
-        document.libraries.values.sortedBy { it.name }.forEach { library ->
+        targets.values.sortedBy { it.name }.forEach { library ->
             library.libs.keys.sorted().forEach { target ->
                 val staging = File(from, "${library.name}/$target")
                 val includeDir = File(staging, "include")
@@ -87,7 +101,7 @@ abstract class KeelThirdpartyPublishTask : DefaultTask() {
                     target = target,
                     defSource = defSource,
                     library = library,
-                    document = document,
+                    document = published,
                     sourceRoot = sourceRoot,
                     projectDir = project,
                 )

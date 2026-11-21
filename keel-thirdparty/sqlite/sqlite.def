@@ -1,0 +1,3 @@
+# SQLite 以 native 模式消费（include/ + libsqlite3.a），不生成 cinterop。
+# 保留本文件是为了满足第三方发布工件的统一定义（def/<lib>.def）。
+headers = sqlite3.h

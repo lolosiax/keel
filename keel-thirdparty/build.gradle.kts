@@ -55,11 +55,14 @@ fun artifactVersion(spec: Map<String, Any?>): String {
 // 下载 manifest 里的源码包 → 解压 → 用 Kotlin/Native 自带的 clang + 三个 sysroot 交叉编译，
 // 产物落在 build/thirdparty/out/<target>/*.a 与 out/include。
 apply(from = "gradle/codecs.gradle.kts")
+// SQLite amalgamation：源码是 zip、无 CMake，单独一份脚本，产物布局与 codec 一致
+apply(from = "gradle/sqlite.gradle.kts")
 
 val compileAll = tasks.register("compileAll") {
     group = "build"
-    description = "从源码编译全部库（6 个 codec × 3 个目标）"
+    description = "从源码编译全部库（6 个 codec + sqlite，按 manifest 的目标）"
     dependsOn("compileCodecs")
+    dependsOn("compileSqliteAll")
 }
 
 // ---------------------------------------------------------------- 拆分到 dist
@@ -110,6 +113,12 @@ val stageAll = tasks.register("stageAll") {
     group = "thirdparty"
     description = "把 build/thirdparty/out 拆成每个库 × 目标的 dist 目录"
     dependsOn(stageTasks)
+}
+
+// 消费侧（驱动构建）直接依赖 stage 任务时，也应当自动编出 sqlite；
+// codec 的 stage 仍只吃已经编译好的 out/，不在这里触发 CMake。
+tasks.matching { it.name.startsWith("stageSqlite") }.configureEach {
+    dependsOn(tasks.matching { it.name.startsWith("compileSqlite") })
 }
 
 // keelThirdpartyPublish 在 afterEvaluate 注册，这里按名字补依赖与输入来源

@@ -31,7 +31,7 @@
 | `keel-gradle-common/` | `keel-gradle-common` | 所有工具链插件共用的 `keel { }` 根容器（只按类型注册 section，不单独 apply） | 是 |
 | `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入 + Windows 版本资源插件 `moe.lolosia.keel.classpath` | 是 |
 | `keel-thirdparty-gradle-plugin/` | `keel-thirdparty-gradle-plugin` | 第三方原生库插件的消费接线与许可门禁 `moe.lolosia.keel.thirdparty` | 是 |
-| `keel-thirdparty/` | `keel-thirdparty` | 第三方原生库的生成侧（manifest / `.def` / licenses / 源码编译 / dist / 发布）；默认不进 `buildAll` | 否 |
+| `keel-thirdparty/` | `keel-thirdparty` | 第三方原生库的生成侧（manifest / `.def` / licenses / 源码编译 / dist / 发布）；本身不进 `buildAll`，但 `keel-database-sqlite` 会通过 composite 按需拉起 sqlite 的编译与 staging | 否 |
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin`；单 exe 产出 `moe.lolosia.keel.bundle`（由前者自动 apply） | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
@@ -45,6 +45,7 @@
 | `keel-api/` | `keel-api` | 插件契约：生命周期、上下文、消息、调度（`moe.lolosia.keel.api`） | 是 |
 | `keel-database-api/` | `keel-database-api` | 数据库能力 ABI + 插件侧 Kotlin 门面（不含驱动、不含加载器） | 是 |
 | `keel-database-mariadb/` | `keel-database-mariadb` | `kind: capability` 的 MariaDB 驱动包（纯 C，打成 `.keel`） | 是（`.keel`） |
+| `keel-database-sqlite/` | `keel-database-sqlite` | `kind: capability` 的 SQLite 驱动包（纯 C + 静态 amalgamation，打成 `.keel`） | 是（`.keel`） |
 | `keel-plugin-basic-rbac/` | `keel-plugin-basic-rbac` + `api/`（坐标 `keel-plugin-rbac-api`） | rbac 默认实现（`provides: ["authz"]`）与契约；坐标是中性的，第三方实现可原位替代 | 是 |
 | `keel-plugin-basic-biz/` | `keel-plugin-basic-biz` + `api/`（坐标 `keel-plugin-basic-biz-api`） | 用户 / 账户 / 设置插件；契约与 DTO 在 impl，api 由 KSP 生成 | 是 |
 | `keel-host/` | `keel-host` | 主进程：插件加载、生命周期、Ktor 引擎、上下文注入 | 是（作为库） |
@@ -114,9 +115,13 @@ gradlew -p keel-router-ksp publish
 gradlew -p keel-plugin-ksp publish
 
 # 第三方原生库：生成侧单独构建（不进 buildAll）
-gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（跨 OS，逻辑在 gradle/codecs.gradle.kts）
+gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（codecs.gradle.kts + sqlite.gradle.kts）
 gradlew -p keel-thirdparty stageAll         # 把 out/ 拆成 dist/<lib>/<target>
 gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
+# 只发布某个库（驱动构建常用）：-Pkeel.thirdparty.libs=sqlite
+gradlew -p keel-thirdparty publishTpSqliteMingwX64PublicationToMavenLocal "-Pkeel.thirdparty.libs=sqlite"
+# keel-database-sqlite 在仓库内会通过 composite 自动触发 sqlite 的编译与 staging，
+# 单独 clone 该目录时才需要上面这条发布命令（或 -Pkeel.thirdparty.dist=<keel-thirdparty>/build/dist）。
 # 编译侧 Windows / Linux 共用同一份 Kotlin 实现（无 shell / Python 依赖），
 # 也可用 -Pkeel.thirdparty.out=<已在别处编译好的 out 目录> 复用产物。
 ```
@@ -420,7 +425,7 @@ keel.password=<password>
 - 自建 Maven 通常是内网 HTTP 或自签 HTTPS，仓库配置需 `isAllowInsecureProtocol = true`（各 `keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` 的 `build.gradle.kts` 与各构建的 `settings.gradle.kts` 已处理）。
 - **凭据、内网地址、口令一律不入库**，包括本文档与 `doc/`；用占位符。
 - 构建期工具各自在自己的 `build.gradle.kts` 里配置发布仓库，没有统一入口；功能插件用 `moe.lolosia.keel.publish` 插件，不要在业务构建里手写 `publishing {}`。
-- 发布顺序：`keel-gradle-common` → `keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` → `keel-abi` → `keel-classpath` → `keel-api` → `keel-classpath-full` → `keel-host` → `keel-plugin-*` → `keel-launcher`。改了 `keel-api` 必须确认消费方重新编译。
+- 发布顺序：`keel-gradle-common` → `keel-*-gradle-plugin` / `keel-router-ksp` / `keel-plugin-ksp` → `keel-abi` → `keel-classpath` → `keel-api` → `keel-classpath-full` → `keel-host` → `keel-plugin-*` → `keel-launcher`；`keel-thirdparty`（sqlite 等原生库）必须先于 `keel-database-*` 驱动发布。改了 `keel-api` 必须确认消费方重新编译。
 
 ## 8. Monorepo 与 Sparse Checkout
 
@@ -500,6 +505,7 @@ keel-classpath-full/src/nativeMain/…/classpath/full/DefaultClasspathRegistry.k
 keel-database-api/src/nativeCpp/keel_database.h     数据库能力 C ABI（唯一布局来源）
 keel-database-api/src/nativeMain/…/database/        KeelDatabase / Row / QueryResult / DbValue / currentDatabase()
 keel-database-mariadb/src/nativeCpp/keel_database_mariadb.c   纯 C 能力包（当前后端仅 select 1）
+keel-database-sqlite/src/nativeCpp/keel_database_sqlite.c     纯 C 能力包（sqlite3 amalgamation 静态并入）
 keel-plugin-basic-rbac/src/commonMain/…/rbac/api/  RbacReader / RbacAdmin + DTO + ROLE_ID_*（api/ 由 KSP 生成，坐标 keel-plugin-rbac-api）
 keel-plugin-basic-biz/src/commonMain/…/basic/biz/api/  UserDirectory / UserAdmin / AccountAdmin / SettingApi + DTO（@PublicApi）
 keel-plugin-basic-biz/api/src/commonMain/…/basic/biz/api/  由 KSP 生成（V1 提交制，勿手改）

@@ -47,5 +47,6 @@ includeBuild("keel-plugin-console")
 includeBuild("keel-plugin-basic-biz")
 includeBuild("keel-plugin-basic-rbac")
 includeBuild("keel-database-mariadb")
+includeBuild("keel-database-sqlite")
 // IDEA 插件依赖 IntelliJ 平台，默认不参与 buildAll（见根 build.gradle.kts）
 includeBuild("keel-idea-plugin")

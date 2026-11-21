@@ -5,6 +5,8 @@
 tasks.register("buildAll") {
     group = "build"
     description = "构建仓库内所有独立 Gradle 构建（IDEA 插件除外）"
+    // keel-database-sqlite 通过 composite 把 keel-thirdparty 的 sqlite stage 接进任务图，
+    // 单独构建时也会自动编译 amalgamation；codec 生成侧仍不进 buildAll（需要 CMake）。
     dependsOn(
         gradle.includedBuilds
             .filter { it.name != "keel-idea-plugin" }
@@ -37,6 +39,7 @@ val publishableBuilds = listOf(
     "keel-launcher",
     "keel-database-api",
     "keel-database-mariadb",
+    "keel-database-sqlite",
 )
 
 /**

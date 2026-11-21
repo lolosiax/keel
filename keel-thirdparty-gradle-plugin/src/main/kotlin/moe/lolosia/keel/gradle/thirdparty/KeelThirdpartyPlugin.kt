@@ -187,6 +187,14 @@ class KeelThirdpartyPlugin : Plugin<Project> {
             task.publishFrom.set(project.file(extension.publishFrom))
             task.projectDir.set(project.layout.projectDirectory)
             task.outputDirectory.set(project.layout.buildDirectory.dir("thirdparty/repo"))
+            // 单独发布某个库：-Pkeel.thirdparty.libs=sqlite
+            task.libraries.set(
+                project.providers.gradleProperty("keel.thirdparty.libs")
+                    .map { value ->
+                        value.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                    }
+                    .orElse(emptyList())
+            )
         }
 
         project.plugins.withId("base") {

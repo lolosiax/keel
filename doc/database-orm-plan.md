@@ -10,6 +10,16 @@
 > 以及 `Context` 扩展（不另造 `DbContext`）。
 >
 > 与代码冲突时以代码为准，并回头修本文。
+>
+> **落地进度（2026-11-21）**：SQLite 驱动已按 ABI v1 落地——
+> `keel-thirdparty` 新增 `sqlite`（amalgamation 3.46.1，三目标静态库；
+> `-Pkeel.thirdparty.libs=sqlite` 可只发布该库）；新模块 `keel-database-sqlite`
+> （纯 C，静态并入 amalgamation，`.keel` 只带一个动态库；仓库内构建通过 composite
+> 自动触发 sqlite 的编译与 staging，单独 clone 该目录时退回 Maven 工件）；
+> `keel-plugin-hello` 的数据库自检扩成 exec / query / 参数绑定 / NULL / BLOB / Unicode /
+> 事务回滚，`KEEL_DB_URL=sqlite://./check.db` 下已通过。
+> ABI v2（`options` / `last_insert_id` / DECIMAL·TIMESTAMP·JSON·UUID）、
+> MariaDB 真实驱动、`Context.database` 扩展与 ORM 仍未做。
 
 ---
 

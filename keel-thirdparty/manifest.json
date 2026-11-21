@@ -124,6 +124,26 @@
         "licenses/msgpack/NOTICE"
       ],
       "patches": []
+    },
+    "sqlite": {
+      "version": "3.46.1",
+      "revision": 1,
+      "source": {
+        "name": "sqlite-amalgamation",
+        "url": "https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip",
+        "sha256": "77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784"
+      },
+      "headers": ["sqlite"],
+      "def": "sqlite.def",
+      "libs": {
+        "mingwX64": ["libsqlite3.a"],
+        "linuxArm64": ["libsqlite3.a"],
+        "linuxX64": ["libsqlite3.a"]
+      },
+      "link": "static",
+      "license": "SQLITE",
+      "licenseFiles": ["licenses/sqlite/LICENSE"],
+      "patches": []
     }
   }
 }
