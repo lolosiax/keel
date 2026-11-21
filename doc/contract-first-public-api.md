@@ -12,7 +12,10 @@
 > `keel.api.mode`（默认 `MIRROR`）、core / contract-first 生成模式已落地；
 > `keel-api` 已接 KSP，`ContextKey` / `ContextProxy` / `WebContextProxy` /
 > `WebRequestComponentProxy` / `ComponentProxy` 已生成并随仓库提交。
-> `@PublicApiProvider` 注解已添加，但 provider 发现 / 注册与跨插件 Context 传递**尚未接线**。
+> `@PublicApiProvider` 已接线：plugin 模式生成多契约并集分发器并写进 `KeelPluginPublicApi.setup`；
+> core 模式（`keel.provider.dir`）为 `RequestContextImpl` 生成
+> `RequestContextImplDispatcher` / `RequestContextImplProvider.register(...)`。
+> 每请求实例的登记调用与释放语义、跨插件 Context 传递**尚未接线**。
 
 ## 0. 决策摘要
 
@@ -622,10 +625,11 @@ mode == CONTRACT_FIRST:
 
 1. ✅ `keel-api` 手写 `Context` 契约（方法形态），并拆出 `LocalContext` / `WebRequestComponent` / `WebContext`；
 2. ✅ `keel-api` 作为 api 模块，由 KSP 生成 `ContextProxy` / `ContextKey`（以及 `WebContext` / `Component` / `WebRequestComponent` 的代理与 Key）；
-3. ⏳ 插件内 `internal ContextImpl : Context`，标 `@PublicApiProvider(Context::class)`；
-4. ⏳ impl 模块只生成 `ContextDispatcher` + 注册，不生成 `Context` 镜像
-   （dispatcher 生成器已支持接口继承展开；provider 发现 / 注册入口待接线）；
-5. 插件 A 创建 Context，插件 B 拿到 handle 调用 `components()`；若 A 提供 `WebContext`，再调用 `webRequest()`；
+3. ✅ 插件内 `internal ContextImpl : Context`，标 `@PublicApiProvider(Context::class)`；
+4. ✅ impl 模块只生成并集分发器 + 注册，不生成 `Context` 镜像；
+   `RequestContextImpl` 已标注，core 模式生成 `RequestContextImplProvider.register(directory, impl)`；
+5. ⏳ 插件 A 创建 Context，插件 B 拿到 handle 调用 `components()`；若 A 提供 `WebContext`，再调用 `webRequest()`
+   （`RequestContextImplProvider.register` 目前只生成未调用：每请求登记需要配套的句柄释放，留到跨插件传递一起做）；
 6. 本地组件在 B 侧不可见；公共组件通过显式方法可见；
 7. 所有目标编译通过（`keel-api` / hello / basic-biz / rbac 已验证）。
 

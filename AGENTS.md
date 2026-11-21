@@ -136,6 +136,9 @@ gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
   - `keel-plugin-ksp` 的 `keel.api.mode` 默认 `MIRROR`（impl 生成 api 镜像）；
     `CONTRACT_FIRST` 用于手写契约的 api 模块。`keel-api` 始终是 `CONTRACT_FIRST` 且没有
     `@KeelPluginMain`（core 模式），只生成 proxy / Key 并写回 `src/commonMain/kotlin`（V1 提交制）。
+  - `@PublicApiProvider(vararg contracts)` 生成「多契约并集」分发器：plugin 模式写进
+    `KeelPluginPublicApi.setup` 并登记实例；core 模式用 `keel.provider.dir` 生成
+    `<Impl>Dispatcher` 与 `<Impl>Provider.register(directory, impl)`，由实例创建方在跨界时调用。
 - **当前没有自动化测试**（`commonTest` 未接入）；验证靠编译 + `keel-host --inspect` / `--plugins` 冒烟，
   历史输出见 [doc/记忆/验证记录.md](doc/记忆/验证记录.md)。
 
@@ -531,6 +534,7 @@ keel-api/src/nativeMain/…/api/worker/
   PluginClasspath / HostClasspathClient       自身 `.keel` + Host 的远程资源视图
   PluginCapabilities / PluginConfig / PluginConsole / PluginStorageImpl
   WorkerScheduler / WorkerScope / WorkerDispatcher
+  RequestContextImplDispatcher / RequestContextImplProvider   由 KSP core 模式生成（勿手改）
 keel-api/src/nativeInterop/cinterop/keelabi.def        C ABI 绑定（含 KEEL_CINTEROP）
 keel-host/src/commonMain/…/host/Main.kt               CLI 入口与 expect 声明
 keel-host/src/commonMain/…/host/HostDirs.kt           dataRoot / cacheRoot 模型

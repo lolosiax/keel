@@ -42,6 +42,8 @@ apply(from = "../gradle/publishing.gradle.kts")
 ksp {
     arg("keel.api.mode", "CONTRACT_FIRST")
     arg("keel.api.dir", file("src/commonMain/kotlin").absolutePath)
+    // 提供者侧分发器落在 nativeMain：RequestContextImpl 是跨 target 共享的实现
+    arg("keel.provider.dir", file("src/nativeMain/kotlin").absolutePath)
 }
 
 // 处理器依赖必须赶在 KSP 建 `ksp<target>` 配置时挂上（KSP 在 afterEvaluate 里固定 classpath）

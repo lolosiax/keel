@@ -11,6 +11,9 @@ private const val API_DIR_OPTION = "keel.api.dir"
 /** 消费方子类胶水的落点；默认不生成。 */
 private const val GLUE_DIR_OPTION = "keel.glue.dir"
 
+/** core 模式下提供者分发器 / 登记入口的落点；默认不生成。 */
+private const val PROVIDER_DIR_OPTION = "keel.provider.dir"
+
 /** 生成模式：`MIRROR`（默认，impl 生成 api）或 `CONTRACT_FIRST`（契约手写在 api 模块）。 */
 private const val MODE_OPTION = "keel.api.mode"
 
@@ -44,6 +47,7 @@ class KeelPluginWorkerProcessorProvider : SymbolProcessorProvider {
             logger = environment.logger,
             apiDir = environment.options[API_DIR_OPTION]?.takeIf { it.isNotBlank() },
             glueDir = environment.options[GLUE_DIR_OPTION]?.takeIf { it.isNotBlank() },
+            providerDir = environment.options[PROVIDER_DIR_OPTION]?.takeIf { it.isNotBlank() },
             contractFirst = contractFirst,
         )
     }
@@ -54,6 +58,7 @@ private class KeelPluginWorkerProcessor(
     private val logger: KSPLogger,
     private val apiDir: String?,
     private val glueDir: String?,
+    private val providerDir: String?,
     private val contractFirst: Boolean,
 ) : SymbolProcessor {
 
@@ -76,7 +81,7 @@ private class KeelPluginWorkerProcessor(
             // 没有插件入口：CONTRACT_FIRST 下这是 api / core 模块，只生成 proxy 与 Key
             if (!coreGenerated) {
                 coreGenerated = true
-                if (contractFirst) publicApi.generateContracts(resolver, apiDir)
+                if (contractFirst) publicApi.generateContracts(resolver, apiDir, providerDir)
             }
             return emptyList()
         }

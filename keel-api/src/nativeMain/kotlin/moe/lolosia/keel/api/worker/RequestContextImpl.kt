@@ -1,6 +1,7 @@
 package moe.lolosia.keel.api.worker
 
 import moe.lolosia.keel.api.PluginContext
+import moe.lolosia.keel.api.annotation.PublicApiProvider
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -12,6 +13,7 @@ import moe.lolosia.keel.api.web.*
  * 请求信息以 [WebRequestComponentImpl] 的形式挂进组件表，因此组件查询与
  * `webRequest()` 走同一条路径；[destroy] 会级联销毁所有挂载组件。
  */
+@PublicApiProvider(Context::class, WebContext::class)
 internal class RequestContextImpl(
     override val plugin: PluginContext,
     request: HttpRequest,
