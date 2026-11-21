@@ -51,6 +51,12 @@ class KeelPluginPackagingPlugin : Plugin<Project> {
         // 所以编译期的 debugModule 也用它，而不是 Gradle 工程名。
         root.get(KeelLoggerExtension::class.java).debugModule.set(readManifestId(manifest) ?: project.name)
 
+        // requires: ["database"] 的插件自动挂 ORM 与数据库接线（KSP 处理器 / 依赖 / 方言参数）；
+        // 其余插件不受影响，也可以用 moe.lolosia.keel.database 显式 apply。
+        if (readRequires(manifest).contains("database")) {
+            project.pluginManager.apply("moe.lolosia.keel.database")
+        }
+
         // 构建期把 git sha / 提交时间合并进 plugin.json；不改仓库里的源文件
         val processedManifest = project.layout.buildDirectory.file("generated/keel/plugin.json")
         val processManifest = project.tasks.register("keelProcessManifest") { task ->

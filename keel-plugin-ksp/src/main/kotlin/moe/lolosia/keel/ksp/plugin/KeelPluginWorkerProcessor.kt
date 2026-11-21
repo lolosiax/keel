@@ -17,6 +17,9 @@ private const val PROVIDER_DIR_OPTION = "keel.provider.dir"
 /** 生成模式：`MIRROR`（默认，impl 生成 api）或 `CONTRACT_FIRST`（契约手写在 api 模块）。 */
 private const val MODE_OPTION = "keel.api.mode"
 
+/** 为 `true` 时在 Worker 入口调用 `OrmMetaBootstrap.install()`（由 `moe.lolosia.keel.database` 传入）。 */
+private const val ORM_ENABLED_OPTION = "keel.orm.enabled"
+
 private const val MODE_MIRROR = "MIRROR"
 
 private const val MODE_CONTRACT_FIRST = "CONTRACT_FIRST"
@@ -49,6 +52,7 @@ class KeelPluginWorkerProcessorProvider : SymbolProcessorProvider {
             glueDir = environment.options[GLUE_DIR_OPTION]?.takeIf { it.isNotBlank() },
             providerDir = environment.options[PROVIDER_DIR_OPTION]?.takeIf { it.isNotBlank() },
             contractFirst = contractFirst,
+            ormEnabled = environment.options[ORM_ENABLED_OPTION]?.trim() == "true",
         )
     }
 }
@@ -60,6 +64,7 @@ private class KeelPluginWorkerProcessor(
     private val glueDir: String?,
     private val providerDir: String?,
     private val contractFirst: Boolean,
+    private val ormEnabled: Boolean,
 ) : SymbolProcessor {
 
     private var generated = false
@@ -121,7 +126,14 @@ private class KeelPluginWorkerProcessor(
         return emptyList()
     }
 
-    private fun render(pkg: String, qualified: String): String = """
+    private fun render(pkg: String, qualified: String): String {
+        // ORM 的方言与实体登记由 keel-orm-ksp 生成的引导器完成；没有实体时它也是空实现
+        val bootstrap = if (ormEnabled) {
+            "        moe.lolosia.keel.orm.generated.OrmMetaBootstrap.install()\n"
+        } else {
+            ""
+        }
+        return """
         |// 由 keel-plugin-ksp 生成，不要手改。
         |package $pkg
         |
@@ -146,10 +158,12 @@ private class KeelPluginWorkerProcessor(
         | */
         |@OptIn(ExperimentalForeignApi::class, ExperimentalNativeApi::class)
         |@CName("keel_plugin_worker_main")
-        |fun keelPluginWorkerMain(api: CPointer<KeelPluginApi>?, out: CPointer<KeelPluginHandlers>?): UInt =
-        |    PluginWorker.enter(api, out, KeelPluginRoutes, KeelPluginPublicApi) { $qualified() }
+        |fun keelPluginWorkerMain(api: CPointer<KeelPluginApi>?, out: CPointer<KeelPluginHandlers>?): UInt {
+        |$bootstrap        return PluginWorker.enter(api, out, KeelPluginRoutes, KeelPluginPublicApi) { $qualified() }
+        |}
         |
-    """.trimMargin()
+        """.trimMargin()
+    }
 
     private companion object {
         const val ANNOTATION = "moe.lolosia.keel.api.annotation.KeelPluginMain"

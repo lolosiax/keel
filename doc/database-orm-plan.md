@@ -32,8 +32,19 @@
 > idOf）、`<Entity>Columns`（`QueryScope<T>.列`）、`OrmMetaBootstrap`（方言 + 实体登记，
 > 固定包 `moe.lolosia.keel.orm.generated`）；支持 superclass 链字段收集、camel→snake、
 > `@Column(name)`、`@Generated` 主键，未知类型直接报错。
+> 多 native 目标下 `nativeMain` 参与 metadata 编译，因此生成物默认直接写进
+> `src/nativeMain/kotlin`（`keel.orm.dir`，V1 提交制，需随源码提交）。
+> `moe.lolosia.keel.database` 已落地：`keel { database { dialect = "sqlite" } }`，
+> 自动挂 `keel-orm-ksp`、加 `keel-orm` / `keel-database-api`、下发
+> `keel.orm.dialect` / `keel.orm.dir` / `keel.orm.enabled`；
+> `requires: ["database"]` 的插件由 `moe.lolosia.keel.plugin` 自动 apply，也可显式 apply。
+> `keel-plugin-ksp` 生成的 Worker 入口在 `keel.orm.enabled=true` 时先调用
+> `OrmMetaBootstrap.install()`。
+> `keel-plugin-hello` 用 `HellUser` 跑通垂直切片：
+> `orm: insert=1/2, first=alice, page=[alice]/2, total=2, filtered=1, nullEmails=1,
+> updatedNull=1, delete=1->1, rollback=1`（SQLite）。
 > ABI v2（`options` / `last_insert_id` / DECIMAL·TIMESTAMP·JSON·UUID）、
-> MariaDB 真实驱动与 Gradle 接线仍未做。
+> MariaDB 真实驱动仍未做；关联 / `Children<T>` / `saveGraph` / 序列化属 D2。
 
 ---
 
@@ -830,6 +841,15 @@ keel {
 - **不把驱动编译塞进这个插件**：SQLite / MariaDB 的 C 构建属于各自的
   `keel-database-*` 构建，原生库来自 `keel-thirdparty`（源码或 zip + `.a`）。
 - **不在 Gradle 任务里生成查询代码**；KSP 负责生成，Gradle 只负责挂载和依赖。
+
+**落地形态（2026-11-21）**：`keel-database-gradle-plugin` 提供
+`moe.lolosia.keel.database`，注册 `keel { database { dialect, outputDir } }`，做三件事：
+挂 `keel-orm-ksp`、给 `nativeMain` 加 `keel-orm` / `keel-database-api`、
+把方言与生成物目录作为 KSP 参数下发。`requires: ["database"]` 的插件由
+`moe.lolosia.keel.plugin` 自动 apply；`keel-plugin-ksp` 在 `keel.orm.enabled=true` 时
+把 `OrmMetaBootstrap.install()` 插进 Worker 入口，不需要业务手写安装代码。
+`orm { enabled = false }` 这类**晚期开关没有落地**：处理器必须在 `ksp<target>`
+配置创建时就挂上，因此「不用 ORM」的插件不 apply 这个插件即可。
 - 如果暂时不做独立插件，至少不要把 ORM / 数据库逻辑继续塞进
   `moe.lolosia.keel.plugin` 的打包流程；`doc/thirdparty-licensing.md` §7 已经给出同样的结论。
 
