@@ -100,31 +100,45 @@ RouteDescriptor(
 
 ## 4. `Context`
 
+`Context` 核心是一个组件容器，不假设一定有 Web 请求：
+
 ```kotlin
 interface Context {
-    val plugin: PluginContext          // 插件运行时上下文（modules / config / server）
-    val request: HttpRequest           // 方法、路径、query、headers、body、remoteAddress、traceId
-    val pathParameters: Map<String, String>
-    val userId: String?
-    val user: UserSnapshot?            // id / username / roles
-    val data: MutableMap<String, Any?> // 请求期共享
+    suspend fun components(): List<Component>
+    suspend fun component(id: String): Component?
+    suspend fun addComponent(component: Component)
+    suspend fun removeComponent(id: String): Component?
+}
 
-    // 跨模块访问器：ctx.<契约> / ctx.<契约>OrNull，由 @PublicApi 的 api 工件生成
+// 本地字段：同运行时可用，不跨插件
+interface LocalContext : Context {
+    val plugin: PluginContext
+    val local: MutableMap<String, Any?>
     val server: KeelServer
     val config: Config
+}
 
-    fun query(name: String): String?
-    fun header(name: String): String?
-    fun body(): ByteArray
-    fun hasPermission(permission: String): Boolean
+// Web 请求作为组件挂载
+interface WebRequestComponent : Component {
+    suspend fun request(): HttpRequest
+    suspend fun pathParameters(): Map<String, String>
+    suspend fun user(): UserSnapshot?
 }
 ```
 
-与 backend 的差异只有一条：**没有 `ctx.call`**（`ApplicationCall` 绑定 Host 协程与线程，不能跨运行时）。
-需要 IP / UA / 请求头时用 `ctx.request`；需要用户时用 `ctx.userId` / `ctx.user`。
+组件可以随时挂载 / 卸载：`addComponent` 同 id 替换并自动绑定 `component.context`，
+`removeComponent` 自动解绑；Context 销毁时先解绑、再按挂载逆序级联调用 `Component.destroy()`。
+挂载期间第三方调用 `destroy()` 无效果（默认实现会检查 `context != null`），
+持有方需要像 try-with-resources 一样保证 `Context.destroy()` 执行。
 
-- `ctx.hasPermission` 通过 Host 实时判定，结果在本次请求内缓存；不要在插件里复制 RBAC 规则。
-- `ctx.data` 只活在本次请求，插件内的服务可以放解析结果、审计字段等。
+控制器继续写 `ctx: Context`，Web 能力由扩展提供：
+`ctx.request()` / `ctx.pathParameters()` / `ctx.user()` / `ctx.userId()` /
+`ctx.query(name)` / `ctx.header(name)` / `ctx.body()` / `ctx.hasPermission(permission)`。
+
+与 backend 的差异只有一条：**没有 `ctx.call`**（`ApplicationCall` 绑定 Host 协程与线程，不能跨运行时）。
+
+- `ctx.hasPermission(...)` 用请求快照里的 `rules` / `owner` 本地判定，不产生跨运行时调用；不要在插件里复制 RBAC 规则。
+- `ctx.local`（原 `ctx.data`）只活在本次请求，插件内的服务可以放解析结果、审计字段等。
 
 ---
 

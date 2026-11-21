@@ -159,7 +159,7 @@ object UserController {
         val userId = ctx.requireUserId()
         val user = UserRepository.findById(userId) ?: throw ApiException(401, "用户不存在")
         val role = UserRepository.roleOf(userId)
-        val rules = ctx.user?.rules.orEmpty()
+        val rules = ctx.user()?.rules.orEmpty()
         return UserRoleRow(
             id = role?.bindingId ?: 0L,
             userId = userId,
@@ -204,6 +204,6 @@ object UserController {
             raw.split(',').map(String::trim).filter(String::isNotEmpty)
     }
 
-    private fun Context.requireUserId(): String =
-        userId ?: throw ApiException(401, "身份认证失败，请重新登录")
+    private suspend fun Context.requireUserId(): String =
+        userId() ?: throw ApiException(401, "身份认证失败，请重新登录")
 }

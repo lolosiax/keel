@@ -35,18 +35,18 @@ object RbacController {
     @POST("/role")
     @Permission("rbac.role.write")
     suspend fun createRole(ctx: Context, @Body body: RoleCreateReq): RoleRow =
-        rbac.createRole(body, ctx.userId)
+        rbac.createRole(body, ctx.userId())
 
     @PUT("/role")
     @Permission("rbac.role.write")
     suspend fun updateRole(ctx: Context, @Body body: RoleUpdateReq) {
-        rbac.updateRole(body, ctx.userId)
+        rbac.updateRole(body, ctx.userId())
     }
 
     @DELETE("/role/{id}")
     @Permission("rbac.role.write")
     suspend fun deleteRole(ctx: Context, @Path("id") id: Long) {
-        rbac.deleteRole(id, ctx.userId)
+        rbac.deleteRole(id, ctx.userId())
     }
 
     /** 某组自身规则（管理界面回填）；库为空时返回默认值。 */
@@ -57,7 +57,7 @@ object RbacController {
     @POST("/role/{id}/rules")
     @Permission("rbac.role.write")
     suspend fun saveRoleRules(ctx: Context, @Path("id") id: Long, @Body body: RulesReq) {
-        rbac.saveRoleRules(id, body.rules, ctx.userId)
+        rbac.saveRoleRules(id, body.rules, ctx.userId())
     }
 
     @GET("/user/{id}/rules")
@@ -67,18 +67,18 @@ object RbacController {
     @POST("/user/{id}/rules")
     @Permission("rbac.user.write")
     suspend fun saveUserRules(ctx: Context, @Path("id") id: String, @Body body: RulesReq) {
-        rbac.saveUserRules(id, body.rules, ctx.userId)
+        rbac.saveUserRules(id, body.rules, ctx.userId())
     }
 
     @POST("/user/{id}/role")
     @Permission("rbac.user.write")
     suspend fun bindRole(ctx: Context, @Path("id") id: String, @Body body: BindReq) {
-        rbac.bindRole(id, body.roleId, ctx.userId)
+        rbac.bindRole(id, body.roleId, ctx.userId())
     }
 
     @DELETE("/user/{id}/role")
     @Permission("rbac.user.write")
     suspend fun unbindRole(ctx: Context, @Path("id") id: String) {
-        rbac.unbindRole(id, ctx.userId)
+        rbac.unbindRole(id, ctx.userId())
     }
 }

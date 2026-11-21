@@ -26,10 +26,10 @@ class BasicBizPlugin : Plugin {
         Schema.apply()
         context.routes.register(
             RouteDescriptor("GET", "/api/user/avatar", "basic-biz#avatar"),
-        ) { ctx -> avatar(ctx, ctx.query("id") ?: ctx.userId) }
+        ) { ctx -> avatar(ctx, ctx.query("id") ?: ctx.userId()) }
         context.routes.register(
             RouteDescriptor("GET", "/api/user/avatar/get/{id}", "basic-biz#avatarById"),
-        ) { ctx -> avatar(ctx, ctx.pathParameters["id"]) }
+        ) { ctx -> avatar(ctx, ctx.pathParameters()["id"]) }
         Log.info("loaded basic-biz", tag = "BasicBiz")
     }
 

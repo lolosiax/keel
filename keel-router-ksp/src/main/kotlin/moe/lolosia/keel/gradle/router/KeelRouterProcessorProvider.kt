@@ -1,5 +1,6 @@
 package moe.lolosia.keel.gradle.router
 
+import com.google.devtools.ksp.getAllSuperTypes
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 import com.google.devtools.ksp.validate
@@ -245,10 +246,16 @@ private class KeelRouterProcessor(
     }
 
     private fun argumentOf(parameter: ParameterModel): String = when (val binding = parameter.binding) {
-        ContextBinding -> "ctx"
+        // 控制器参数可以是 Context 的子接口（如 WebContext）；运行期对象就是插件侧实现
+        ContextBinding -> if (parameter.type.declaration.qualifiedName?.asString() == CONTEXT) {
+            "ctx"
+        } else {
+            "ctx as ${parameter.type.render()}"
+        }
+
         BodyBinding ->
             "runCatching { json.decodeFromString(serializer<${parameter.type.render()}>(), " +
-                "ctx.request.body.decodeToString()) }" +
+                "ctx.request().body.decodeToString()) }" +
                 ".getOrElse { throw ApiException(400, \"请求体无法解析\") }"
 
         is SimpleBinding -> convertFrom(binding, parameter.type)
@@ -256,7 +263,7 @@ private class KeelRouterProcessor(
 
     private fun convertFrom(binding: SimpleBinding, type: KSType): String {
         val raw = when (binding.source) {
-            Source.PATH -> "ctx.pathParameters[${binding.name.quote()}]"
+            Source.PATH -> "ctx.pathParameters()[${binding.name.quote()}]"
             Source.QUERY -> "ctx.query(${binding.name.quote()})"
             Source.HEADER -> "ctx.header(${binding.name.quote()})"
         }
@@ -387,9 +394,11 @@ private fun permissionsOf(annotated: KSAnnotated): List<String> {
 }
 
 private fun isContext(type: KSType): Boolean {
-    val qualified = type.declaration.qualifiedName?.asString()
-    // DbContext 是含数据库能力插件用的请求上下文，与 Context 同义
-    return qualified == CONTEXT || qualified == DB_CONTEXT
+    val declaration = type.declaration as? KSClassDeclaration ?: return false
+    if (declaration.qualifiedName?.asString() == CONTEXT) return true
+    // 业务可以声明 Context 的子接口（如 WebContext），控制器参数按子类型注入
+    return declaration.getAllSuperTypes()
+        .any { it.declaration.qualifiedName?.asString() == CONTEXT }
 }
 
 private fun joinPath(base: String, sub: String): String {
@@ -419,7 +428,6 @@ private const val QUERY = "moe.lolosia.keel.api.web.Query"
 private const val HEADER = "moe.lolosia.keel.api.web.Header"
 private const val BODY = "moe.lolosia.keel.api.web.Body"
 private const val CONTEXT = "moe.lolosia.keel.api.web.Context"
-private const val DB_CONTEXT = "moe.lolosia.keel.database.DbContext"
 
 private val HTTP_ANNOTATIONS = listOf(
     "moe.lolosia.keel.api.web.GET" to "GET",

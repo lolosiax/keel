@@ -75,7 +75,14 @@ internal object PluginRoutes : Routes {
             val entry = entries.firstOrNull { it.descriptor.routeId == routeId }
                 ?: return HttpResponse(status = 404, body = ResponseBody.Text("route not found: $routeId"))
             val context = RequestContextImpl(plugin, request, pathParameters, user)
-            return entry.handler(context)
+            // 请求结束必须级联释放 Context 上挂载的组件；异常路径同样要走到
+            try {
+                return entry.handler(context)
+            } finally {
+                // 释放失败不能覆盖业务异常，只记录
+                runCatching { context.destroy() }
+                    .onFailure { Log.error("Context 销毁失败", cause = it) }
+            }
         } finally {
             Debug.exitBridge(bridge)
         }

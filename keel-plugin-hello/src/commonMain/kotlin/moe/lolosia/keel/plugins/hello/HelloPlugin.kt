@@ -10,9 +10,7 @@ import moe.lolosia.keel.api.auth.*
 import moe.lolosia.keel.api.command.*
 import moe.lolosia.keel.api.config.*
 import moe.lolosia.keel.api.log.LogTextFormat
-import moe.lolosia.keel.api.web.HttpResponse
-import moe.lolosia.keel.api.web.ResponseBody
-import moe.lolosia.keel.api.web.RouteDescriptor
+import moe.lolosia.keel.api.web.*
 
 /**
  * 最小示例插件：演示生命周期与上下文注入。
@@ -34,7 +32,7 @@ class HelloPlugin : Plugin {
         context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { ctx ->
             HttpResponse(
                 body = ResponseBody.Text(
-                    text = ctx.request.body.decodeToString(),
+                    text = ctx.request().body.decodeToString(),
                     contentType = "application/json; charset=utf-8",
                 ),
             )

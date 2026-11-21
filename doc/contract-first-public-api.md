@@ -4,12 +4,20 @@
 > 本文只讨论 `@PublicApi` 的 contract-first 改造与 `Context` 的共享方式；
 > 数据库 / ORM 不在本文范围，见 [database-orm-plan.md](database-orm-plan.md)。
 > 与现有实现冲突时以代码为准，并回填本文。
+>
+> **落地进度（2026-11-21）**：`Context` 组件化切片已实现（`Component` / `Context` /
+> `LocalContext` / `WebRequestComponent` / `WebContext` + `ContextExt.kt` 语法糖）；
+> `keel.api.mode`、`@PublicApiProvider`、`ContextProxy` / `ContextKey` **尚未实现**，
+> `keel-plugin-ksp` 仍是 MIRROR。
 
 ## 0. 决策摘要
 
 - **新增 contract-first 模式**：契约手写在 api 模块里，KSP 不再生成同 FQN 的镜像。
-- **Context = Components + 本地字段**：Context 核心只暴露公共组件；Web 请求、用户、Session 都是 Component，不是所有 Context 都有 Web 请求。
+- **Context = Components + 本地字段**：`Context` 核心只暴露公共组件方法；
+  本地字段（`plugin` / `local` / `server` / `config`）放在不进 api 工件的 `LocalContext`。
 - **Component 基接口**：`@PublicApi interface Component`；公共组件继承它；本地组件不标 `@PublicApi`，也不进入公共方法。
+- **不同业务挂扩展函数**：Web 能力在 `WebRequestComponent` / `WebContext`，
+  控制器通过 `ctx.request()` / `ctx.userId()` 这类扩展使用；数据库等业务同样以 `Context` 扩展提供。
 - **`ContextImpl` 留在插件内部**：`internal` + `@PublicApiProvider(Context::class)`，只生成 dispatcher / 注册。
 - **生成物归 api 模块**：proxy / Key / 访问器 / DTO / 值类型由 KSP 生成在 api 模块，其他模块直接导入。
 - **provider 侧归 impl 模块**：dispatcher / 注册 / shadow 生成在当前 impl 模块。
@@ -251,19 +259,48 @@ Context 的核心是 **Components + 本地字段**，不是“Web 请求上下�
 ```kotlin
 @PublicApi
 interface Component {
+    // 本地生命周期字段：非 null 表示已挂载，不进入跨插件契约面
+    var context: Context?
+
     @PublicApi suspend fun id(): String
+
+    // 挂载期间调用无效果；Context.destroy 会先解绑再调用
+    @PublicApi suspend fun destroy() {
+        if (context != null) return
+    }
 }
 
 @PublicApi(id = "keel.context")
 interface Context {
     @PublicApi suspend fun components(): List<Component>
     @PublicApi suspend fun component(id: String): Component?
+    @PublicApi suspend fun addComponent(component: Component)
+    @PublicApi suspend fun removeComponent(id: String): Component?
+    @PublicApi suspend fun destroy()
+}
 
-    // 本地成员：不标 @PublicApi，不进入跨插件面
+// 本地成员：不标 @PublicApi，不进入跨插件面
+interface LocalContext : Context {
     val plugin: PluginContext
     val local: MutableMap<String, Any?>
+    val server: KeelServer get() = plugin.server
+    val config: Config get() = plugin.config
 }
 ```
+
+- `component(id)` 以 `Component.id()` 为查询键；
+- `addComponent` 随时可调用（任意插件、任意时刻），同 id 替换；挂载时把
+  `component.context` 指向当前 Context，替换掉的旧组件会被自动解绑；
+- `removeComponent` **只解除挂载**（清空 `component.context`），返回被移除的实例，不调用 `destroy`；
+  是否销毁由调用者决定，remove 后忘记销毁导致泄漏也是调用者的责任；
+- `Component.destroy()` 默认实现是 `if (context != null) return`：**挂载期间第三方调用无效果**；
+  有资源的实现覆盖时要保留这个判断（忘了写就是实现方的 bug）；
+- **`Context.destroy()` 负责级联释放**：先清空组件表并解绑全部组件，再按挂载逆序调用
+  `destroy()`；持有方要像 try-with-resources 一样保证它被执行（例如 `finally`），重复调用是空操作；
+- 本地字段放在独立的 `LocalContext`：现有 KSP 对接口是「全部成员导出」，
+  把 `plugin` 这类类型写在 `@PublicApi Context` 上会被将来的 proxy 生成器拖进契约；
+  `Component.context` 同理，contract-first 生成时必须作为非导出成员处理；
+- 控制器拿到的 `ctx` 静态类型仍是 `Context`，本地字段与业务能力都由扩展补齐。
 
 Web 请求只是其中一个组件，不是所有 Context 都有：
 
@@ -273,12 +310,26 @@ interface WebRequestComponent : Component {
     @PublicApi suspend fun request(): HttpRequest
     @PublicApi suspend fun pathParameters(): Map<String, String>
     @PublicApi suspend fun user(): UserSnapshot?
+
+    companion object { const val TYPE_ID = "keel.web.request" }
 }
 
 @PublicApi
 interface WebContext : Context {
     @PublicApi suspend fun webRequest(): WebRequestComponent?
 }
+```
+
+业务代码不直接拼组件查询，而是用 `ContextExt.kt` 里的扩展：
+
+```kotlin
+val Context.plugin: PluginContext            // as? LocalContext
+val Context.config: Config                   // 同上
+suspend fun Context.request(): HttpRequest   // requireWebRequest()
+suspend fun Context.user(): UserSnapshot?
+suspend fun Context.userId(): String?
+suspend fun Context.query(name: String): String?
+suspend fun Context.hasPermission(permission: String): Boolean
 ```
 
 约束：
@@ -297,38 +348,79 @@ interface WebContext : Context {
 ### 5.2 `ContextImpl`
 
 ```kotlin
-// 插件内部；internal 即可
-@PublicApiProvider(Context::class)
-internal class ContextImpl(
+// keel-api 内部；当前只有本地实现
+internal class RequestContextImpl(
     override val plugin: PluginContext,
-    override val local: MutableMap<String, Any?> = mutableMapOf(),
-    private val componentMap: MutableMap<String, Component> = mutableMapOf(),
-) : Context {
+    request: HttpRequest,
+    pathParameters: Map<String, String>,
+    user: UserSnapshot?,
+) : LocalContext, WebContext {
+    override val local: MutableMap<String, Any?> = mutableMapOf()
+
+    private val componentMap = mutableMapOf<String, Component>()
+
+    init {
+        val webRequest = WebRequestComponentImpl(request, pathParameters, user)
+        webRequest.context = this
+        componentMap[WebRequestComponent.TYPE_ID] = webRequest
+    }
+
     override suspend fun components(): List<Component> = componentMap.values.toList()
     override suspend fun component(id: String): Component? = componentMap[id]
+
+    override suspend fun addComponent(component: Component) {
+        val id = component.id()
+        val owner = component.context
+        require(owner == null || owner === this) { "组件 $id 已挂载在其它 Context 上" }
+        val previous = componentMap.put(id, component)
+        if (previous != null && previous !== component) previous.context = null
+        component.context = this
+    }
+
+    override suspend fun removeComponent(id: String): Component? {
+        val removed = componentMap.remove(id) ?: return null
+        removed.context = null
+        return removed
+    }
+
+    override suspend fun webRequest(): WebRequestComponent? =
+        componentMap[WebRequestComponent.TYPE_ID] as? WebRequestComponent
+
+    override suspend fun destroy() {
+        val mounted = componentMap.values.toList().asReversed()
+        componentMap.clear()
+        mounted.forEach { it.context = null }   // 先解绑
+        var failure: Throwable? = null
+        for (component in mounted) {            // 再逆序销毁
+            try { component.destroy() } catch (t: Throwable) { if (failure == null) failure = t }
+        }
+        failure?.let { throw it }
+    }
 }
 ```
 
-Web 场景再提供一个 `WebContextImpl : WebContext`，标 `@PublicApiProvider(WebContext::class)`，
-把 `WebRequestComponent` 挂进 `componentMap`；它的 `types` 同时包含 `WebContext` / `Context`。
-非 Web 场景直接使用 `ContextImpl`，不需要伪造 `HttpRequest`。
-
-- impl 可以是 `internal`；
-- provider dispatcher 与 impl 同模块，能访问 internal；
-- 不需要生成 `Context` 镜像；
-- `keel-api` 本身就是 `Context` 的 api 模块，不新建包。
+- 本版本 Context 只在插件运行时内创建（`PluginRoutes` 按请求构造），还没有跨插件的
+  provider 注册，所以没有 `@PublicApiProvider`；
+- `WebRequestComponent` 由独立的 `WebRequestComponentImpl` 挂进组件表，Context 自身不再实现它；
+- 挂载 / 卸载维护 `component.context`；销毁先清表、再解绑、最后逆序调用 `destroy()`，
+  单个失败不中断其余组件；
+- HTTP 场景的持有方是 `PluginRoutes.dispatch`，它在 `finally` 里调用 `context.destroy()`，异常路径也不会漏释放；
+- 非 Web 的通用 `ContextImpl` 等定时任务 / 控制台真的需要再加，不提前造；
+- impl 是 `internal`，`keel-api` 本身就是 `Context` 的 api 模块，不新建包。
 
 ### 5.3 Proxy / Key
 
-`keel-api` 就是 `Context` 的 api 模块，proxy / Key 由它的 KSP 生成：
+`keel-api` 就是 `Context` 的 api 模块；contract-first 阶段由它的 KSP 生成 proxy / Key：
 
 ```text
 keel-api/
   Context.kt                 # 手写契约
-  ContextProxy.kt            # KSP 生成
-  ContextKey.kt              # KSP 生成：PublicApiKey<Context>("keel.context")
+  ContextProxy.kt            # 待 KSP 生成
+  ContextKey.kt              # 待 KSP 生成：PublicApiKey<Context>("keel.context")
 ```
 
+- **本版本未实现**：`keel-api` 还没有接 KSP，`ContextProxy` / `ContextKey` 由后续
+  contract-first 阶段补；
 - 其他插件依赖 `keel-api`，直接 import 这些生成物；
 - **不存在“每个 consumer 各生成一份”**；
 - `ContextImpl` 所在插件只生成 provider 侧的 dispatcher / 注册。
@@ -338,7 +430,7 @@ keel-api/
 `Context` 是 `@PublicApi` 有状态对象，handle 就是它的身份：
 
 - **谁创建谁持有**：Host 创建时 Host 持有，插件创建时插件持有；
-- 创建者在请求 / 子操作结束时 `destroy()`；
+- 创建者在请求 / 子操作结束时 `destroy()`；它按挂载逆序级联销毁全部组件，持有方用 `try/finally` 保证执行；
 - 传给下游时传的是 handle，不是 Kotlin 对象；
 - **下游不要 destroy 别人创建的 Context**：没有引用计数，提前关闭会让上游调用失败。
 
@@ -366,7 +458,12 @@ Components 是 Context 的一等公民，不删除：
   跨插件走 handle 或序列化值；
   通过 `WebContext.webRequest()` / `MyContext.myComponent()` 这类**声明方提供的显式方法**访问，
   不要用 `component(id) as XxxComponent` 强转。
-- **本地组件**：不标 `@PublicApi`，放在 `ContextImpl` 的 `local` / 内部 map；
+- **挂载与卸载**：`Context.addComponent` / `removeComponent` 是契约方法，任何插件随时可调；
+  同 id 替换；add 自动把 `component.context` 指向当前 Context，remove 自动清空；
+  真正释放由 `Context.destroy()` 先解绑、再按逆序级联执行。
+  本地 Context 直接在 Worker 的组件表上操作；跨插件 Context（下一轮）会变成反向请求，
+  由 Context 所有者的 Worker 执行，组件实例留在挂载方的运行时里，只把句柄挂上去。
+- **本地组件**：不标 `@PublicApi`，放在 `LocalContext.local` / 内部 map；
   不进入 api 模块，不跨 DLL。
 - **Web 请求**：`WebRequestComponent`，只在 `WebContext` 上存在；
   定时任务、控制台、插件内部调用使用普通 `Context`，不伪造 Web 请求。
@@ -378,12 +475,15 @@ Components 是 Context 的一等公民，不删除：
 
 #### 5.6.1 Component 取用：Unity 风格 `getComponent<T>`
 
+> 本版本未实现：当前契约只有 `component(id)`，业务使用声明方的 typed 方法
+> （`WebContext.webRequest()`）与 `Context` 扩展；下面的泛型写法留作后续方案。
+
 最终 API 可以写成 Unity 风格：
 
 ```kotlin
 suspend inline fun <reified T : Component> Context.getComponent(id: String? = null): T? {
     val typeId = T::class.qualifiedName ?: return null
-    val component = component(id, typeId) ?: return null
+    val component = component(typeId) ?: return null
     return component as? T
 }
 ```
@@ -395,12 +495,12 @@ suspend inline fun <reified T : Component> Context.getComponent(id: String? = nu
 
 1. **本地组件**
    - `ContextImpl` 里存的是真实对象；
-   - `component(id, typeId)` 返回 `AComponent` 实例；
+   - `component(typeId)` 返回 `AComponent` 实例；
    - `as? T` 直接成功。
 
 2. **跨插件组件**
    - 注册时保留具体类型：`types = { AComponent, Component }`；
-   - 查找走非泛型 bridge：`component(id, typeId)`，`typeId` 由 `T::class` 或稳定 key 提供；
+   - 查找走非泛型 bridge：`component(typeId)`，`typeId` 由 `T::class` 或稳定 key 提供；
    - 消费方生成 `ComponentProxies`，按 `typeId` 返回具体代理：
      ```kotlin
      object ComponentProxies {
@@ -502,10 +602,10 @@ mode == CONTRACT_FIRST:
 
 ### 阶段 1：Context 垂直切片
 
-1. `keel-api` 手写 `Context` 契约（方法形态）；
-2. `keel-api` 作为 api 模块，由 KSP 生成 `ContextProxy` / `ContextKey`；
-3. 插件内 `internal ContextImpl : Context`，标 `@PublicApiProvider(Context::class)`；
-4. impl 模块只生成 `ContextDispatcher` + 注册，不生成 `Context` 镜像；
+1. ✅ `keel-api` 手写 `Context` 契约（方法形态），并拆出 `LocalContext` / `WebRequestComponent` / `WebContext`；
+2. ⏳ `keel-api` 作为 api 模块，由 KSP 生成 `ContextProxy` / `ContextKey`；
+3. ⏳ 插件内 `internal ContextImpl : Context`，标 `@PublicApiProvider(Context::class)`；
+4. ⏳ impl 模块只生成 `ContextDispatcher` + 注册，不生成 `Context` 镜像；
 5. 插件 A 创建 Context，插件 B 拿到 handle 调用 `components()`；若 A 提供 `WebContext`，再调用 `webRequest()`；
 6. 本地组件在 B 侧不可见；公共组件通过显式方法可见；
 7. 所有目标编译通过。
@@ -530,6 +630,9 @@ mode == CONTRACT_FIRST:
 
 ## 8. 验收
 
+> 以下为 contract-first 全部落地后的验收。本版本只完成 Context 组件化切片：
+> 与本地实现相关的条目已满足；`ContextProxy` / `ContextKey` / provider / handle 相关条目待后续。
+
 - `Context` 在 classpath 中只有一个 FQN；
 - `keel-api` 中没有 `Context` 镜像；`ContextProxy` / `ContextKey` 由 `keel-api` 的 KSP 生成；
 - provider 模块生成 `ContextDispatcher` / 注册，且能访问 `internal ContextImpl`；
@@ -553,6 +656,13 @@ mode == CONTRACT_FIRST:
 ### 已定
 
 - **Context = Components + 本地字段**：`Component` 是公共组件基接口，标 `@PublicApi`；本地组件不标。
+  本地字段（`plugin` / `local` / `server` / `config`）放在不进 api 工件的 `LocalContext`。
+- **业务能力走 `Context` 扩展**：Web 用 `ctx.request()` / `ctx.userId()`；数据库等后续业务同样加扩展。
+- **组件挂载随时可发生**：`addComponent` / `removeComponent` 在 `Context` 契约上；
+  add/remove 自动维护 `component.context`；`Context.destroy()` 先解绑、再逆序级联释放组件，
+  持有方必须像 try-with-resources 一样保证它被执行。
+- **跨插件 Context 传递下一轮做**：届时 add/remove 变成反向请求，组件实例留在挂载方运行时，
+  只把句柄挂到 Context 所有者的组件表上。
 - **不是所有 Context 都有 Web 请求**：Web 请求是 `WebRequestComponent`，Web 场景用 `WebContext`；普通 Context 不伪造请求。
 - **公共组件用显式类型化方法访问**：`WebContext.webRequest()` / `MyContext.myComponent()`；
   不用泛型 `component<T>()`，也不依赖 `component(id) as Xxx` 的跨插件强转。

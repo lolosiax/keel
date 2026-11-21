@@ -71,7 +71,7 @@ object AuthController {
     @POST("/register")
     suspend fun register(@Body param: RegisterReq): UserRow = AuthService.register(param)
 
-    private fun bearerToken(ctx: Context): String? = ctx.request.headers.entries
+    private suspend fun bearerToken(ctx: Context): String? = ctx.request().headers.entries
         .firstOrNull { it.key.equals("Authorization", ignoreCase = true) }
         ?.value
         ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }

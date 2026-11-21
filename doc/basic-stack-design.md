@@ -51,7 +51,7 @@
 | 契约 | 现状 |
 | --- | --- |
 | `web/Annotations.kt` | `@Controller` / `@GET` / `@Path` / `@Query` / `@Header` / `@Body` / `@Permission` 已有 |
-| `web/Context.kt` | `plugin` / `request` / `pathParameters` / `userId` / `user` / `data` / `hasPermission`（**非 suspend**） |
+| `web/Context.kt` | `Context` 只留 `components()` / `component(id)`（suspend）；本地字段在 `LocalContext`，Web 能力在 `WebRequestComponent` + `ContextExt.kt` 扩展（`request()` / `userId()` / `query()` 等，均 suspend） |
 | `web/RouteDescriptor.kt` | `method` / `path` / `routeId` / `permissions` |
 | `auth/Authorizer.kt` | `fun authorize(userId: String?, permission: String): Boolean`（**非 suspend**） |
 | `HostRoutes.kt` | 线性匹配 + `{name}` 段；**没有权限校验** |
