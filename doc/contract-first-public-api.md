@@ -7,8 +7,12 @@
 >
 > **落地进度（2026-11-21）**：`Context` 组件化切片已实现（`Component` / `Context` /
 > `LocalContext` / `WebRequestComponent` / `WebContext` + `ContextExt.kt` 语法糖）；
-> `keel.api.mode`、`@PublicApiProvider`、`ContextProxy` / `ContextKey` **尚未实现**，
-> `keel-plugin-ksp` 仍是 MIRROR。
+> `@LocalMember` 与生成器对本地成员（不进入 dispatcher、代理本地实现）的支持已落地，
+> `keel-plugin-ksp` 同时补了重复 typeId 检查。
+> `keel.api.mode`（默认 `MIRROR`）、core / contract-first 生成模式已落地；
+> `keel-api` 已接 KSP，`ContextKey` / `ContextProxy` / `WebContextProxy` /
+> `WebRequestComponentProxy` / `ComponentProxy` 已生成并随仓库提交。
+> `@PublicApiProvider` 注解已添加，但 provider 发现 / 注册与跨插件 Context 传递**尚未接线**。
 
 ## 0. 决策摘要
 
@@ -184,8 +188,11 @@ internal class ContextImpl(...) : Context
 ```kotlin
 @Target(AnnotationTarget.CLASS)
 @Retention(AnnotationRetention.BINARY)
-annotation class PublicApiProvider(val contract: KClass<*>)
+annotation class PublicApiProvider(vararg val contracts: KClass<*>)
 ```
+
+`vararg` 让一个实现可以同时提供多个契约（如 `Context` 与 `WebContext`），
+单契约写法 `@PublicApiProvider(Context::class)` 不变。
 
 规则：
 
@@ -259,7 +266,8 @@ Context 的核心是 **Components + 本地字段**，不是“Web 请求上下�
 ```kotlin
 @PublicApi
 interface Component {
-    // 本地生命周期字段：非 null 表示已挂载，不进入跨插件契约面
+    // 本地生命周期字段：非 null 表示已挂载；@LocalMember 让它不进入跨插件契约面
+    @LocalMember
     var context: Context?
 
     @PublicApi suspend fun id(): String
@@ -299,7 +307,10 @@ interface LocalContext : Context {
   `destroy()`；持有方要像 try-with-resources 一样保证它被执行（例如 `finally`），重复调用是空操作；
 - 本地字段放在独立的 `LocalContext`：现有 KSP 对接口是「全部成员导出」，
   把 `plugin` 这类类型写在 `@PublicApi Context` 上会被将来的 proxy 生成器拖进契约；
-  `Component.context` 同理，contract-first 生成时必须作为非导出成员处理；
+  个别确实要挂在契约类型上的本地状态（如 `Component.context`）用 `@LocalMember` 显式标注：
+  KSP 不生成它的跨界分发，生成的代理在本地用 `null` 初始化；
+- **本地成员不靠「接口一律不导出」的隐式规则**：必须逐成员标 `@LocalMember`，
+  需要跨界读取的状态写成 suspend 访问器（`suspend fun getX()`），不要导出属性；
 - 控制器拿到的 `ctx` 静态类型仍是 `Context`，本地字段与业务能力都由扩展补齐。
 
 Web 请求只是其中一个组件，不是所有 Context 都有：
@@ -338,6 +349,7 @@ suspend fun Context.hasPermission(permission: String): Boolean
 - `Component` 是公共组件的基接口，标 `@PublicApi`；
 - 公共组件接口继承 `Component`；本地组件不标 `@PublicApi`，放在 `Context.local`；
 - 接口上禁止导出属性，公共属性写成 `suspend fun getX()`；
+  纯本地的状态用 `@LocalMember` 标注（见 §5.1）；
 - 禁止 `Any`、泛型方法、可变集合、函数类型；
 - **公共组件用显式类型化方法访问**：`Context` 只提供 `Component` 基类查询；
   具体组件由 `WebContext.webRequest()` 这类子接口 / 方法暴露；
@@ -415,12 +427,13 @@ internal class RequestContextImpl(
 ```text
 keel-api/
   Context.kt                 # 手写契约
-  ContextProxy.kt            # 待 KSP 生成
-  ContextKey.kt              # 待 KSP 生成：PublicApiKey<Context>("keel.context")
+  ContextProxy.kt            # KSP core 模式生成
+  ContextKey.kt              # KSP core 模式生成：PublicApiKey<Context>("keel.context")
 ```
 
-- **本版本未实现**：`keel-api` 还没有接 KSP，`ContextProxy` / `ContextKey` 由后续
-  contract-first 阶段补；
+- **已落地**：`keel-api` 已应用 KSP（`keel.api.mode=CONTRACT_FIRST`），
+  `ContextKey` / `ContextProxy` / `WebContextProxy` / `WebRequestComponentProxy` / `ComponentProxy`
+  由 core 模式生成到 `src/commonMain/kotlin`，随仓库提交（V1 提交制）；
 - 其他插件依赖 `keel-api`，直接 import 这些生成物；
 - **不存在“每个 consumer 各生成一份”**；
 - `ContextImpl` 所在插件只生成 provider 侧的 dispatcher / 注册。
@@ -544,6 +557,8 @@ suspend inline fun <reified T : Component> Context.getComponent(id: String? = nu
 - `@PublicApiProvider(contract)`：provider 标记；生成 dispatcher / 注册。
 - `@PublicApiHandler`：保留，手写逃生口。
 - `@Singleton`：继续表示单例提供者。
+- `@LocalMember`：契约里的本地成员标记；不进入 dispatcher，
+  属性必须是可空 `var`（生成的代理用 `null` 初始化），方法必须带默认实现。
 
 ### 6.2 模型
 
@@ -580,6 +595,9 @@ mode == CONTRACT_FIRST:
 - 不要静默生成重复类；
 - `CONTRACT_FIRST` 下 `@PublicApi` 类型如果带实现体，应按契约处理，不按 impl 镜像处理。
 
+已落地：同一构建里多个 `@PublicApi` 使用同一个 `typeId` 时直接报错；
+跨依赖的目标 FQN 检测仍未实现（等签名校验一起补）。
+
 ### 6.5 签名校验（本版本不做）
 
 本版本不新增签名 / 版本校验：
@@ -594,21 +612,22 @@ mode == CONTRACT_FIRST:
 
 ### 阶段 0：新增模式，不动默认
 
-- 新增 `keel.api.mode`，默认 `MIRROR`；
-- 新增 `@PublicApiProvider`；
-- 现有插件行为不变；
-- `keel-api` 单独标记为 `CONTRACT_FIRST`；
-- 补 KSP 单测 / 构建验证。
+- ✅ 新增 `keel.api.mode`，默认 `MIRROR`；
+- ✅ 新增 `@PublicApiProvider`（`vararg contracts`）；
+- ✅ 现有插件行为不变（hello / basic-biz / rbac 构建通过）；
+- ✅ `keel-api` 单独标记为 `CONTRACT_FIRST`；
+- KSP 单测仍未接入（靠构建 + 生成物检查）。
 
 ### 阶段 1：Context 垂直切片
 
 1. ✅ `keel-api` 手写 `Context` 契约（方法形态），并拆出 `LocalContext` / `WebRequestComponent` / `WebContext`；
-2. ⏳ `keel-api` 作为 api 模块，由 KSP 生成 `ContextProxy` / `ContextKey`；
+2. ✅ `keel-api` 作为 api 模块，由 KSP 生成 `ContextProxy` / `ContextKey`（以及 `WebContext` / `Component` / `WebRequestComponent` 的代理与 Key）；
 3. ⏳ 插件内 `internal ContextImpl : Context`，标 `@PublicApiProvider(Context::class)`；
-4. ⏳ impl 模块只生成 `ContextDispatcher` + 注册，不生成 `Context` 镜像；
+4. ⏳ impl 模块只生成 `ContextDispatcher` + 注册，不生成 `Context` 镜像
+   （dispatcher 生成器已支持接口继承展开；provider 发现 / 注册入口待接线）；
 5. 插件 A 创建 Context，插件 B 拿到 handle 调用 `components()`；若 A 提供 `WebContext`，再调用 `webRequest()`；
 6. 本地组件在 B 侧不可见；公共组件通过显式方法可见；
-7. 所有目标编译通过。
+7. 所有目标编译通过（`keel-api` / hello / basic-biz / rbac 已验证）。
 
 ### 阶段 2：一个插件契约迁移
 

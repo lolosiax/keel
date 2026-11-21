@@ -1,6 +1,7 @@
 package moe.lolosia.keel.ksp.plugin
 
 import com.google.devtools.ksp.getDeclaredFunctions
+import com.google.devtools.ksp.getDeclaredProperties
 import com.google.devtools.ksp.processing.*
 import com.google.devtools.ksp.symbol.*
 
@@ -28,10 +29,26 @@ internal class KeelPublicApiGenerator(
         /** 按值传递的 `@Serializable` 类型；[type] 是源码里的 Kotlin 类型文本。 */
         data class Value(val type: String) : Wire
 
-        data class Shared(val fqn: String, val proxy: String) : Wire
+        /**
+         * 跨运行时按句柄传递的对象。
+         *
+         * @property fqn 元素类型全名；列表时是元素类型
+         * @property proxy 元素类型的本地代理类全名
+         * @property nullable 可空单值；线格式里句柄 `0` 表示 null
+         * @property list 共享对象列表；线格式是 `List<SharedRef>`
+         */
+        data class Shared(
+            val fqn: String,
+            val proxy: String,
+            val nullable: Boolean = false,
+            val list: Boolean = false,
+        ) : Wire
     }
 
     private class Param(val name: String, val fqn: String, val wire: Wire)
+
+    /** 标 `@LocalMember` 的可空 `var` 属性；代理在本地持有，不参与跨界分发。 */
+    private class LocalProperty(val name: String, val type: String)
 
     private class Method(
         val name: String,
@@ -51,6 +68,8 @@ internal class KeelPublicApiGenerator(
         val manual: Boolean,
         val supported: Boolean,
         val methods: List<Method>,
+        /** `@LocalMember` 属性；只由生成的代理在本地实现，不进入 dispatcher。 */
+        val localProperties: List<LocalProperty> = emptyList(),
         /** 契约来自依赖（klib）而不是本模块源码：只生成提供者侧分发器，不生成镜像 / 代理。 */
         val external: Boolean = false,
     ) {
@@ -90,7 +109,12 @@ internal class KeelPublicApiGenerator(
         val usePlugin: Boolean,
     )
 
-    fun generate(resolver: Resolver, main: KSClassDeclaration, apiDir: String? = null) {
+    fun generate(
+        resolver: Resolver,
+        main: KSClassDeclaration,
+        apiDir: String? = null,
+        contractFirst: Boolean = false,
+    ) {
         val mainFqn = main.qualifiedName?.asString()
         if (mainFqn == null) {
             logger.error("@KeelPluginMain 只能标在具名类上", main)
@@ -183,6 +207,7 @@ internal class KeelPublicApiGenerator(
                 manual = manual,
                 supported = manual || kind == Kind.VALUE || methods != null,
                 methods = methods ?: emptyList(),
+                localProperties = if (manual) emptyList() else localMembers(declaration, kind),
             )
         }
 
@@ -201,6 +226,18 @@ internal class KeelPublicApiGenerator(
         // 只参与 declare 与提供者侧分发器，不生成镜像 / 代理（api 工件里已有）。
         val external = dependencyContracts(resolver, main, models)
         val allModels = models + external
+
+        // 句柄按 typeId 路由；同一个 id 出现两个类型时 Host 只能认第一个，必须提前报错
+        allModels
+            .filter { !it.isValue }
+            .groupBy { it.id }
+            .filter { (_, types) -> types.map { it.fqn }.distinct().size > 1 }
+            .forEach { (id, types) ->
+                logger.error(
+                    "同一个 typeId `$id` 被多个 @PublicApi 类型使用：${types.joinToString { it.fqn }}",
+                    types.first().declaration,
+                )
+            }
         val allProviders = singletonProviders(resolver, allModels, mainFqn)
         allProviders.flatMap { it.contracts }.forEach { it.providedSingleton = true }
 
@@ -225,13 +262,130 @@ internal class KeelPublicApiGenerator(
             dependencies = dependencies,
         )
 
-        if (apiDir != null) {
+        if (contractFirst) {
+            // 契约在 api 工件里手写；本模块不再生成镜像。
+            // 本地 @PublicApi 若出现在 CONTRACT_FIRST 构建里，说明模式用错了。
+            models.filter { it.kind == Kind.INTERFACE && !it.manual }.forEach { model ->
+                logger.error(
+                    "CONTRACT_FIRST 构建里的 @PublicApi 契约应放在 api 模块：${model.fqn}",
+                    model.declaration,
+                )
+            }
+        } else if (apiDir != null) {
             emitApi(models, apiDir)
         } else if (models.any { !it.manual && it.kind != Kind.PLUGIN }) {
             logger.warn(
                 "存在 @PublicApi 类型但本构建没有 api 工程；如需导出，创建 api/ 并配置 keel.api.dir",
                 main,
             )
+        }
+    }
+
+    /**
+     * core / contract-first 模式：本模块就是 api 工件，没有 `@KeelPluginMain`。
+     *
+     * 契约已经是手写源码，这里只按 `@PublicApi` 生成消费方需要的 Key 与 Proxy；
+     * 不生成镜像、分发器或单例访问器。落点由 `keel.api.dir` 指定，产物随仓库提交。
+     */
+    fun generateContracts(resolver: Resolver, apiDir: String?) {
+        val declarations = resolver.getSymbolsWithAnnotation(PUBLIC_API)
+            .filterIsInstance<KSClassDeclaration>()
+            .filter {
+                it.classKind == ClassKind.INTERFACE ||
+                    it.classKind == ClassKind.CLASS ||
+                    it.classKind == ClassKind.ENUM_CLASS
+            }
+            .distinctBy { it.qualifiedName?.asString() }
+            .sortedBy { it.qualifiedName?.asString() }
+            .toList()
+        if (declarations.isEmpty()) return
+
+        if (apiDir == null) {
+            logger.warn(
+                "CONTRACT_FIRST 模式需要 keel.api.dir 才能生成 proxy / Key",
+                declarations.first(),
+            )
+            return
+        }
+
+        val sharedNames = declarations
+            .filter { !isValueDeclaration(it) }
+            .mapNotNull { declaration ->
+                declaration.qualifiedName?.asString()
+                    ?.let { it to declaration.simpleName.asString() }
+            }
+            .toMap()
+
+        val models = declarations.mapNotNull { declaration ->
+            val fqn = declaration.qualifiedName?.asString() ?: return@mapNotNull null
+            val kind = when {
+                isValueDeclaration(declaration) -> Kind.VALUE
+                declaration.classKind == ClassKind.INTERFACE -> Kind.INTERFACE
+                declaration.classKind == ClassKind.CLASS -> Kind.CLASS
+                else -> return@mapNotNull null
+            }
+            if (kind == Kind.CLASS) {
+                logger.error("CONTRACT_FIRST core 模式暂不支持 open class 契约：$fqn", declaration)
+                return@mapNotNull null
+            }
+            val methods = if (kind == Kind.VALUE) {
+                emptyList()
+            } else {
+                extractMethods(declaration, kind, sharedNames)
+            }
+            TypeModel(
+                declaration = declaration,
+                fqn = fqn,
+                simpleName = declaration.simpleName.asString(),
+                id = idOf(declaration) ?: fqn,
+                kind = kind,
+                manual = false,
+                supported = methods != null,
+                methods = methods ?: emptyList(),
+                localProperties = if (methods == null) {
+                    emptyList()
+                } else {
+                    localMembers(declaration, kind)
+                },
+            )
+        }
+
+        emitContracts(models, apiDir)
+    }
+
+    /** core 模式：只写 Key 与 Proxy，契约本身已经是源码。 */
+    private fun emitContracts(models: List<TypeModel>, dir: String) {
+        val targets = models.filter { it.kind == Kind.INTERFACE && it.supported }
+        if (targets.isEmpty()) return
+
+        val root = java.io.File(dir)
+        root.mkdirs()
+        val directoryNeeds = apiDirectoryNeeds(targets)
+        // 三个 target 各跑一次 KSP，可能并发；用文件锁串行化
+        val lock = java.io.File(
+            System.getProperty("java.io.tmpdir"),
+            "keel-api-${dir.hashCode()}.lock",
+        )
+        java.nio.channels.FileChannel.open(
+            lock.toPath(),
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.WRITE,
+        ).use { channel ->
+            withFileLock(channel) {
+                targets.forEach { model ->
+                    val packageDir = java.io.File(root, model.packageName.replace('.', '/'))
+                    writeApiFile(
+                        packageDir,
+                        "${model.simpleName}Key.kt",
+                        renderApiKey(model),
+                    )
+                    writeApiFile(
+                        packageDir,
+                        "${model.simpleName}Proxy.kt",
+                        renderApiProxy(model, directoryNeeds),
+                    )
+                }
+            }
         }
     }
 
@@ -317,6 +471,7 @@ internal class KeelPublicApiGenerator(
                     manual = false,
                     supported = true,
                     methods = methods,
+                    localProperties = localMembers(declaration, Kind.INTERFACE),
                     external = true,
                 )
             }
@@ -384,13 +539,14 @@ internal class KeelPublicApiGenerator(
             return null
         }
 
-        val functions = declaration.getDeclaredFunctions()
+        val functions = contractFunctions(declaration, kind)
             .filter { function ->
                 function.simpleName.asString() != "<init>" &&
                     function.simpleName.asString() !in ANY_METHODS &&
                     function.extensionReceiver == null &&
                     function.typeParameters.isEmpty() &&
-                    function.visibility() == Visibility.PUBLIC
+                    function.visibility() == Visibility.PUBLIC &&
+                    function.annotations.none { it.isNamed(LOCAL_MEMBER) }
             }
             .filter { function ->
                 when (kind) {
@@ -424,9 +580,10 @@ internal class KeelPublicApiGenerator(
                     logger.error("不支持的参数类型 ${type.render()}：${function.qualifiedName}", function)
                     return null
                 }
-                if (wire is Wire.Shared && (kind != Kind.PLUGIN || function.parameters.size > 1)) {
+                if (wire is Wire.Shared && function.parameters.size > 1) {
+                    // 多参包成 Args DTO，共享对象无法按值序列化；契约里请拆成单参方法
                     logger.error(
-                        "共享类型参数只支持单参数插件方法：${function.qualifiedName}",
+                        "共享类型参数不能与其它参数混用：${function.qualifiedName}",
                         function,
                     )
                     return null
@@ -456,15 +613,105 @@ internal class KeelPublicApiGenerator(
         return methods
     }
 
+    /**
+     * 接口契约的有效方法集合。
+     *
+     * 接口要求代理实现全部抽象成员，所以必须展开父接口（`WebContext : Context`）；
+     * 类 / 插件仍只看自己声明的成员，避免把基类实现重复导出。
+     * 生成器不支持重载，按方法名去重，派生接口的覆盖优先。
+     */
+    private fun contractFunctions(
+        declaration: KSClassDeclaration,
+        kind: Kind,
+    ): List<KSFunctionDeclaration> {
+        val functions = if (kind == Kind.INTERFACE) {
+            declaration.getAllFunctions().toList()
+        } else {
+            declaration.getDeclaredFunctions().toList()
+        }
+        val self = declaration.qualifiedName?.asString()
+        return functions
+            .sortedByDescending { it.parentDeclaration?.qualifiedName?.asString() == self }
+            .distinctBy { it.simpleName.asString() }
+    }
+
+    /**
+     * 契约里的本地成员：标 `@LocalMember`，不进入跨边界分发。
+     *
+     * 方法只要有默认实现就不需要代理接管；属性必须是可空 `var`，
+     * 生成的代理才能写成 `override var x: T? = null`。
+     * 接口同样展开父接口，`WebRequestComponent` 才能拿到 `Component.context`。
+     */
+    private fun localMembers(
+        declaration: KSClassDeclaration,
+        kind: Kind,
+    ): List<LocalProperty> {
+        contractFunctions(declaration, kind)
+            .filter { function -> function.annotations.any { it.isNamed(LOCAL_MEMBER) } }
+            .forEach { function ->
+                if (function.isAbstract) {
+                    logger.error(
+                        "@LocalMember 方法必须带默认实现：${function.qualifiedName}",
+                        function,
+                    )
+                }
+            }
+        val properties = if (kind == Kind.INTERFACE) {
+            declaration.getAllProperties().toList()
+        } else {
+            declaration.getDeclaredProperties().toList()
+        }
+        val self = declaration.qualifiedName?.asString()
+        return properties
+            .sortedByDescending { it.parentDeclaration?.qualifiedName?.asString() == self }
+            .distinctBy { it.simpleName.asString() }
+            .filter { property ->
+                property.annotations.any { it.isNamed(LOCAL_MEMBER) } &&
+                    property.visibility() == Visibility.PUBLIC
+            }
+            .mapNotNull { property ->
+                val name = property.simpleName.asString()
+                if (!property.isMutable) {
+                    logger.error("@LocalMember 属性必须是 var：$name", property)
+                    return@mapNotNull null
+                }
+                val type = property.type.resolve()
+                if (!type.isMarkedNullable) {
+                    logger.error("@LocalMember 属性必须是可空类型：$name", property)
+                    return@mapNotNull null
+                }
+                LocalProperty(name, type.render())
+            }
+            .toList()
+    }
+
     private fun wireOf(type: KSType, shared: Map<String, String>): Wire? {
         val name = type.declaration.qualifiedName?.asString() ?: return null
         if (name == UNIT) return if (type.isMarkedNullable) null else Wire.Unit
 
         val sharedSimple = shared[name]
         if (sharedSimple != null) {
-            // 共享对象按句柄传，不支持可空或泛型包装
-            if (type.isMarkedNullable || type.arguments.isNotEmpty()) return null
-            return Wire.Shared(name, "${name.substringBeforeLast('.')}.$sharedSimple" + "Proxy")
+            // 共享对象按句柄传；可空单值用句柄 0 表示 null
+            if (type.arguments.isNotEmpty()) return null
+            return Wire.Shared(
+                fqn = name,
+                proxy = sharedProxy(name, sharedSimple),
+                nullable = type.isMarkedNullable,
+            )
+        }
+
+        // 共享对象列表：线格式是 List<SharedRef>，消费方按元素类型构造代理
+        if (name == LIST) {
+            val element = type.arguments.singleOrNull()?.type?.resolve() ?: return null
+            val elementName = element.declaration.qualifiedName?.asString() ?: return null
+            val elementSimple = shared[elementName]
+            if (elementSimple != null && !element.isMarkedNullable && element.arguments.isEmpty()) {
+                return Wire.Shared(
+                    fqn = elementName,
+                    proxy = sharedProxy(elementName, elementSimple),
+                    list = true,
+                )
+            }
         }
 
         return if (isValueType(type)) Wire.Value(type.render()) else null
@@ -664,6 +911,7 @@ internal class KeelPublicApiGenerator(
             val usesArgs = methods.any { it.params.size > 1 }
             if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
             if (usesValue) appendLine("import kotlinx.serialization.serializer")
+            if (usesSharedList(methods)) appendLine("import kotlinx.serialization.builtins.ListSerializer")
             appendLine("import moe.lolosia.keel.api.service.ServiceWire")
             appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
             appendLine("import moe.lolosia.keel.api.share.SharedProxy")
@@ -712,10 +960,7 @@ internal class KeelPublicApiGenerator(
         val call = apiBridgeCall(model, method, "sharedHandle", "Mirror", "base.${method.name}")
         when (val result = method.result) {
             Wire.Unit -> appendLine("$indent$call")
-            is Wire.Shared -> {
-                appendLine("${indent}val ref = ServiceWire.decode(SharedRef.serializer(), $call)")
-                appendLine("${indent}return ${result.proxy}(ref.handle)")
-            }
+            is Wire.Shared -> append(decodeSharedResult(result, call, indent, ""))
             else -> appendLine("${indent}return ServiceWire.decode(${serializer(result)}, $call)")
         }
     }
@@ -749,6 +994,9 @@ internal class KeelPublicApiGenerator(
             val usesArgs = model.methods.any { it.params.size > 1 }
             if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
             if (usesValue) appendLine("import kotlinx.serialization.serializer")
+            if (usesSharedList(model.methods)) {
+                appendLine("import kotlinx.serialization.builtins.ListSerializer")
+            }
             appendLine("import moe.lolosia.keel.api.service.ServiceWire")
             appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
             if (needsDirectory) appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
@@ -775,6 +1023,10 @@ internal class KeelPublicApiGenerator(
                     appendLine("class ${model.simpleName}Proxy(")
                     appendLine("    private val proxyHandle: Long$directory,")
                     appendLine(") : ${model.fqn} {")
+                    model.localProperties.forEach { property ->
+                        appendLine()
+                        appendLine("    override var ${property.name}: ${property.type} = null")
+                    }
                 }
             }
 
@@ -789,11 +1041,8 @@ internal class KeelPublicApiGenerator(
                 when (val result = method.result) {
                     Wire.Unit -> appendLine("        $call")
                     is Wire.Shared -> {
-                        appendLine(
-                            "        val ref = ServiceWire.decode(SharedRef.serializer(), $call)"
-                        )
                         val extra = if (directoryNeeds[result.fqn] == true) ", directory" else ""
-                        appendLine("        return ${result.proxy}(ref.handle$extra)")
+                        append(decodeSharedResult(result, call, "        ", extra))
                     }
                     else -> appendLine(
                         "        return ServiceWire.decode(${serializer(result)}, $call)"
@@ -826,9 +1075,7 @@ internal class KeelPublicApiGenerator(
         }
         val param = method.params.single()
         return when (val wire = param.wire) {
-            is Wire.Shared ->
-                "ServiceWire.encode(SharedRef.serializer(), " +
-                    "SharedRef(directory.handleOf(${param.name})))"
+            is Wire.Shared -> encodeSharedParam(wire, param.name)
             else -> "ServiceWire.encode(${serializer(wire)}, ${param.name})"
         }
     }
@@ -971,6 +1218,7 @@ internal class KeelPublicApiGenerator(
         val usesArgs = model.methods.any { it.params.size > 1 }
         if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
         if (usesValue) appendLine("import kotlinx.serialization.serializer")
+        if (usesSharedList(model.methods)) appendLine("import kotlinx.serialization.builtins.ListSerializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
         if (usesShared) appendLine("import moe.lolosia.keel.api.share.SharedRef")
@@ -982,6 +1230,12 @@ internal class KeelPublicApiGenerator(
         appendLine("/** `${model.fqn}` 的本地代理。 */")
         val superType = if (model.kind == Kind.INTERFACE) model.fqn else "${model.fqn}()"
         appendLine("internal class ${model.simpleName}Proxy(private val proxyHandle: Long) : $superType {")
+        if (model.kind == Kind.INTERFACE) {
+            model.localProperties.forEach { property ->
+                appendLine()
+                appendLine("    override var ${property.name}: ${property.type} = null")
+            }
+        }
         model.methods.forEach { method ->
             appendLine()
             appendLine(
@@ -998,10 +1252,7 @@ internal class KeelPublicApiGenerator(
         val call = bridgeCall(model, method)
         when (val result = method.result) {
             Wire.Unit -> appendLine("$indent$call")
-            is Wire.Shared -> {
-                appendLine("$indent val ref = ServiceWire.decode(SharedRef.serializer(), $call)")
-                appendLine("$indent return ${result.proxy}(ref.handle)")
-            }
+            is Wire.Shared -> append(decodeSharedResult(result, call, "$indent ", ""))
             else -> appendLine("$indent return ServiceWire.decode(${serializer(result)}, $call)")
         }
     }
@@ -1035,6 +1286,7 @@ internal class KeelPublicApiGenerator(
         val usesArgs = model.methods.any { it.params.size > 1 }
         if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
         if (usesValue) appendLine("import kotlinx.serialization.serializer")
+        if (usesSharedList(model.methods)) appendLine("import kotlinx.serialization.builtins.ListSerializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDispatcher")
@@ -1079,6 +1331,7 @@ internal class KeelPublicApiGenerator(
         val usesArgs = model.methods.any { it.params.size > 1 }
         if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
         if (usesValue) appendLine("import kotlinx.serialization.serializer")
+        if (usesSharedList(model.methods)) appendLine("import kotlinx.serialization.builtins.ListSerializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         appendLine("import moe.lolosia.keel.api.share.PublicApiBridge")
         appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
@@ -1155,6 +1408,7 @@ internal class KeelPublicApiGenerator(
         val usesArgs = model.methods.any { it.params.size > 1 }
         if (usesArgs) appendLine("import kotlinx.serialization.Serializable")
         if (usesValue) appendLine("import kotlinx.serialization.serializer")
+        if (usesSharedList(model.methods)) appendLine("import kotlinx.serialization.builtins.ListSerializer")
         appendLine("import moe.lolosia.keel.api.service.ServiceWire")
         if (model.dispatcherNeedsDirectory) {
             appendLine("import moe.lolosia.keel.api.share.PublicApiDirectory")
@@ -1321,11 +1575,7 @@ internal class KeelPublicApiGenerator(
         }
         method.params.firstOrNull()?.let { param ->
             when (val wire = param.wire) {
-                is Wire.Shared ->
-                    appendLine(
-                        "${indent}val ${param.name} = " +
-                            "${wire.proxy}(ServiceWire.decode(SharedRef.serializer(), payload).handle)"
-                    )
+                is Wire.Shared -> append(decodeSharedParam(wire, param.name, indent))
                 else ->
                     appendLine(
                         "${indent}val ${param.name} = " +
@@ -1342,13 +1592,7 @@ internal class KeelPublicApiGenerator(
                 appendLine("${indent}$call")
                 appendLine("${indent}ByteArray(0)")
             }
-            is Wire.Shared -> {
-                appendLine("${indent}val value = $call")
-                appendLine(
-                    "${indent}ServiceWire.encode(SharedRef.serializer(), " +
-                        "SharedRef(directory.handleOf(value)))"
-                )
-            }
+            is Wire.Shared -> append(encodeSharedResult(result, call, indent))
             else -> appendLine("${indent}ServiceWire.encode(${serializer(result)}, $call)")
         }
     }
@@ -1357,13 +1601,7 @@ internal class KeelPublicApiGenerator(
         val call = "shadow.${method.name}(${method.callArguments()})"
         when (val result = method.result) {
             Wire.Unit -> appendLine("${indent}$call")
-            is Wire.Shared -> {
-                appendLine("${indent}val value = $call")
-                appendLine(
-                    "${indent}ServiceWire.encode(SharedRef.serializer(), " +
-                        "SharedRef(directory.handleOf(value)))"
-                )
-            }
+            is Wire.Shared -> append(encodeSharedResult(result, call, indent))
             else -> appendLine("${indent}ServiceWire.encode(${serializer(result)}, $call)")
         }
     }
@@ -1375,6 +1613,106 @@ internal class KeelPublicApiGenerator(
         Wire.Unit -> error("Unit 没有序列化器")
         is Wire.Value -> "serializer<${wire.type}>()"
         is Wire.Shared -> "SharedRef.serializer()"
+    }
+
+    /** 共享对象的代理类名；与 impl 侧 `renderProxy` 的命名保持一致。 */
+    private fun sharedProxy(fqn: String, simple: String): String =
+        "${fqn.substringBeforeLast('.')}.$simple" + "Proxy"
+
+    /** 模型里是否有共享对象列表；决定生成文件要不要导入 `ListSerializer`。 */
+    private fun usesSharedList(methods: List<Method>): Boolean =
+        methods.any { method ->
+            method.params.any { (it.wire as? Wire.Shared)?.list == true } ||
+                (method.result as? Wire.Shared)?.list == true
+        }
+
+    /** 代理侧：把共享结果解码成本地代理；[extra] 是代理构造器额外参数（如 `, directory`）。 */
+    private fun decodeSharedResult(
+        result: Wire.Shared,
+        call: String,
+        indent: String,
+        extra: String,
+    ): String = buildString {
+        when {
+            result.list -> {
+                appendLine(
+                    "${indent}val refs = ServiceWire.decode(" +
+                        "ListSerializer(SharedRef.serializer()), $call)"
+                )
+                appendLine("${indent}return refs.map { ${result.proxy}(it.handle$extra) }")
+            }
+            result.nullable -> {
+                appendLine("${indent}val ref = ServiceWire.decode(SharedRef.serializer(), $call)")
+                appendLine(
+                    "${indent}return if (ref.handle == 0L) null else " +
+                        "${result.proxy}(ref.handle$extra)"
+                )
+            }
+            else -> {
+                appendLine("${indent}val ref = ServiceWire.decode(SharedRef.serializer(), $call)")
+                appendLine("${indent}return ${result.proxy}(ref.handle$extra)")
+            }
+        }
+    }
+
+    /** 所有者侧：把本地调用结果编码成共享句柄载荷。 */
+    private fun encodeSharedResult(
+        result: Wire.Shared,
+        call: String,
+        indent: String,
+    ): String = buildString {
+        appendLine("${indent}val value = $call")
+        when {
+            result.list -> appendLine(
+                "${indent}ServiceWire.encode(ListSerializer(SharedRef.serializer()), " +
+                    "value.map { SharedRef(directory.handleOf(it)) })"
+            )
+            result.nullable -> appendLine(
+                "${indent}ServiceWire.encode(SharedRef.serializer(), " +
+                    "if (value == null) SharedRef(0) else SharedRef(directory.handleOf(value)))"
+            )
+            else -> appendLine(
+                "${indent}ServiceWire.encode(SharedRef.serializer(), " +
+                    "SharedRef(directory.handleOf(value)))"
+            )
+        }
+    }
+
+    /** 代理侧：把共享参数编码成句柄载荷表达式。 */
+    private fun encodeSharedParam(wire: Wire.Shared, name: String): String = when {
+        wire.list ->
+            "ServiceWire.encode(ListSerializer(SharedRef.serializer()), " +
+                "$name.map { SharedRef(directory.handleOf(it)) })"
+        wire.nullable ->
+            "ServiceWire.encode(SharedRef.serializer(), " +
+                "$name?.let { SharedRef(directory.handleOf(it)) } ?: SharedRef(0))"
+        else -> "ServiceWire.encode(SharedRef.serializer(), SharedRef(directory.handleOf($name)))"
+    }
+
+    /** 所有者侧：把共享参数载荷解码成代理。 */
+    private fun decodeSharedParam(
+        wire: Wire.Shared,
+        name: String,
+        indent: String,
+    ): String = buildString {
+        when {
+            wire.list -> appendLine(
+                "${indent}val $name = ServiceWire.decode(" +
+                    "ListSerializer(SharedRef.serializer()), payload)" +
+                    ".map { ${wire.proxy}(it.handle) }"
+            )
+            wire.nullable -> {
+                appendLine("${indent}val ${name}Ref = ServiceWire.decode(SharedRef.serializer(), payload)")
+                appendLine(
+                    "${indent}val $name = if (${name}Ref.handle == 0L) null else " +
+                        "${wire.proxy}(${name}Ref.handle)"
+                )
+            }
+            else -> appendLine(
+                "${indent}val $name = ${wire.proxy}(" +
+                    "ServiceWire.decode(SharedRef.serializer(), payload).handle)"
+            )
+        }
     }
 
     // ---------------------------------- 注解与文件 ----------------------------------
@@ -1474,11 +1812,13 @@ internal class KeelPublicApiGenerator(
     private companion object {
         const val PUBLIC_API = "moe.lolosia.keel.api.annotation.PublicApi"
         const val PUBLIC_API_HANDLER = "moe.lolosia.keel.api.annotation.PublicApiHandler"
+        const val LOCAL_MEMBER = "moe.lolosia.keel.api.annotation.LocalMember"
         const val SINGLETON = "moe.lolosia.keel.api.annotation.Singleton"
         const val PLUGIN_CONTEXT = "moe.lolosia.keel.api.PluginContext"
         const val SERIALIZABLE = "kotlinx.serialization.Serializable"
         const val SERIALIZABLE_WITH = "kotlinx.serialization.SerializableWith"
         const val UNIT = "kotlin.Unit"
+        const val LIST = "kotlin.collections.List"
         const val API_HEADER = "// 由 keel-plugin-ksp 生成，不要手改。"
         val COLLECTIONS = setOf(
             "kotlin.collections.List",

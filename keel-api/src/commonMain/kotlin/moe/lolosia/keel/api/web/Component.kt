@@ -1,5 +1,6 @@
 package moe.lolosia.keel.api.web
 
+import moe.lolosia.keel.api.annotation.LocalMember
 import moe.lolosia.keel.api.annotation.PublicApi
 
 /**
@@ -15,10 +16,12 @@ interface Component {
     /**
      * 当前挂载的 Context；由 [Context.addComponent] / [Context.removeComponent] 维护。
      *
-     * 这是本地生命周期状态，不属于跨插件契约面，实现方不要自己改；
-     * 实现类声明 `override var context: Context? = null` 即可。
+     * 这是本地生命周期状态，标 [LocalMember] 后不进入跨插件契约面：
+     * KSP 不生成它的跨界分发，代理在本地用 `null` 初始化。
+     * 实现方不要自己改；实现类声明 `override var context: Context? = null` 即可。
      * 非 null 表示组件仍挂载，此时 [destroy] 应当直接返回。
      */
+    @LocalMember
     var context: Context?
 
     /**

@@ -133,6 +133,9 @@ gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
   - 会创建文件的处理器不要在首轮 `deferred`：KSP 会重跑同一轮，重复 `createNewFile` 直接抛 `FileAlreadyExistsException`。
   - 处理器依赖必须赶在 `ksp<target>` 配置创建时挂上（用 `configurations.configureEach`）；
     晚于 KSP 的 `afterEvaluate` 再加就只有空 classpath，症状是「KSP 跑完但什么都没生成」。
+  - `keel-plugin-ksp` 的 `keel.api.mode` 默认 `MIRROR`（impl 生成 api 镜像）；
+    `CONTRACT_FIRST` 用于手写契约的 api 模块。`keel-api` 始终是 `CONTRACT_FIRST` 且没有
+    `@KeelPluginMain`（core 模式），只生成 proxy / Key 并写回 `src/commonMain/kotlin`（V1 提交制）。
 - **当前没有自动化测试**（`commonTest` 未接入）；验证靠编译 + `keel-host --inspect` / `--plugins` 冒烟，
   历史输出见 [doc/记忆/验证记录.md](doc/记忆/验证记录.md)。
 
@@ -504,7 +507,7 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
                                       Ansi / LogLineFormatter（Spring Boot 配色与行格式）
                                       LogRecord / LogError / LogLine / LogPage / LogFormat / LogTextFormat
                                       LogRecordFormat（PLAIN / ANSI / RAW 的共享渲染）/ LogHistory / NoneLogHistory
-  annotation/  KeelPluginMain / PublicApi / Singleton / PublicApiHandler
+  annotation/  KeelPluginMain / PublicApi / Singleton / PublicApiHandler / LocalMember / PublicApiProvider
   auth/        Authenticator / Authorizer / AuthnRequest / AuthnReply / AuthzRequest / AuthzReply / AuthzSnapshot
   callback/    CallbackDescriptor / CallbackInvoker / CallbackRegistry
   command/     Command / CommandSender / ConsoleCommandRequest / ConsoleCommandResult
@@ -519,6 +522,8 @@ keel-api/src/commonMain/kotlin/moe/lolosia/keel/api/
   storage/     PluginStorage / StorageOp / StorageRequest / StorageReply
   web/         Annotations（注解集中例外）/ Context / HttpRequest / HttpResponse / ResponseBody
                UserSnapshot / RouteDescriptor / Routes / GeneratedRoutes / PermissionNode / ApiResult
+               ContextProxy / ContextKey / WebContextProxy / WebRequestComponentProxy / ComponentProxy
+               （后三组由 keel-plugin-ksp 的 core 模式生成，勿手改）
 keel-api/src/nativeMain/…/api/worker/
   PluginWorker.kt                     `@CName` Worker 入口分发（生命周期 / PING / TIMER / HTTP / CONSOLE / SHARED_CALL / AUTHN / AUTHZ）
   NativePluginLogger.kt               插件日志 → Host 收件箱

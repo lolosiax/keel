@@ -3,6 +3,8 @@ import moe.lolosia.keel.gradle.common.*
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
+    // keel-api 本身就是 api 工件：CONTRACT_FIRST 下由 KSP 生成 proxy / Key
+    alias(libs.plugins.ksp)
     // 本模块自己也要被日志插件处理：`Log.site()` 在 keel-api 内部才有调用点
     id("moe.lolosia.keel.logger")
     `maven-publish`
@@ -30,6 +32,27 @@ group = "moe.lolosia.keel"
 version = libs.versions.keel.get()
 
 apply(from = "../gradle/publishing.gradle.kts")
+
+/**
+ * core / contract-first 模式的 KSP 处理器。
+ *
+ * 本模块没有 `@KeelPluginMain`，处理器只按 `@PublicApi` 契约生成 proxy / Key；
+ * 产物写回 `src/commonMain/kotlin`（V1 提交制），所以 `keel.api.dir` 指向源码目录。
+ */
+ksp {
+    arg("keel.api.mode", "CONTRACT_FIRST")
+    arg("keel.api.dir", file("src/commonMain/kotlin").absolutePath)
+}
+
+// 处理器依赖必须赶在 KSP 建 `ksp<target>` 配置时挂上（KSP 在 afterEvaluate 里固定 classpath）
+configurations.configureEach {
+    if (name == "kspMingwX64" || name == "kspLinuxArm64" || name == "kspLinuxX64") {
+        project.dependencies.add(
+            name,
+            "moe.lolosia.keel.toolchain:keel-plugin-ksp:${libs.versions.keel.get()}",
+        )
+    }
+}
 
 // ABI 头文件归 keel-abi 所有（契约与实现同属一个构建）；def 仍留在本构建。
 // 当前直接读兄弟目录的头文件；等 keel-abi 发布 include 产物后改为构建期解压。

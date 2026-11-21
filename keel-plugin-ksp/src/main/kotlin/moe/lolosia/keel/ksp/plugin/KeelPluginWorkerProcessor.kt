@@ -11,6 +11,13 @@ private const val API_DIR_OPTION = "keel.api.dir"
 /** 消费方子类胶水的落点；默认不生成。 */
 private const val GLUE_DIR_OPTION = "keel.glue.dir"
 
+/** 生成模式：`MIRROR`（默认，impl 生成 api）或 `CONTRACT_FIRST`（契约手写在 api 模块）。 */
+private const val MODE_OPTION = "keel.api.mode"
+
+private const val MODE_MIRROR = "MIRROR"
+
+private const val MODE_CONTRACT_FIRST = "CONTRACT_FIRST"
+
 /**
  * 插件 Worker 入口生成器。
  *
@@ -22,13 +29,24 @@ private const val GLUE_DIR_OPTION = "keel.glue.dir"
  */
 class KeelPluginWorkerProcessorProvider : SymbolProcessorProvider {
 
-    override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor =
-        KeelPluginWorkerProcessor(
+    override fun create(environment: SymbolProcessorEnvironment): SymbolProcessor {
+        val mode = environment.options[MODE_OPTION]?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+        val contractFirst = when (mode) {
+            null, MODE_MIRROR -> false
+            MODE_CONTRACT_FIRST -> true
+            else -> {
+                environment.logger.warn("未知的 keel.api.mode=$mode，按 MIRROR 处理")
+                false
+            }
+        }
+        return KeelPluginWorkerProcessor(
             codeGenerator = environment.codeGenerator,
             logger = environment.logger,
             apiDir = environment.options[API_DIR_OPTION]?.takeIf { it.isNotBlank() },
             glueDir = environment.options[GLUE_DIR_OPTION]?.takeIf { it.isNotBlank() },
+            contractFirst = contractFirst,
         )
+    }
 }
 
 private class KeelPluginWorkerProcessor(
@@ -36,9 +54,13 @@ private class KeelPluginWorkerProcessor(
     private val logger: KSPLogger,
     private val apiDir: String?,
     private val glueDir: String?,
+    private val contractFirst: Boolean,
 ) : SymbolProcessor {
 
     private var generated = false
+
+    /** core 模式（无 `@KeelPluginMain`）只生成一次；KSP 每轮都会再进 process。 */
+    private var coreGenerated = false
 
     private val publicApi = KeelPublicApiGenerator(codeGenerator, logger)
 
@@ -50,7 +72,14 @@ private class KeelPluginWorkerProcessor(
         val mains = resolver.getSymbolsWithAnnotation(ANNOTATION)
             .filterIsInstance<KSClassDeclaration>()
             .toList()
-        if (mains.isEmpty()) return emptyList()
+        if (mains.isEmpty()) {
+            // 没有插件入口：CONTRACT_FIRST 下这是 api / core 模块，只生成 proxy 与 Key
+            if (!coreGenerated) {
+                coreGenerated = true
+                if (contractFirst) publicApi.generateContracts(resolver, apiDir)
+            }
+            return emptyList()
+        }
 
         // 还没解析完的符号留到下一轮，避免误报「没有 @KeelPluginMain」
         val deferred = mains.filterNot { it.validate() }
@@ -69,7 +98,7 @@ private class KeelPluginWorkerProcessor(
         }
 
         // @PublicApi 的注册表与 Worker 入口成对生成：入口固定引用 KeelPluginPublicApi
-        publicApi.generate(resolver, main, apiDir)
+        publicApi.generate(resolver, main, apiDir, contractFirst)
 
         // 消费方子类（如 Dog : Animal）的 overrides / dispatcher，写进提交制的源码目录
         subclass.generate(resolver)
