@@ -62,6 +62,26 @@ internal object HostShared {
     /** 类型由哪个插件声明；没有声明过的类型返回 null。 */
     fun declaringOf(typeId: String): ULong? = types[typeId]?.declaring
 
+    /**
+     * 释放一个共享对象。
+     *
+     * 只允许所有者释放；句柄移除后，其它持有者的后续调用会得到
+     * “shared object closed”。登记的类型声明不受影响（它们跟插件生命周期走）。
+     */
+    fun release(pluginId: ULong, handle: Long) {
+        val entry = entries[handle] ?: return
+        if (entry.owner != pluginId) {
+            Log.warn(
+                "插件 $pluginId 试图释放不属于它的句柄 $handle（owner=${entry.owner}）",
+                tag = "Shared",
+            )
+            return
+        }
+        entries.remove(handle)
+        singletons.entries.removeAll { it.value == handle }
+        Log.info("released handle=$handle owner=$pluginId", tag = "Shared")
+    }
+
     /** 登记一个对象；返回 Host 分配的句柄。 */
     fun register(pluginId: ULong, registration: SharedRegistration): Long {
         val handle = nextHandle++

@@ -15,7 +15,9 @@
 > `@PublicApiProvider` 已接线：plugin 模式生成多契约并集分发器并写进 `KeelPluginPublicApi.setup`；
 > core 模式（`keel.provider.dir`）为 `RequestContextImpl` 生成
 > `RequestContextImplDispatcher` / `RequestContextImplProvider.register(...)`。
-> 每请求实例的登记调用与释放语义、跨插件 Context 传递**尚未接线**。
+> 释放语义已落地：`PublicApiDirectory.release` + `PUBLIC_API_RELEASE` + `HostShared.release`；
+> `LocalContext.shareHandle()` 按需登记，`Context.destroy()` 释放句柄。
+> 挂载组件的跨界登记、真正的跨插件 Context 传递示例**尚未接线**。
 
 ## 0. 决策摘要
 
@@ -629,7 +631,8 @@ mode == CONTRACT_FIRST:
 4. ✅ impl 模块只生成并集分发器 + 注册，不生成 `Context` 镜像；
    `RequestContextImpl` 已标注，core 模式生成 `RequestContextImplProvider.register(directory, impl)`；
 5. ⏳ 插件 A 创建 Context，插件 B 拿到 handle 调用 `components()`；若 A 提供 `WebContext`，再调用 `webRequest()`
-   （`RequestContextImplProvider.register` 目前只生成未调用：每请求登记需要配套的句柄释放，留到跨插件传递一起做）；
+   （`LocalContext.shareHandle()` 已按需登记、`destroy()` 已释放；
+   但 `components()` 里的组件还没有跨界句柄，组件登记是下一步）；
 6. 本地组件在 B 侧不可见；公共组件通过显式方法可见；
 7. 所有目标编译通过（`keel-api` / hello / basic-biz / rbac 已验证）。
 

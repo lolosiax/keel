@@ -74,6 +74,9 @@ object HostSubjects {
     /** 请求：共享对象方法调用；载荷见 [SharedCall]，Host 按句柄路由。 */
     const val SHARED_CALL: Long = 0x1016L
 
+    /** 通知：释放本插件登记的共享对象；载荷是 CBOR 的 `SharedRef`。 */
+    const val PUBLIC_API_RELEASE: Long = 0x1018L
+
     /**
      * 请求：按 typeId 远程构造共享对象；载荷见 [SharedCreateRequest]。
      *

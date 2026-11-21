@@ -780,6 +780,12 @@ internal object HostPump {
                 ByteArray(0)
             }
 
+            HostSubjects.PUBLIC_API_RELEASE -> {
+                val ref = decodePayload(SharedRef.serializer(), payload, "共享对象释放")
+                HostShared.release(source, ref.handle)
+                ByteArray(0)
+            }
+
             HostSubjects.PUBLIC_API_REGISTER -> {
                 val request = decodePayload(SharedRegistration.serializer(), payload, "共享对象登记")
                 val handle = HostShared.register(source, request)

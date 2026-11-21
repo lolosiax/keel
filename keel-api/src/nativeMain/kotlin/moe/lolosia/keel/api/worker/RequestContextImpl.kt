@@ -2,6 +2,7 @@ package moe.lolosia.keel.api.worker
 
 import moe.lolosia.keel.api.PluginContext
 import moe.lolosia.keel.api.annotation.PublicApiProvider
+import moe.lolosia.keel.api.share.SharedRef
 import moe.lolosia.keel.api.web.*
 
 /**
@@ -24,6 +25,8 @@ internal class RequestContextImpl(
     override val local: MutableMap<String, Any?> = mutableMapOf()
 
     private val componentMap = mutableMapOf<String, Component>()
+
+    private var sharedRef: SharedRef? = null
 
     init {
         val webRequest = WebRequestComponentImpl(request, pathParameters, user)
@@ -53,21 +56,32 @@ internal class RequestContextImpl(
     override suspend fun webRequest(): WebRequestComponent? =
         componentMap[WebRequestComponent.TYPE_ID] as? WebRequestComponent
 
+    override suspend fun shareHandle(): SharedRef =
+        sharedRef ?: RequestContextImplProvider.register(plugin.publicApi, this)
+            .also { sharedRef = it }
+
     /**
      * 先解除挂载，再按逆序释放；组件在 destroy 里看到的 `context` 已经是 null。
-     * 先清空表，避免组件在 destroy 里再次操作本表。
+     * 先清空表，避免组件在 destroy 里再次操作本表；最后释放共享句柄，
+     * 组件销毁抛异常时也要释放。
      */
     override suspend fun destroy() {
-        if (componentMap.isEmpty()) return
         val mounted = componentMap.values.toList().asReversed()
         componentMap.clear()
         mounted.forEach { it.context = null }
         var failure: Throwable? = null
-        for (component in mounted) {
-            try {
-                component.destroy()
-            } catch (t: Throwable) {
-                if (failure == null) failure = t
+        try {
+            for (component in mounted) {
+                try {
+                    component.destroy()
+                } catch (t: Throwable) {
+                    if (failure == null) failure = t
+                }
+            }
+        } finally {
+            sharedRef?.let {
+                plugin.publicApi.release(this)
+                sharedRef = null
             }
         }
         failure?.let { throw it }

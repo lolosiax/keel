@@ -67,6 +67,15 @@ interface PublicApiDirectory {
     fun handleOf(instance: Any): Long
 
     /**
+     * 释放本插件登记的实例。
+     *
+     * 只有登记方可以释放；未登记或不属于本插件时是空操作。
+     * 释放后 Host 侧句柄立即失效，其它持有者的后续调用得到
+     * “shared object closed” 错误。
+     */
+    fun release(instance: Any)
+
+    /**
      * 取声明方登记的单例；不存在时返回 null。
      *
      * @param factory 由生成的代理提供：句柄 → 本地代理

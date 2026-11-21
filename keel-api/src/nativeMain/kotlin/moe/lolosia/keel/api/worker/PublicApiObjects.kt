@@ -141,6 +141,15 @@ internal object PublicApiObjects : PublicApiDirectory, PublicApiBridge.Remote {
             ?: (instance as? SharedProxy)?.sharedHandle?.takeIf { it != 0L }
             ?: throw IllegalArgumentException("对象尚未登记为 @PublicApi 共享对象")
 
+    override fun release(instance: Any) {
+        val local = locals.firstOrNull { it.instance === instance } ?: return
+        locals.remove(local)
+        callHost(
+            HostSubjects.PUBLIC_API_RELEASE.toULong(),
+            ServiceWire.encode(SharedRef.serializer(), SharedRef(local.handle)),
+        )
+    }
+
     override fun <T : Any> getInstance(key: PublicApiKey<T>, factory: (Long) -> T): T? =
         runCatching { requireInstance(key, factory) }.getOrNull()
 
