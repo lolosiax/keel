@@ -1,10 +1,11 @@
 # 第三方原生库：封装发布与许可合规
 
-> 状态：方案（2026-11-19，插件与首批工件已落地）。本文回答两件事：
+> 状态：方案（2026-11-21）。本文回答两件事：
 > keel 如何发布第三方原生库的封装；分发这些产物时如何满足许可义务。
 > `keel-thirdparty-gradle-plugin` 已实现消费接线与 check / notices / verify / publish；
 > `keel-thirdparty/` 已迁入 6 个 codec（zlib / png / webp / jpeg / gif / msgpack），
-> SQLite 等其余库仍待补。与实现冲突时以代码为准，并回头修本文。
+> SQLite 等其余库仍待补。本次补充了 A 类的源码 / `.a` 消费与
+> `NATIVE` / `KLIB` / `BOTH` 发布形态。与实现冲突时以代码为准，并回头修本文。
 
 ---
 
@@ -30,6 +31,14 @@
 
 A 类不发布 cinterop 工件：插件永远只经过能力 ABI，不直接调用 `sqlite3_*` / `mysql_*`。
 B 类才需要头文件、`.def` 与链接参数。
+
+A 类的构建输入可以有两种来源：
+
+- 预编译工件：按 `<lib>-<target>` 解析 zip，解出 `include/` + `lib/<target>/`；
+- 源码构建：能力包构建读取 `keel-thirdparty` 的源码树，现场编译自己的门面 `.a`
+  （参考 `lolosia-backend` 的 `liblolosia.a`），并依赖其它 thirdparty 的 `.a`。
+  多个静态库按链接顺序写进 `.def` 的 `staticLibraries`，用 `-libraryPath` 指向各自目录。
+  源码构建只改变构建输入，不改变 A 类「只发布 `.keel`」的交付形态。
 
 ---
 
@@ -117,11 +126,22 @@ keel {
 - 发布一个 BOM（`keel-thirdparty-bom`），`keel { thirdparty { library("sqlite") } }` 不写版本时按 BOM 解析。
 - 原生库可以单独发补丁版，不必等 keel 主版本；BOM 负责把一组版本钉成一套。
 
-### 2.5 可选：预编译 klib
+### 2.5 发布形态：NATIVE / KLIB / BOTH
 
-不作为默认发布物。klib 与 Kotlin/Native 编译器版本绑定，外部插件换版本就会失效。
-需要加速时，由 `keel-thirdparty-gradle-plugin` 在消费方本地生成一次并缓存；
-真要发布，按 Kotlin 版本命名（`sqlite-klib-2.4.20`），并标明只适用于该版本。
+每个库、每个目标可以配置发布形态：
+
+| 形态 | 产物 | 适用 |
+| --- | --- | --- |
+| `NATIVE` | `.a` / `.so` + 头文件 + `.def` 的 zip | 默认；A 类能力包构建、B 类 cinterop |
+| `KLIB` | K/N klib（与 Kotlin 版本绑定） | 可选加速；外部插件换版本可能失效 |
+| `BOTH` | 同时发布 native zip 与 klib | 需要同时服务两种消费方 |
+
+- 默认 `NATIVE`；A 类数据库驱动只消费 `NATIVE`，不发布 cinterop 工件。
+- klib 坐标按 Kotlin 版本命名：`<group>:<lib>-klib-<kotlinVersion>-<target>:<version>`；
+  native 坐标保持 `<group>:<lib>-<target>:<version>@zip`。
+- `keel-thirdparty-gradle-plugin` 的消费侧要同时支持「解包 native」和「直接用 klib」；
+  A 类驱动构建只走 native 模式（只解包 `include/` + `lib/`，不建 cinterop）。
+- klib 不是必选项；不在仓库里提交生成的 klib。
 
 ### 2.6 脱离 keel 使用
 
@@ -370,6 +390,10 @@ MariaDB Connector/C 属于 LGPL：实现上优先动态链接，不要把它静�
    **插件已实现**（`keel-thirdparty-gradle-plugin`）：manifest 为空时门禁任务跳过。
 2. 第一个工件用 SQLite（公有领域、单文件 amalgamation）打通全流程；
    需要上游源码的 `source.sha256` 与各目标产物。
-3. MariaDB Connector/C 先定动态链接的部署形态（`.dll` / `.so` 放在哪、如何替换）。
-4. 把 `--licenses` 与单 exe 声明聚合接进 Host。
-5. LGPL 静态链接、AGPL 等边界场景走一次法务确认。
+3. 给 A 类补 native 消费模式：驱动构建只解包 `include/` + `lib/<target>/`，不建 cinterop；
+   同时允许现场编译自己的门面 `.a` 并依赖其它 thirdparty 的 `.a`
+   （参考 `lolosia-backend` 的 `liblolosia.a`）。
+4. MariaDB Connector/C 先定动态链接的部署形态（`.dll` / `.so` 放在哪、如何替换）；
+   加载方式复用 `kigers-live-helper` 的 `LoadLibraryExW` / `dlopen`。
+5. 把 `--licenses` 与单 exe 声明聚合接进 Host。
+6. LGPL 静态链接、AGPL 等边界场景走一次法务确认。
