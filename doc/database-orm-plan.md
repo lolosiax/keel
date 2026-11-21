@@ -28,8 +28,12 @@
 > `isNull` / `isIn` / `between` / `like` / `contains` / `orderBy` / `limit` / `offset`，
 > 以及 `findList` / `findFirst` / `findCount` / `findPage`、`insert` / `update` / `delete` /
 > `lastInsertId`。
+> `keel-orm-ksp` 已落地：`@Table` → `<Entity>Meta`（列顺序 / read / writeInsert / writeUpdate /
+> idOf）、`<Entity>Columns`（`QueryScope<T>.列`）、`OrmMetaBootstrap`（方言 + 实体登记，
+> 固定包 `moe.lolosia.keel.orm.generated`）；支持 superclass 链字段收集、camel→snake、
+> `@Column(name)`、`@Generated` 主键，未知类型直接报错。
 > ABI v2（`options` / `last_insert_id` / DECIMAL·TIMESTAMP·JSON·UUID）、
-> MariaDB 真实驱动、`keel-orm-ksp` 与 Gradle 接线仍未做。
+> MariaDB 真实驱动与 Gradle 接线仍未做。
 
 ---
 

@@ -30,6 +30,11 @@ object OrmTypes {
         override fun decode(row: Row, index: Int): Long = row.longOrNull(index) ?: 0L
     }
 
+    val INT32: OrmType<Int> = object : OrmType<Int> {
+        override fun encode(value: Int): DbValue = DbValue.Integer(value.toLong())
+        override fun decode(row: Row, index: Int): Int = (row.longOrNull(index) ?: 0L).toInt()
+    }
+
     val REAL: OrmType<Double> = object : OrmType<Double> {
         override fun encode(value: Double): DbValue = DbValue.Decimal(value)
         override fun decode(row: Row, index: Int): Double = row.doubleOrNull(index) ?: 0.0
