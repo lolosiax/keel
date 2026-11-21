@@ -6,6 +6,8 @@ plugins {
     // 示例控制器里的 DTO 用 @Serializable，生成器按类型取序列化器
     alias(libs.plugins.kotlin.serialization)
     id("moe.lolosia.keel.plugin")
+    // ORM 接线：挂 keel-orm-ksp、加 keel-orm / keel-database-api、下发方言
+    id("moe.lolosia.keel.database")
 }
 
 group = "moe.lolosia.keel.plugins"
@@ -46,6 +48,9 @@ keel {
         // 这样 IDE 里在 keel-host 的 .kt 行上打断点才有 locationId 可下发。
         runHostExecutable = "../keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe"
         runHostDebugDir = "../keel-host/build/keel-debug"
+    }
+    database {
+        dialect = "sqlite"
     }
 }
 

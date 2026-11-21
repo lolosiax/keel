@@ -1,6 +1,8 @@
 pluginManagement {
     includeBuild("../keel-plugin-gradle-plugin")
     includeBuild("../keel-abi-gradle-plugin")
+    // ORM 接线：keel { database { dialect = "sqlite" } }
+    includeBuild("../keel-database-gradle-plugin")
     repositories {
         maven("https://maven.aliyun.com/repository/public/")
         maven("https://maven.aliyun.com/repository/gradle-plugin")
