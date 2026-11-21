@@ -115,8 +115,12 @@ Keel is built around a componentized plug-in model. Components ship as independe
 | `keel-abi` | C ABI headers and per-target static libraries: queues, events, bootstrap, console, and crash handling |
 | `keel-classpath` | Read-only resource layer: zip, directory, prefix view, and streaming reads |
 | `keel-classpath-full` | Host registry, generation-aware resource references, and cross-module proxies |
+| `keel-database-api` | Database capability ABI plus the plugin-side Kotlin facade (`KeelDatabase`, `Row`, `Context.database`) |
+| `keel-orm` | ORM runtime: annotations, `EntityMeta`, SQL dialects, query DSL, CRUD, and paging |
+| `keel-orm-ksp` | Entity code generator: `@Table` to `EntityMeta`, typed columns, and `OrmMetaBootstrap` |
+| `keel-database-sqlite` / `keel-database-mariadb` | `kind: capability` driver packages loaded from `plugins/` |
 | `keel-plugin-*` | Business plugins. Each plugin is a top-level independent Gradle build. |
-| `keel-*-gradle-plugin` | Build-time Gradle plugins: embedding, packaging, ABI injection, logger attachment, and publishing |
+| `keel-*-gradle-plugin` | Build-time Gradle plugins: embedding, packaging, ABI injection, logger attachment, database/ORM wiring, and publishing |
 | `keel-router-ksp` | Route table code generator |
 | `keel-plugin-ksp` | Plugin worker entry code generator |
 
@@ -543,8 +547,10 @@ Log.error("request failed", cause = exception)
 | `moe.lolosia.keel.abi` | Gradle plugin | Extracts `libkeel_abi.a` and headers and injects linker options and export lists |
 | `moe.lolosia.keel.logger` | Gradle plugin | Attaches the log compiler plugin to Kotlin/Native compilation |
 | `moe.lolosia.keel.publish` | Gradle plugin | Registers a private Maven repository |
+| `moe.lolosia.keel.database` | Gradle plugin | Wires `keel-orm-ksp`, ORM dependencies, and the build-time SQL dialect |
 | `keel-plugin-ksp` | KSP processor | Generates `keel_plugin_worker_main` from `@KeelPluginMain` |
 | `keel-router-ksp` | KSP processor | Generates route tables from controller annotations |
+| `keel-orm-ksp` | KSP processor | Generates `EntityMeta`, typed column extensions, and `OrmMetaBootstrap` |
 
 ### Resource embedding
 

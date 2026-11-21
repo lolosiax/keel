@@ -717,8 +717,14 @@ keel/
 ├── keel-logger-compiler-plugin/     日志调用点 IR 改写
 ├── keel-logger-gradle-plugin/       挂载日志编译器插件
 ├── keel-plugin-gradle-plugin/       .keel 打包
+├── keel-database-gradle-plugin/     数据库 / ORM 接线
 ├── keel-plugin-hello/               示例插件
 ├── keel-plugin-ksp/                 Worker 入口生成
+├── keel-orm-ksp/                    实体 Meta / 列扩展生成
+├── keel-database-api/               数据库 ABI 与插件侧门面
+├── keel-orm/                        ORM 运行时
+├── keel-database-sqlite/            SQLite 能力包
+├── keel-database-mariadb/           MariaDB 能力包
 ├── keel-publish-gradle-plugin/      发布仓库注册
 ├── keel-router-ksp/                 路由表生成
 └── doc/                             设计与计划
@@ -728,7 +734,7 @@ keel/
 
 ## 当前状态
 
-Keel 处于 `0.1.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志、配置、认证、存储与打包链路已经可以运行，下表逐项记录状态。
+Keel 处于 `0.2.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志、配置、认证、存储与打包链路已经可以运行，下表逐项记录状态。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
@@ -746,6 +752,9 @@ Keel 处于 `0.1.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日
 | 插件存储 | 可用 | 每插件命名空间下的 `read` / `write` / `delete` |
 | 注解路由生成 | 可用 | `@Controller` / `@GET` 等生成 `KeelPluginRoutes` |
 | 权限判定 | 可用 | Host 认证 / 授权中间件 + `authn` / `authz` SPI，401 / 403 / 503 |
+| 数据库能力包 | 部分可用 | SQLite 驱动已可用（exec / query / 事务 / 参数 / NULL / BLOB）；MariaDB 仍是 `select 1` 桩 |
+| ORM（单表） | 可用 | `@Table` → `EntityMeta` / 类型安全列 / `OrmMetaBootstrap`；查询 / CRUD / 分页 / 事务 |
+| `Context` 数据库扩展 | 可用 | `ctx.database` / `transaction` / `execute` / `query(sql)`；缺包时 503 |
 | JSON 信封与响应头 | 部分可用 | 生成的控制器会包 JSON 信封；`HttpResponse.headers` 尚未进入线格式 |
 | 流式响应 | 契约已定义 | `ResponseBody.Stream` 尚未接入 HTTP 分发 |
 | 单文件内嵌插件 | 入口已就位 | `keel-launcher` 目前转发到宿主入口 |

@@ -151,10 +151,10 @@ keel-database-mariadb 只依赖 keel-database-api 的 ABI 头，不依赖任何 
 不含驱动、不含 Host 加载器，只回答「怎么调用驱动」：
 
 - `src/nativeCpp/keel_database.h`：稳定的 C ABI（§6.5），Host 与能力包共同遵守；
-- `commonMain`：`KeelDatabase` / `Row` / `Tx` / `DbContext` / `DatabaseException`，
-  以及参数与行的纯 Kotlin 类型；`DbContext` 在 `keel-api` 的 `Context` 之上加 `db` / `transaction`
-  （见 §8.5）；
-- `nativeMain`：cinterop + 一个 `internal` 的 C ABI 客户端，把 `KeelPluginApi` 里的函数表指针
+- `nativeMain`：`KeelDatabase` / `Row` / `QueryResult` / `DbValue` / `DatabaseException`
+  与参数、行的纯 Kotlin 类型；`Context.database` / `Context.transaction` /
+  `Context.execute` / `Context.query(sql)` 扩展同包（**不新增 `DbContext`**，见 §8.5）；
+- `nativeMain` 的 cinterop：一个 `internal` 的 C ABI 客户端，把 `KeelPluginApi` 里的函数表指针
   包成上面的 Kotlin 类型；
 - **公开面只有 Kotlin 类型**：cinterop 的 `CPointer` 不出现在任何 public 签名里，
   业务插件不需要 `enableCInteropCommonization`，也不需要认识 `keel_database.h`；
@@ -265,7 +265,7 @@ keel-database-mariadb 只依赖 keel-database-api 的 ABI 头，不依赖任何 
 
 | 产物 | 形态 | 内容 | 谁依赖 |
 | --- | --- | --- | --- |
-| `keel-database-api` | **KMP klib** | C ABI 头 `keel_database.h` + 插件侧 Kotlin 门面（`KeelDatabase` / `Row` / `Tx` / `DbContext`） | 所有要查库的业务插件 |
+| `keel-database-api` | **KMP klib（nativeMain）** | C ABI 头 `keel_database.h` + 插件侧 Kotlin 门面（`KeelDatabase` / `Row` / `QueryResult` / `DbValue`）+ `Context` 数据库扩展 | 所有要查库的业务插件 |
 | Host 能力加载器 | `keel-host` 内的模块 | 发现 `kind: capability`、`schemes` 匹配、ABI 校验、`open` / `close` | Host |
 | `keel-database-mariadb` | **`.keel` 能力包**（`kind: capability`） | 纯 C/C++ 动态库（或 Rust cdylib），链接 `libmariadb`；实现 `keel_database.h` | 用户丢进 `plugins/` |
 | `keel-database-pgsql`（后续） | 同上 | 同一份 ABI 的 PgSQL 实现 | 用户按需丢 |
@@ -716,24 +716,23 @@ Host 只负责原样写回状态码、Content-Type 与字节。
 | `ctx.call`（`ApplicationCall`） | **没有** | `ApplicationCall` 不跨运行时；用 `ctx.request`（方法/路径/query/headers/body/remoteAddress/traceId） |
 | `ctx.data` | `ctx.data: MutableMap<String, Any?>` | 插件本地，请求结束释放 |
 | `ctx.session` / `ctx.userId` / `ctx.user` | `ctx.userId` / `ctx.user: UserSnapshot?` | Host 在分发时从 token 解析并注入 |
-| `ctx.db` / `ctx.transaction` | `DbContext`（`keel-database-api`） | 见下 |
+| `ctx.db` / `ctx.transaction` | `ctx.database` / `ctx.transaction { }`（`keel-database-api` 扩展） | 见下 |
 | `ctx.hasPermission` | 同名，**同步** | 用 `ctx.user.rules` 本地判定 |
 
-`DbContext` 放在 `keel-database-api`，避免所有插件都被迫认识 sqlx4k：
+数据库能力**不做 `DbContext` 子接口**：`keel-api` 不知道数据库，控制器参数始终是 `Context`，
+由 `keel-database-api` / `keel-orm` 提供扩展：
 
 ```kotlin
-/** 有数据库的插件用的请求上下文；由插件自己的路由注入表按类型提供。 */
-interface DbContext : Context {
-    val db: QueryExecutor
-    suspend fun <T> transaction(block: suspend (Transaction) -> T): T
-}
+val Context.database: KeelDatabase                       // 缺包 / 未配置时抛 status = -2
+fun <T> Context.transaction(block: (KeelDatabase) -> T): T
+fun Context.execute(sql: String, params: List<DbValue> = emptyList()): Long
+fun <T : Any> Context.query(block: QueryScope<T>.() -> Unit): Query<T>   // keel-orm
 ```
 
-- biz / rbac 的控制器与 `@Service` 方法首参写 `ctx: DbContext`；
-- 没有数据库的插件继续用 `Context`，不引入 `keel-database-api`；
-- `DbContext` 是请求级的：`db` 来自插件启动时建立的 `Datasource`，`transaction` 直接落到本地驱动。
-
-> 服务层「首参透传 `ctx`」的约定不变；变的只是类型与 import。
+- 业务插件只依赖 `keel-database-api`（查库门面）与 `keel-orm`（类型安全查询）；
+- 没有数据库的插件继续用 `Context`，不引入这两个依赖；
+- 事务是插件 Worker 上的同步本地调用，不跨 ABI；
+- 没有能力包 / 未配置 URL 时 `requireDatabase()` 给出可定位的异常，Web 侧映射 503。
 
 ---
 

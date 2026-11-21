@@ -53,19 +53,24 @@
 
 ## 0. 结论
 
-`keel-database-api` 的**契约骨架已经成形**，`keel-database-mariadb` **只有外壳**；
-真实驱动和 ORM 都还没开始。现在能跑通的是 `select 1` 链路，
-还不能承载 rbac / biz 的真实业务。
+**现状（2026-11-21）**：SQLite 驱动与 D1 单表 ORM 已落地；MariaDB 真实后端仍是外壳，
+ABI v2 与 D2（关联 / 序列化 / 级联）未做。
+
+- `keel-database-api` 的契约骨架 + `Context` 数据库扩展可用，SQLite 上 exec / query /
+  事务 / 参数绑定 / NULL / BLOB / Unicode 全部跑通；
+- `keel-orm` + `keel-orm-ksp` + `moe.lolosia.keel.database` 组成完整的单表链路，
+  `basic-biz` 仍是手写 SQL 仓库，未迁移到 ORM；
+- `keel-database-mariadb` 只响应 `select 1`，其余语句返回 `KEEL_ERR_UNSUPPORTED`。
 
 **先做 SQLite，再补 MariaDB。** SQLite 用来把 exec / query / 事务 / 参数绑定 / 结果集
 整条链路和 ORM 的方言渲染压实；MariaDB 随后只多网络、鉴权、连接池与 LGPL 动态分发。
 `basic-biz` 的多数据库兼容是长期目标，**本次不做迁移**；
 SQLite 只用于驱动 / ORM conformance 与测试，`basic-biz` 仍以 MariaDB 为主发布目标。
 
-目标形态分成两层：
+目标形态分成两层（均已落地）：
 
 ```
-构建期：@Table 实体 ──KSP──> QSysUser / Mapper
+构建期：@Table 实体 ──KSP──> <Entity>Meta / <Entity>Columns / OrmMetaBootstrap
 运行期：插件(Context 扩展) ──> keel-orm ──> keel-database-api ──C ABI──> sqlite.keel / mariadb.keel
 ```
 
@@ -78,15 +83,19 @@ SQLite 只用于驱动 / ORM conformance 与测试，`basic-biz` 仍以 MariaDB 
 
 ## 1. 现状评估
 
+> 下表在 2026-11-21 落地后更新；「缺口」只列真实剩余项。
+
 | 模块 | 已具备 | 主要缺口 |
 | --- | --- | --- |
-| `keel-database-api` | C ABI 头、`KeelDatabase` / `Row` / `QueryResult` / `DbValue`、事务、结果集、三目标 cinterop | 只有最小 ABI；没有 `last_insert_id`、`ping`、批量、列元数据；`Decimal` 是 `Double`；没有 `Instant` / 精确 DECIMAL；没有 `Context.database` / `Context.transaction` 扩展；并发下 `last_error` 有竞态 |
+| `keel-database-api` | C ABI 头、`KeelDatabase` / `Row` / `QueryResult` / `DbValue`、事务、结果集、三目标 cinterop；`Context.database` / `transaction` / `execute` / `query(sql)`；`Row` 的空安全访问器 | 只有 ABI v1：没有 `last_insert_id` / `ping` / 列元数据 / `options`；`Decimal` 仍是 `Double`（精确十进制由 ORM 的 `Decimal` 文本承担）；并发下 `last_error` 有竞态 |
+| `keel-orm` | `@Table` / `@Id` / `@Generated` / `@Column` / `@Transient`；`EntityMeta` / `EntityMetas`；`SqlDialect`（sqlite/mariadb）；查询 DSL（where/and/or、比较、IN、BETWEEN、LIKE）；`findList/findFirst/findCount/findPage`；`insert/update/delete/lastInsertId` | 关联 / `Children<T>` / `withChildren` / `saveGraph` / `deleteGraph`、软删除、审计字段、序列化（D2） |
+| `keel-orm-ksp` | `@Table` → `<Entity>Meta`（列顺序 / read / writeInsert / writeUpdate / idOf）、`<Entity>Columns`、`OrmMetaBootstrap`；superclass 链字段收集、camel→snake；生成到 `build/generated/keel/orm` | 跨模块实体、`has*` 访问器（IR 插件，D2） |
 | `keel-database-mariadb` | `.keel` 打包、`keel_capability_entry`、池 / 事务 / 结果集骨架、`select 1` | **没有链接 libmariadb**；`backend_exec` / `backend_query` 是 stub，除 `select 1` 全返回 `KEEL_ERR_UNSUPPORTED` |
-| `keel-database-sqlite` | 尚未创建 | 需要新增顶层构建：SQLite amalgamation、能力包、三目标 `.keel` |
-| `keel-thirdparty` | 6 个 codec 的源码编译 / stage / publish 已跑通 | 还没有 `sqlite` / `mariadb` / `openssl` 条目；消费侧只有 KMP cinterop 模式，缺少「驱动构建读取源码或 `.a`」的 native 消费模式 |
+| `keel-database-sqlite` | 已完成：amalgamation 静态并入，exec / query / 参数 / 事务 / NULL / BLOB / Unicode 与 ORM 切片通过；构建经 composite 自动拉起 sqlite 编译 | 仅作为 conformance / 测试库 |
+| `keel-thirdparty` | 6 个 codec 的源码编译 / stage / publish；`sqlite` 条目与 A 类 native 消费模式（驱动构建直接读 `build/dist`） | `mariadb` / `openssl` 条目未接入 |
 | Host 能力加载 | 发现、scheme 匹配、ABI 校验、`open` / `close`、`requires` 校验 | `database` 配置仍只读环境变量；没有 dialect / features 下发；没有健康检查 / 重连 / 热替换；没有池指标 |
-| rbac / biz | 手写 SQL 仓库、幂等建表、真实接口 | 大量位置映射样板；建表 SQL 内嵌且是 MariaDB 方言；basic-biz 多库兼容后置；没有版本化迁移 |
-| 构建接线 | `requires` 会解析成运行期 `.keel` | `requires: ["database"]` 只影响 `keelRun` 的包解析，不会自动加 `keel-database-api` / ORM KSP 依赖 |
+| rbac / biz | 手写 SQL 仓库、幂等建表、真实接口 | 大量位置映射样板；建表 SQL 内嵌且是 MariaDB 方言；basic-biz 未迁 ORM / 多库兼容后置；没有版本化迁移 |
+| 构建接线 | `moe.lolosia.keel.database` 已落地：`keel { database { dialect, outputDir } }`，挂 KSP、加依赖、下发参数 | `requires: ["database"]` 仍只解析运行期 `.keel`，不做编译期接线（已定为显式 apply） |
 
 几个具体证据：
 
@@ -95,9 +104,7 @@ SQLite 只用于驱动 / ORM conformance 与测试，`basic-biz` 仍以 MariaDB 
 - 配置仍走环境变量：[DatabaseSettings.kt](../keel-host/src/nativeMain/kotlin/moe/lolosia/keel/host/capability/DatabaseSettings.kt)
   的 `fromEnvironment()`；启动时 [HostPlugins.kt](../keel-host/src/nativeMain/kotlin/moe/lolosia/keel/host/plugin/HostPlugins.kt)
   直接调用 `HostCapabilities.activateDatabase(DatabaseSettings.fromEnvironment())`。
-- router KSP 目前还把 `moe.lolosia.keel.database.DbContext` 当作请求上下文别名
-  （[KeelRouterProcessorProvider.kt](../keel-router-ksp/src/main/kotlin/moe/lolosia/keel/gradle/router/KeelRouterProcessorProvider.kt)），
-  但 Keel 不新增 `DbContext`；Web 业务统一用 `Context` + 扩展，这一分支应删除。
+- router KSP 已删除 `DbContext` 分支，控制器只接受 `Context`。
 - `requires` 的读取与解析在
   [KeelPluginPackagingPlugin.kt](../keel-plugin-gradle-plugin/src/main/kotlin/moe/lolosia/keel/gradle/plugin/KeelPluginPackagingPlugin.kt)
   的 `readRequires` / `runPlugins` 分支，只用于运行目录组装，不用于编译期依赖。
@@ -242,15 +249,17 @@ SQLite 只用于驱动 / ORM conformance 与测试，`basic-biz` 仍以 MariaDB 
 Host 与不依赖 database 的插件必须正常启动。`basic-biz` 继续在 MariaDB 上冒烟，
 不要求 SQLite；SQLite 只验证驱动 / ORM。
 
-### D1：ORM 运行时 + KSP
+### D1：ORM 运行时 + KSP（已完成，2026-11-21）
 
 1. `keel-orm`：查询 DSL、SQL 渲染、行映射、CRUD、分页、事务；
    Web 入口是 `Context` 扩展（`Context.query<T> { }` / `Context.transaction { }`），
    不新增 `DbContext`。
-2. `keel-orm-ksp`：读 `@Table` / `@Column` / `@Id`，生成 `XxxMeta`、`XxxMapper`、`QXxx`。
-3. 构建接线：把 `keel-orm-ksp` 挂到每个 native 目标的 `ksp<target>`，
-   并自动加 `keel-orm` / `keel-database-api` 依赖。
-4. **D1 只做单表**：先用最小测试实体做垂直切片，跑通查询 / CRUD / 分页 / 事务；
+2. `keel-orm-ksp`：读 `@Table` / `@Column` / `@Id`，生成 `<Entity>Meta`、
+   `<Entity>Columns`（`QueryScope<T>.列`）与 `OrmMetaBootstrap`。
+3. 构建接线：`moe.lolosia.keel.database` 把 `keel-orm-ksp` 挂到**一个** native 目标，
+   生成到 `build/generated/keel/orm` 并挂进 `nativeMain`；同时加
+   `keel-orm` / `keel-database-api` 依赖。
+4. **D1 只做单表**：已用 `HellUser` 做垂直切片，跑通查询 / CRUD / 分页 / 事务；
    `basic-biz` 的仓库迁移后续再说。关联 / 图写入 / 序列化不进 D1。
 
 ### D2 及以后：高级能力
@@ -832,8 +841,8 @@ plugins {
 
 keel {
     database {
-        dialect = "sqlite"          // 或 mariadb
-        orm { enabled = true }
+        dialect = "sqlite"                              // 或 mariadb
+        outputDir = "build/generated/keel/orm"          // 默认值，可覆盖
         // schemaDir = "src/commonMain/resources/sql"
     }
 }
@@ -864,20 +873,23 @@ basic-biz / rbac 也生成空引导器，收益不抵噪音，所以不做。
 
 ---
 
-## 5. 建议的第一步
+## 5. 第一步（已完成）
 
-先做 **SQLite 驱动 + `keel-thirdparty` 的 native 消费模式 + ABI v2 + `Context` 扩展**，
-这是所有后续工作的前提；然后用 `SysUser` 一张表做 **D1 的垂直切片**：
+**落地顺序**（2026-11-21 全部完成）：SQLite 驱动 + `keel-thirdparty` native 消费 →
+`Context` 扩展 → D1 垂直切片：
 
 1. 在 `keel-thirdparty` 增加 `sqlite`，让 `keel-database-sqlite` 能拿到 `include/` + `sqlite3.a`；
 2. 实现 SQLite 能力包，跑通 conformance；
 3. 在 `keel-database-api` 加 `Context.database` / `Context.transaction` 扩展，
    控制器仍只写 `Context`；
-4. 在测试插件里定义一个最小 `@Table` 实体，`keel-orm-ksp` 生成 `Q` / Mapper；
+4. 在测试插件（hello）里定义 `@Table` 实体，`keel-orm-ksp` 生成
+   `Meta` / `Columns` / `OrmMetaBootstrap`；
 5. 用 SQLite 跑通查询 / CRUD / 分页 / 事务，验证 ORM 与方言渲染；
-6. `keelRun` 对比出参不变。
+6. `keelRun` 出参不变。
 
-这个切片跑通后，再补 MariaDB 动态库与方言化 DDL；不要先做关联 / 序列化 / `saveGraph`，
+ABI v2 没有阻塞这一步：`Instant` 用 epoch 毫秒、`Decimal` 用文本、`last_insert_id` 用
+方言 SQL 回填；MariaDB 多连接下的 `last_insert_id` 仍需要 ABI v2。
+下一步是补 MariaDB 动态库与方言化 DDL，并推进 D2；不要先做懒加载 / 脏检查，
 也暂不迁移 `basic-biz` 到 SQLite。
 
 ---
@@ -1015,55 +1027,51 @@ keel 统一 `MutableList` + 默认空列表；排序用显式 order 列 + `order
    - 驱动不执行迁移，也不理解业务表；`keel-database-*` 只负责 SQL 执行。
    - savepoint / 嵌套事务后置，不在 D1。
 
-10. **router KSP 的 `DbContext` 分支（已定，待代码修改）**
-    - 删除 `DB_CONTEXT` 常量与 `isContext` 中的分支；
-    - 控制器只接受 `Context`，数据库能力走 `Context.database` / `Context.query` 扩展；
-    - 错误提示改成“只支持 `Context` / `@Body` / `@Path` / `@Query` / `@Header`”；
-    - 这是 D1 前的必做小改动，避免生成代码继续指向不存在的类型。
+10. **router KSP 的 `DbContext` 分支（已完成，2026-11-21）**
+    - 已删除 `DB_CONTEXT` 常量与 `isContext` 中的分支；
+    - 控制器只接受 `Context`，数据库能力走 `Context.database` / `Context.query` 扩展。
 
 ---
 
-## 8. 实现缺口检查清单
+## 8. 剩余缺口（2026-11-21 更新）
 
-以下是文档已定、但代码里还不存在的部分；按依赖顺序排列：
+已完成：SQLite 驱动与 `keel-thirdparty` native 消费、`Context` 数据库扩展、
+router KSP 的 `DbContext` 清理、ORM 三件套（`keel-orm` / `keel-orm-ksp` /
+`moe.lolosia.keel.database`）、D1 类型映射与垂直切片。
 
-1. **新模块 `keel-database-sqlite`**
-   - 顶层构建、`settings.gradle.kts` / `buildAll` / `publishAll` / `AGENTS.md` 表都要补。
-2. **`keel-thirdparty` 的 SQLite 条目与 native 消费模式**
-   - `manifest.json` 加 `sqlite`；发布形态 `NATIVE` / `KLIB` / `BOTH` 落 DSL；
-   - A 类消费：只解包 `include/` + `lib/`，不建 cinterop；允许源码编译门面 `.a`。
-3. **Host `CapabilityLoader` 的目录物化**
-   - 当前只复制入口库；MariaDB 需要把整个 `lib/<target>/` 复制到缓存目录，
-     并用平台搜索路径加载依赖 DLL / SO。
-4. **ABI v2 的 Host/插件接线**
+按依赖顺序剩余：
+
+1. **MariaDB 真实驱动**
+   - Connector/C 的动态库部署（`lib/<target>/` 整目录物化 + `$ORIGIN` / DLL 搜索路径）；
+   - 连接池 / 预处理语句 / `utf8mb4` / 线程初始化；
+   - 错误缓冲线程局部化；`exec` 返回 affected rows、结果集持有连接直到 `result_free`。
+2. **ABI v2 的 Host/插件接线**
    - `KeelDbConfig.options`、`KeelHostApi` 的 `dialect` / `features` / `databases`；
    - `KeelDbValue` 增加 DECIMAL / TIMESTAMP / JSON / UUID；
-   - `plugin.json` 增加 `dialect` / `features`，Host 解析并下发。
-5. **`Context` 数据库扩展**
-   - `Context.database` / `Context.transaction` / `Context.query<T>` / `Context.execute`；
-   - `requireDatabase()` 的缺包 / 未配置 / open 失败三种错误。
-6. **router KSP 清理 `DB_CONTEXT`**
-   - 删除常量、识别分支与错误提示里的 `DbContext`。
-7. **ORM 三件套**
-   - `keel-orm` 运行时、`keel-orm-ksp` 生成器、`keel-orm-compiler-plugin`（has* 访问器）；
-   - Gradle 接线：挂 `keel-orm-ksp` 到所有 `ksp<target>`，按 `requires` 加依赖。
-8. **`Children<T>` 与 `hasId`**
-   - `Children<T>` 实现 `MutableList<T>` + `loaded` 状态；
-   - IR 插件给实体注入 `hasId` / `has*`；IR 不可行时回退可空主键或显式 diff。
-9. **类型映射**
-   - `Decimal`（精确字符串）、`Instant`、`JsonElement`、枚举 / `Long` 位掩码；
-   - 自定义转换器与强类型 JSON 后置。
-10. **迁移器位置**
-    - 建议在 `keel-database-api` 提供 `MigrationRunner`，插件侧按
-      `resources/sql/<dialect>/V*.sql` 调用；Host 只提供 classpath / storage / config。
-11. **跨模块实体限制**
-    - `EntityMetas` 只聚合当前 KSP 模块的实体；跨模块共享实体需要在声明方生成 meta / serializer，
-      消费方通过 api 工件获得。
-    - **已定（2026-11-21）**：实体与查询代码放 `nativeMain`。KSP2 不处理 commonMain /
-      intermediate 源集，而 `nativeMain` 参与 metadata 编译；因此 `keel-database-gradle-plugin`
-      只在一个 native 目标上跑 ORM KSP，生成到 `build/generated/keel/orm`，再把该目录
-      挂进 `nativeMain` 源码集并接好任务依赖。生成物不提交、不污染 `src/`。
-      跨模块实体仍按「声明方生成」处理，D2 再展开。
-12. **测试**
-    - C 级 conformance（SQLite / MariaDB 各一套）；
-    - ORM 最小测试插件（实体 + 查询 + 分页 + 事务），不依赖 basic-biz 迁移。
+   - `plugin.json` 增加 `dialect` / `features`，Host 解析并下发；
+   - 版本协商改为「接受 1..CURRENT + `struct_size` 探测」。
+3. **Host `CapabilityLoader` 的目录物化**
+   - 当前只复制入口库；MariaDB 需要把整个 `lib/<target>/` 复制到缓存目录。
+4. **配置切到 `application.yaml`**
+   - `DatabaseSettings` 从 Host 配置读取，环境变量保留为覆盖；日志不打印含密码的 URL。
+5. **D2：关联与图写入**
+   - `Children<T>`（`MutableList` + `loaded`）、`withChildren` / `withRef`（1+N 批量）；
+   - `saveGraph` / `deleteGraph`、软删除、审计字段（`@WhenCreated` / `@WhenModified`）；
+   - 子查询 / raw SQL / 视图、乐观锁 `@Version`、批量插入、流式结果。
+6. **`has*` 访问器**
+   - IR 编译器插件给实体注入 `hasId`（`::id.isInitialized`）；不可行时回退可空主键 / 显式 diff。
+7. **实体序列化**
+   - `keel-orm-ksp` 生成 `KSerializer`；只用于缓存 / 快照 / 调试，HTTP 入口继续用 DTO。
+8. **basic-biz / rbac 迁移 ORM**
+   - 手写 SQL 仓库替换为 `db.query<T>` / `insert` / `update`；
+   - `Schema.kt` 的 MariaDB 写法拆成版本化迁移（`resources/sql/<dialect>/V*.sql`），
+     DDL / upsert / 自增回填交给方言或迁移脚本。
+9. **PgSQL 方言与多数据源**
+   - `$n` 占位符、`RETURNING`、`TRUE/FALSE`；`databases` / `database_count` 的真实实现；
+   - ES 作为独立能力（`provides: ["search"]`），不塞进 `database`。
+10. **自动化测试**
+    - 把 hello 里的 SQLite conformance 固化成可重复执行的测试（当前靠 Host 冒烟）；
+    - MariaDB 一套同等的 conformance。
+11. **api 生成迁到 build 目录**
+    - 与 ORM 同样由 Gradle 参与，V1 提交制退役；
+      见 [public-api-design.md](public-api-design.md) §4.2。
