@@ -255,6 +255,11 @@ keel-thirdparty/
 
 MariaDB Connector/C 属于 LGPL：实现上优先动态链接，不要把它静态并进插件。
 
+当前 manifest 已登记 `mariadb`（3.4.7，`link: dynamic`），由
+`gradle/mariadb.gradle.kts` 用 CMake + Schannel 从源码构建（当前仅 mingwX64）；
+`keel-database-mariadb` 的 `.keel` 同时携带 `libmariadb.dll` 与 `licenses/mariadb/COPYING.LIB`，
+Host 会整目录物化，用户可原位替换该动态库。
+
 ### 3.3 修改上游
 
 - 所有修改以 `patches/*.patch` 形式入库，manifest 记录 patch 列表；

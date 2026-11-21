@@ -57,12 +57,15 @@ fun artifactVersion(spec: Map<String, Any?>): String {
 apply(from = "gradle/codecs.gradle.kts")
 // SQLite amalgamation：源码是 zip、无 CMake，单独一份脚本，产物布局与 codec 一致
 apply(from = "gradle/sqlite.gradle.kts")
+// MariaDB Connector/C：CMake 工程，构建共享库 libmariadb（当前仅 mingwX64）
+apply(from = "gradle/mariadb.gradle.kts")
 
 val compileAll = tasks.register("compileAll") {
     group = "build"
-    description = "从源码编译全部库（6 个 codec + sqlite，按 manifest 的目标）"
+    description = "从源码编译全部库（6 个 codec + sqlite + mariadb，按 manifest 的目标）"
     dependsOn("compileCodecs")
     dependsOn("compileSqliteAll")
+    dependsOn("compileMariadbAll")
 }
 
 // ---------------------------------------------------------------- 拆分到 dist
@@ -83,7 +86,7 @@ libraries.forEach { (library, spec) ->
         val archives = (archivesNode as List<*>).map { it.toString() }
         val stage = tasks.register<Sync>("stage${cap(library)}${cap(target)}") {
             group = "thirdparty"
-            description = "把 $library / $target 的头文件与静态库拆到 dist/"
+            description = "把 $library / $target 的头文件与库文件拆到 dist/"
             into(layout.buildDirectory.dir("dist/$library/$target"))
             doFirst {
                 val out = outRoot.get().asFile
@@ -119,6 +122,15 @@ val stageAll = tasks.register("stageAll") {
 // codec 的 stage 仍只吃已经编译好的 out/，不在这里触发 CMake。
 tasks.matching { it.name.startsWith("stageSqlite") }.configureEach {
     dependsOn(tasks.matching { it.name.startsWith("compileSqlite") })
+}
+tasks.matching { it.name.startsWith("stageMariadb") }.configureEach {
+    dependsOn(tasks.matching { it.name.startsWith("compileMariadb") })
+}
+
+// 所有 stage 任务都读 out/include 与 out/<target>；MariaDB 也写这两个目录的
+// libmariadb 子项，显式声明顺序避免 Gradle 的隐式依赖校验报错。
+tasks.matching { it.name.startsWith("stage") }.configureEach {
+    mustRunAfter(tasks.matching { it.name.startsWith("compileMariadb") })
 }
 
 // keelThirdpartyPublish 在 afterEvaluate 注册，这里按名字补依赖与输入来源

@@ -18,3 +18,6 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "keel-database-mariadb"
+
+// Connector/C 的源码编译与 staging 在生成侧完成；仓库内用 composite 按需拉起
+includeBuild("../keel-thirdparty")

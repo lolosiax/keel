@@ -32,7 +32,7 @@
 | `keel-classpath-gradle-plugin/` | `keel-classpath-gradle-plugin` | 普通产物的 `classpath.zip` 嵌入 + Windows 版本资源插件 `moe.lolosia.keel.classpath` | 是 |
 | `keel-thirdparty-gradle-plugin/` | `keel-thirdparty-gradle-plugin` | 第三方原生库插件的消费接线与许可门禁 `moe.lolosia.keel.thirdparty` | 是 |
 | `keel-database-gradle-plugin/` | `keel-database-gradle-plugin` | 数据库 / ORM 接线插件 `moe.lolosia.keel.database`（`keel { database { } }`） | 是 |
-| `keel-thirdparty/` | `keel-thirdparty` | 第三方原生库的生成侧（manifest / `.def` / licenses / 源码编译 / dist / 发布）；本身不进 `buildAll`，但 `keel-database-sqlite` 会通过 composite 按需拉起 sqlite 的编译与 staging | 否 |
+| `keel-thirdparty/` | `keel-thirdparty` | 第三方原生库的生成侧（manifest / `.def` / licenses / 源码编译 / dist / 发布）；本身不进 `buildAll`，但 `keel-database-sqlite` / `keel-database-mariadb` 会通过 composite 按需拉起对应库的编译与 staging | 否 |
 | `keel-plugin-gradle-plugin/` | `keel-plugin-gradle-plugin` | `.keel` 打包插件 `moe.lolosia.keel.plugin`；单 exe 产出 `moe.lolosia.keel.bundle`（由前者自动 apply） | 是 |
 | `keel-publish-gradle-plugin/` | `keel-publish-gradle-plugin` | 发布插件 `moe.lolosia.keel.publish` | 是 |
 | `keel-router-ksp/` | `keel-router-ksp` | Web 路由 KSP 处理器（构建期，不是 Gradle 插件） | 是 |
@@ -122,9 +122,15 @@ gradlew -p keel-router-ksp publish
 gradlew -p keel-plugin-ksp publish
 
 # 第三方原生库：生成侧单独构建（不进 buildAll）
-gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（codecs.gradle.kts + sqlite.gradle.kts）
+gradlew -p keel-thirdparty compileAll       # 下载/解压源码并交叉编译（codecs / sqlite / mariadb）
 gradlew -p keel-thirdparty stageAll         # 把 out/ 拆成 dist/<lib>/<target>
 gradlew -p keel-thirdparty publishAll       # 打包并按 Maven 坐标发布
+# MariaDB Connector/C 走 CMake + Ninja（当前只编 mingwX64）
+#   依赖：cmake / ninja 在 PATH，或 -Pkeel.cmake= / -Pkeel.ninja= 指定；
+#   Python 用户可 python -m pip install cmake ninja
+gradlew -p keel-thirdparty compileMariadbMingwX64
+gradlew -p keel-thirdparty stageMariadbMingwX64
+gradlew -p keel-thirdparty publishTpMariadbMingwX64PublicationToMavenLocal "-Pkeel.thirdparty.libs=mariadb"
 # 只发布某个库（驱动构建常用）：-Pkeel.thirdparty.libs=sqlite
 gradlew -p keel-thirdparty publishTpSqliteMingwX64PublicationToMavenLocal "-Pkeel.thirdparty.libs=sqlite"
 # keel-database-sqlite 在仓库内会通过 composite 自动触发 sqlite 的编译与 staging，

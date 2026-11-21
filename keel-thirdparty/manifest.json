@@ -125,6 +125,24 @@
       ],
       "patches": []
     },
+    "mariadb": {
+      "version": "3.4.7",
+      "revision": 1,
+      "source": {
+        "name": "mariadb-connector-c",
+        "url": "https://github.com/mariadb-corporation/mariadb-connector-c/archive/refs/tags/v3.4.7.tar.gz",
+        "sha256": "cf81cd1c71c3199da9d2125aee840cb6083d43e1ea4c60c4be5045bfc7824eba"
+      },
+      "headers": ["mariadb"],
+      "def": "mariadb.def",
+      "libs": {
+        "mingwX64": ["libmariadb.dll", "libmariadb.dll.a"]
+      },
+      "link": "dynamic",
+      "license": "LGPL-2.1",
+      "licenseFiles": ["licenses/mariadb/COPYING.LIB"],
+      "patches": []
+    },
     "sqlite": {
       "version": "3.46.1",
       "revision": 1,

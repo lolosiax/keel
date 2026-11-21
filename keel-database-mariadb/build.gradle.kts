@@ -1,11 +1,13 @@
+import groovy.json.JsonSlurper
 import java.io.File
 import org.gradle.api.publish.maven.MavenPublication
 
 /**
  * MariaDB 能力包：纯 C 动态库 + `plugin.json` 打成 `.keel`。
  *
- * 与 Kotlin 插件的区别只有两点：没有 K/N 运行时，也没有 `lib/<target>` 之外的资源；
- * 因此这里不用 KMP，直接用 K/N 自带的交叉 gcc 编译（与 keel-abi 同一套工具链）。
+ * 与 SQLite 的差别是链接方式：Connector/C 以 **动态库** 消费（LGPL），
+ * 所以 `lib/<target>/` 同时放入口库与 `libmariadb.dll`，Host 会整目录物化。
+ * Connector/C 由 `keel-thirdparty` 从源码构建（当前仅 mingwX64）。
  */
 plugins {
     base
@@ -44,17 +46,7 @@ private fun toolchainFor(target: String): CToolchain = when (target) {
         CToolchain(dir, File(dir, "gcc.exe").absolutePath)
     }
 
-    "linuxX64" -> {
-        val dir = File(findToolchainDir("x86_64-unknown-linux-gnu-gcc"), "bin")
-        CToolchain(dir, File(dir, "x86_64-unknown-linux-gnu-gcc").absolutePath)
-    }
-
-    "linuxArm64" -> {
-        val dir = File(findToolchainDir("aarch64-unknown-linux-gnu-gcc"), "bin")
-        CToolchain(dir, File(dir, "aarch64-unknown-linux-gnu-gcc").absolutePath)
-    }
-
-    else -> error("未知目标：$target")
+    else -> error("MariaDB 能力包当前只支持 mingwX64：$target")
 }
 
 private fun hostTargetName(): String {
@@ -74,10 +66,10 @@ private fun libraryName(target: String): String =
 /**
  * 参与构建的目标。
  *
- * 默认只编当前主机目标；交叉 gcc 是 Linux 可执行文件，在 Windows 上跑不起来，
- * 所以其它目标在对应平台构建，或用 `-Pkeel.db.targets=linuxArm64` 显式指定。
+ * Connector/C 目前只接了 mingwX64（源码构建用 Schannel；Linux 还需要 OpenSSL 与
+ * `$ORIGIN` rpath），其它平台先跳过，避免把 `buildAll` 卡死。
  */
-val targets: List<String> =
+val requestedTargets: List<String> =
     (findProperty("keel.db.targets") as String?)
         ?.split(',')
         ?.map { it.trim() }
@@ -85,53 +77,86 @@ val targets: List<String> =
         ?.ifEmpty { null }
         ?: listOf(hostTargetName())
 
+val targets: List<String> = requestedTargets.filter { it == "mingwX64" }
+
+if (targets.isEmpty()) {
+    logger.warn("keel-database-mariadb: Connector/C 目前只支持 mingwX64，跳过能力包构建")
+}
+
 val sources = cppDir.asFile.listFiles { file -> file.extension == "c" }.orEmpty()
 
-/**
- * MariaDB Connector/C 的安装位置。
- *
- * 本轮先用本机安装的 Connector/C 打通真实后端：取 `include/mysql/mysql.h`、
- * 导入库与运行期动态库。可用 `-Pkeel.mariadb.home=<dir>` 或环境变量
- * `MARIADB_HOME` 覆盖；后续再迁到 `keel-thirdparty` 的源码构建。
- */
-val mariadbHome: File? = (findProperty("keel.mariadb.home") as String?)?.let(::file)
-    ?: System.getenv("MARIADB_HOME")?.let(::file)
-    ?: listOf("C:/Program Files/MariaDB", "D:/Program Files/MariaDB", "/usr")
-        .map(::file)
-        .firstOrNull { home ->
-            listOf("include/mysql", "include/mariadb").any { File(home, "$it/mysql.h").isFile } &&
-                listOf("lib/libmariadb.lib", "lib/libmariadb.dll.a", "lib/libmariadb.a", "lib/libmariadb.so")
-                    .any { File(home, it).isFile }
-        }
+// Connector/C 的坐标来自 keel-thirdparty manifest：版本 + revision → `<version>-keel.<revision>`
+val thirdpartyManifest = JsonSlurper()
+    .parse(layout.projectDirectory.file("../keel-thirdparty/manifest.json").asFile) as Map<*, *>
+@Suppress("UNCHECKED_CAST")
+val mariadbSpec = (thirdpartyManifest["libraries"] as Map<String, Map<String, Any?>>).getValue("mariadb")
+val mariadbVersion = mariadbSpec["version"].toString()
+val mariadbRevision = (mariadbSpec["revision"] as Number).toInt()
+val thirdpartyVersion = "$mariadbVersion-keel.$mariadbRevision"
 
-val mariadbInclude: File? = mariadbHome?.let { home ->
-    listOf("include/mysql", "include/mariadb")
-        .map { File(home, it) }
-        .firstOrNull { File(it, "mysql.h").isFile }
-}
-
-val mariadbLink: File? = mariadbHome?.let { home ->
-    listOf("lib/libmariadb.lib", "lib/libmariadb.dll.a", "lib/libmariadb.a", "lib/libmariadb.so")
-        .map { File(home, it) }
-        .firstOrNull { it.isFile }
-}
-
-/** 需要随 `.keel` 一起分发、和入口库放在同一目录的运行期动态库。 */
-val mariadbRuntime: File? = mariadbHome?.let { home ->
-    listOf("lib/libmariadb.dll", "bin/libmariadb.dll", "lib/libmariadb.so")
-        .map { File(home, it) }
-        .firstOrNull { it.isFile }
-}
-
-/** 没有 Connector/C 时跳过能力包构建，避免 `buildAll` 被本机环境卡住。 */
-val mariadbAvailable: Boolean =
-    mariadbHome != null && mariadbInclude != null && mariadbLink != null
-
-if (!mariadbAvailable) {
-    logger.warn(
-        "keel-database-mariadb: 未找到 MariaDB Connector/C，跳过能力包构建；" +
-            "用 -Pkeel.mariadb.home=<dir> 或 MARIADB_HOME 指定安装目录。"
+/** 每个目标一份 thirdparty 依赖：zip 里是 include/mariadb 与 lib/<target>/libmariadb.*。 */
+val thirdpartyConfigs = targets.associateWith { target ->
+    val name = "keelMariadbNative${target.replaceFirstChar { it.uppercaseChar() }}"
+    val configuration = configurations.create(name) {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        isTransitive = false
+        description = "MariaDB Connector/C 头文件与动态库（$target）"
+    }
+    dependencies.add(
+        configuration.name,
+        "moe.lolosia.keel.thirdparty:mariadb-$target:$thirdpartyVersion@zip",
     )
+    configuration
+}
+
+/**
+ * 第三方产物的取用方式：
+ * - 仓库内开发（存在 `../keel-thirdparty`）→ 直接读 `build/dist`，并由任务图自动触发
+ *   `:stageMariadb<target>`（进而 CMake 编译 Connector/C）；可用 `-Pkeel.thirdparty.dist=<dir>` 覆盖；
+ * - 单独 clone 本目录（没有兄弟目录）→ 按 Maven 坐标解析已发布的 zip。
+ */
+val thirdpartyProjectDir = layout.projectDirectory.dir("../keel-thirdparty").asFile
+val distOverride: File? =
+    (findProperty("keel.thirdparty.dist") as String?)?.let { file(it) }
+        ?: File(thirdpartyProjectDir, "build/dist").takeIf { thirdpartyProjectDir.isDirectory }
+
+val unpackTasks = targets.associateWith { target ->
+    tasks.register("keelMariadbUnpack$target") {
+        group = "keel"
+        description = "解出 Connector/C 的 include/ 与 libmariadb 动态库（$target）"
+        val output = layout.buildDirectory.dir("thirdparty/$target")
+        outputs.dir(output)
+        // 仓库内：把生成侧的 stage 任务接进同一张任务图
+        if (thirdpartyProjectDir.isDirectory) {
+            val stage = "stageMariadb${target.replaceFirstChar { it.uppercaseChar() }}"
+            dependsOn(gradle.includedBuild("keel-thirdparty").task(":$stage"))
+        }
+        doLast {
+            val out = output.get().asFile
+            out.deleteRecursively()
+            out.mkdirs()
+            if (distOverride != null) {
+                val source = File(distOverride, "mariadb/$target")
+                check(source.isDirectory) {
+                    "keel.thirdparty.dist 里没有 mariadb/$target：${source.absolutePath}"
+                }
+                copy { from(File(source, "include")); into(File(out, "include")) }
+                copy { from(File(source, "lib")); into(File(out, "lib")) }
+            } else {
+                // 发布 zip 的布局是 lib/<target>/libmariadb.*，规整成 include/ + lib/
+                val zip = thirdpartyConfigs.getValue(target).singleFile
+                copy { from(zipTree(zip)); into(out) }
+                val nested = File(out, "lib/$target")
+                if (nested.isDirectory) {
+                    nested.listFiles().orEmpty().forEach { file ->
+                        file.renameTo(File(File(out, "lib"), file.name))
+                    }
+                    nested.deleteRecursively()
+                }
+            }
+        }
+    }
 }
 
 val libraryTasks = targets.associateWith { target ->
@@ -140,29 +165,36 @@ val libraryTasks = targets.associateWith { target ->
         description = "用 K/N 自带交叉 gcc 编译 MariaDB 能力包（$target）"
 
         val toolchain = toolchainFor(target)
+        val thirdparty = layout.buildDirectory.dir("thirdparty/$target")
         val outDir = outputRoot.map { it.dir("lib/$target").asFile }
         val library = outDir.map { File(it, libraryName(target)) }
 
-        inputs.files(sources.toList() + listOf(dbAbiDir.file("keel_database.h").asFile, keelAbiDir.file("keel_abi.h").asFile))
-        mariadbInclude?.let { inputs.dir(it) }
-        mariadbLink?.let { inputs.file(it) }
-        mariadbRuntime?.let { inputs.file(it) }
+        dependsOn(unpackTasks.getValue(target))
+        inputs.files(
+            sources.toList() + listOf(
+                dbAbiDir.file("keel_database.h").asFile,
+                keelAbiDir.file("keel_abi.h").asFile,
+                keelAbiDir.file("keel_platform.h").asFile,
+            )
+        )
         outputs.dir(outDir)
-        onlyIf { mariadbAvailable }
 
         environment(
             "PATH",
             "${toolchain.binDir.absolutePath}${File.pathSeparator}${System.getenv("PATH")}",
         )
         doFirst {
-            val include = mariadbInclude!!
-            val link = mariadbLink!!
+            val include = File(thirdparty.get().asFile, "include/mariadb")
+            val link = File(thirdparty.get().asFile, "lib/libmariadb.dll.a")
+            check(File(include, "mysql.h").isFile) {
+                "Connector/C 头文件缺失：${include.absolutePath}"
+            }
+            check(link.isFile) { "Connector/C 导入库缺失：${link.absolutePath}" }
             outDir.get().mkdirs()
             commandLine(
                 buildList {
                     add(toolchain.gcc)
                     add("-shared")
-                    if (!target.startsWith("mingw")) add("-fPIC")
                     addAll(listOf("-O2", "-std=c99", "-Wall", "-Wextra"))
                     add("-I${dbAbiDir.asFile.absolutePath}")
                     add("-I${keelAbiDir.asFile.absolutePath}")
@@ -170,23 +202,18 @@ val libraryTasks = targets.associateWith { target ->
                     add("-o")
                     add(library.get().absolutePath)
                     addAll(sources.map { it.absolutePath })
-                    if (target.startsWith("mingw")) {
-                        // 能力包必须自带运行时依赖：静态并入 libgcc / winpthread，
-                        // 否则 LoadLibraryExW 在插件目录 / System32 里找不到这些 DLL。
-                        add("-static")
-                        add(link.absolutePath)
-                        addAll(listOf("-lws2_32"))
-                    } else {
-                        add("-L${link.parentFile.absolutePath}")
-                        addAll(listOf("-lmariadb", "-lpthread", "-ldl", "-lm"))
-                    }
+                    // 能力包必须自带运行时依赖：静态并入 libgcc / winpthread，
+                    // 否则 LoadLibraryExW 在插件目录 / System32 里找不到这些 DLL。
+                    add("-static")
+                    add(link.absolutePath)
+                    add("-lws2_32")
                 }
             )
         }
         doLast {
-            mariadbRuntime?.let { runtime ->
-                runtime.copyTo(File(outDir.get(), runtime.name), overwrite = true)
-            }
+            val runtime = File(thirdparty.get().asFile, "lib/libmariadb.dll")
+            check(runtime.isFile) { "运行期动态库缺失：${runtime.absolutePath}" }
+            runtime.copyTo(File(outDir.get(), runtime.name), overwrite = true)
         }
     }
 }
@@ -220,7 +247,7 @@ val generateManifest = tasks.register("keelDatabaseManifest") {
             $entries
               },
               "authors": ["lolosia"],
-              "description": "MariaDB 数据库能力包"
+              "description": "MariaDB 数据库能力包（动态链接 Connector/C）"
             }
             """.trimIndent() + "\n"
         )
@@ -232,7 +259,7 @@ val keelDatabasePackage by tasks.registering(Zip::class) {
     description = "把能力包打成 .keel（plugin.json + lib/<target>）"
     dependsOn(libraryTasks.values)
     dependsOn(generateManifest)
-    onlyIf { mariadbAvailable }
+    onlyIf { targets.isNotEmpty() }
 
     archiveFileName.set("keel-database-mariadb-$version.keel")
     destinationDirectory.set(outputRoot)

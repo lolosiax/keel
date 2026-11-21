@@ -1,0 +1,7 @@
+# MariaDB Connector/C 以 native 模式消费：驱动 C 代码直接 include `mariadb/mysql.h`，
+# 链接 `libmariadb.dll.a`，运行期由 Host 把同目录的 `libmariadb.dll` 一起物化。
+#
+# 这里仍提供 def，满足第三方工件「def/ + include/ + lib/<target>/」的布局校验；
+# 本库不生成 Kotlin cinterop 绑定。
+headers = mariadb/mysql.h
+headerFilter = mariadb/**

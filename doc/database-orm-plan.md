@@ -57,9 +57,11 @@
 > SQLite 与 MariaDB 的 exec / query / 参数 / 事务 / ORM 垂直切片都已跑通。
 > ORM 方言改为优先读能力包下发的 `dialect`（构建期值只作回落），
 > `lastInsertId()` 走 ABI 而不是方言 SQL。
-> 剩余：Connector/C 尚未迁到 `keel-thirdparty` 源码构建（当前取本机安装），
-> Linux 目标与 TLS（OpenSSL / Schannel 之外）未验证；关联 / `Children<T>` /
-> `saveGraph` / 序列化仍属 D2。
+> Connector/C 已迁到 `keel-thirdparty` 源码构建（`gradle/mariadb.gradle.kts`，
+> CMake + Ninja + K/N clang，mingwX64 / Schannel），并已发布 `mariadb-mingwX64`
+> 工件；`keel-database-mariadb` 通过 composite / Maven zip 消费。
+> 剩余：Linux 目标的 OpenSSL / `$ORIGIN`、`sslmode` 配置入口，
+> 以及关联 / `Children<T>` / `saveGraph` / 序列化（D2）。
 
 ---
 
@@ -102,9 +104,9 @@ SQLite 只用于驱动 / ORM conformance 与测试，`basic-biz` 仍以 MariaDB 
 | `keel-database-api` | ABI v2 头（DECIMAL / TIMESTAMP / JSON / UUID、`last_insert_id`、`ping`、`options`）、`KeelDatabase` / `Row` / `QueryResult` / `DbValue`、事务、结果集、三目标 cinterop；`Context.database` / `transaction` / `execute` / `query(sql)`；`currentDialect()` / `currentFeatures()`；`Row` 的空安全访问器与 `timestampOrNull` | 列元数据（`column_name/type`）未加；`options` 已过边界但 Host 尚未从配置填值 |
 | `keel-orm` | `@Table` / `@Id` / `@Generated` / `@Column` / `@Transient`；`EntityMeta` / `EntityMetas`；`SqlDialect`（sqlite/mariadb）；查询 DSL（where/and/or、比较、IN、BETWEEN、LIKE）；`findList/findFirst/findCount/findPage`；`insert/update/delete/lastInsertId` | 关联 / `Children<T>` / `withChildren` / `saveGraph` / `deleteGraph`、软删除、审计字段、序列化（D2） |
 | `keel-orm-ksp` | `@Table` → `<Entity>Meta`（列顺序 / read / writeInsert / writeUpdate / idOf）、`<Entity>Columns`、`OrmMetaBootstrap`；superclass 链字段收集、camel→snake；生成到 `build/generated/keel/orm` | 跨模块实体、`has*` 访问器（IR 插件，D2） |
-| `keel-database-mariadb` | 真实后端：连接池、`mysql_stmt_*` 预处理、事务、类型映射、线程局部错误、`last_insert_id` / `ping`；`.keel` 带 `libmariadb.dll` 与 LGPL 许可文本 | 当前用本机 Connector/C（`-Pkeel.mariadb.home` / `MARIADB_HOME`）；尚未迁到 `keel-thirdparty` 源码构建；Linux / TLS 未验证 |
+| `keel-database-mariadb` | 真实后端：连接池、`mysql_stmt_*` 预处理、事务、类型映射、线程局部错误、`last_insert_id` / `ping`；`.keel` 带 `libmariadb.dll` 与 LGPL 许可文本 | Connector/C 由 `keel-thirdparty` 源码构建（`gradle/mariadb.gradle.kts`，CMake + Schannel）并发布 `mariadb-<target>` 工件；Linux / TLS 未验证 |
 | `keel-database-sqlite` | 已完成：amalgamation 静态并入，exec / query / 参数 / 事务 / NULL / BLOB / Unicode 与 ORM 切片通过；构建经 composite 自动拉起 sqlite 编译 | 仅作为 conformance / 测试库 |
-| `keel-thirdparty` | 6 个 codec 的源码编译 / stage / publish；`sqlite` 条目与 A 类 native 消费模式（驱动构建直接读 `build/dist`） | `mariadb` / `openssl` 条目未接入 |
+| `keel-thirdparty` | 6 个 codec 的源码编译 / stage / publish；`sqlite` 条目；`mariadb` 条目（CMake + Schannel，动态库 + LGPL）与 A 类 native 消费模式（驱动构建直接读 `build/dist`） | `openssl` 条目未接入（Linux 目标需要） |
 | Host 能力加载 | 发现、scheme 匹配、ABI v2 严格校验、`open` / `close`、`requires` 校验；`lib/<target>/` 整目录物化；`dialect` / `features` 经 `KeelHostApi` 下发 | `database` 配置仍只读环境变量；没有健康检查 / 重连 / 热替换；没有池指标 |
 | rbac / biz | 手写 SQL 仓库、幂等建表、真实接口 | 大量位置映射样板；建表 SQL 内嵌且是 MariaDB 方言；basic-biz 未迁 ORM / 多库兼容后置；没有版本化迁移 |
 | 构建接线 | `moe.lolosia.keel.database` 已落地：`keel { database { dialect, outputDir } }`，挂 KSP、加依赖、下发参数 | `requires: ["database"]` 仍只解析运行期 `.keel`，不做编译期接线（已定为显式 apply） |
@@ -1056,9 +1058,11 @@ router KSP 的 `DbContext` 清理、ORM 三件套（`keel-orm` / `keel-orm-ksp` 
 1. **MariaDB 真实驱动（已完成 mingwX64，剩生产化）**
    - 已完成：连接池 / 预处理 / `utf8mb4` / 线程初始化 / 线程局部错误 /
      `last_insert_id` / `ping`；`.keel` 带 `libmariadb.dll`；Host 整目录物化；
-   - 剩余：把 Connector/C 迁到 `keel-thirdparty` 源码构建（当前读本机安装，
-     缺失时任务 `onlyIf` 跳过、不影响 `buildAll`），
-     Linux 的 OpenSSL / rpath 与 TLS 开关，以及连接池指标 / 重连。
+   - Connector/C 已迁到 `keel-thirdparty`：`gradle/mariadb.gradle.kts` 下载源码、
+     CMake + Ninja + K/N clang 构建 `libmariadb` 共享库，stage 后发布
+     `moe.lolosia.keel.thirdparty:mariadb-mingwX64:3.4.7-keel.1`；
+     `keel-database-mariadb` 通过 composite / Maven zip 消费。
+   - 剩余：Linux 的 OpenSSL / rpath 与 `sslmode` 配置，连接池指标 / 重连。
 2. **ABI v2 的 Host/插件接线（已完成）**
    - `KeelDbConfig.options`、`KeelHostApi` 的 `dialect` / `features`；
    - `KeelDbValue` 的 DECIMAL / TIMESTAMP / JSON / UUID；

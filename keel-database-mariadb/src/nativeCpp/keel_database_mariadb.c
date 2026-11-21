@@ -288,6 +288,15 @@ static MYSQL *connect_new(DbPool *pool) {
     mysql_options(mysql, MYSQL_SET_CHARSET_NAME, "utf8mb4");
     my_bool local_infile = 0;
     mysql_options(mysql, MYSQL_OPT_LOCAL_INFILE, &local_infile);
+    /*
+     * Connector/C 3.x 的开关是 MYSQL_OPT_SSL_ENFORCE（不是 MySQL 8 的 SSL_MODE）。
+     * 默认关闭：服务端支持 TLS 时 Connector/C 仍会协商，不支持则退化为明文；
+     * 后续由 database options 的 `sslmode` 强制 required / verify_ca。
+     */
+    my_bool ssl_enforce = 0;
+    mysql_options(mysql, MYSQL_OPT_SSL_ENFORCE, &ssl_enforce);
+    my_bool ssl_verify = 0;
+    mysql_options(mysql, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &ssl_verify);
 
     const char *user = (pool->username != NULL && pool->username[0] != '\0') ? pool->username : NULL;
     const char *password =
