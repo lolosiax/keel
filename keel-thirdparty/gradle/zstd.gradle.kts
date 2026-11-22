@@ -200,6 +200,9 @@ private class ZstdBuild(private val project: Project) {
                                 "-fvisibility=hidden",
                                 // 只留当前版本格式；legacy 解码需要 lib/legacy 全套源码
                                 "-DZSTD_LEGACY_SUPPORT=0",
+                                // 解压热路径的 x86-64 BMI2 手写汇编在 huf_decompress_amd64.S 里，
+                                // 本脚本只编 .c；关掉它以免 linuxX64 链接时缺符号
+                                "-DZSTD_DISABLE_ASM",
                                 "-I${libDir.path}",
                                 "-c", source.path,
                                 "-o", obj.path,
