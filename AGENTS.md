@@ -474,6 +474,8 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
 | [doc/codegen-design.md](doc/codegen-design.md) | **零样板模块互访**：Gradle 插件 + KSP 生成客户端 / 分发器 / 访问器 / 回调 / plugin.json |
 | [doc/plugin-contract-discussion.md](doc/plugin-contract-discussion.md) | **插件契约形态讨论记录**（未定稿）：`-impl` 命名取舍、Gradle 多工件可行性、`@KeelExposed` 分期与待决问题 |
 | [doc/public-api-design.md](doc/public-api-design.md) | **`@PublicApi` 讨论稿**：impl + api 两模块下从注解生成 api 工件、跨插件继承的声明方基类影子（`super` / 裸字段 / override 集合）、`create` + `initialization` 远程构造、任何人可 `destroy` 与 Host 句柄表 |
+| [doc/contract-first-public-api.md](doc/contract-first-public-api.md) | **contract-first `@PublicApi`**：`keel.api.mode`（`MIRROR` / `CONTRACT_FIRST`）、Context 组件化、`@LocalMember`、跨界共享对象与释放语义 |
+| [doc/database-orm-plan.md](doc/database-orm-plan.md) | **数据库与 ORM 计划**：能力包 ABI、SQLite 先行 / MariaDB 后补、`keel-orm` 与 KSP 生成物位置、分阶段验收 |
 | [doc/config-design.md](doc/config-design.md) | **配置读写**：YAML + 注释保留、分层覆盖、插件配置隔离、原子落盘与变更通知 |
 | [doc/web-design.md](doc/web-design.md) | **Web 路由**：Host 单端口、插件路由注册、Context 快照、流式响应、中间件与鉴权 |
 | [doc/authz-design.md](doc/authz-design.md) | **权限边界**：core 只留 `@Permission` / `Authorizer` SPI，RBAC 默认实现归 `keel-plugin-basic-rbac`（可替换），fail closed |
@@ -500,8 +502,9 @@ git sparse-checkout set keel-api keel-host keel-launcher doc
   仍需在板子上做一次 `linuxArm64` 运行时验证（`dlopen` / `dlsym` / 事件泵）。
 - 单 exe 内嵌（Windows PE 资源 / Linux trailer）已在 `mingwX64` 上端到端跑通；
   `linuxArm64` / `linuxX64` 的 launcher 工件与 trailer 读取仍需在对应平台验证。
-- release launcher 工件 `keel-launcher-<target>` 已发布；release Host 的 HTTP 插件响应路径
-  仍需在真实路由上做一次冒烟（历史 `ACCESS_VIOLATION` 见 `doc/任务记忆.md`）。
+- release launcher 工件 `keel-launcher-<target>` 已发布；release Host 的插件 HTTP 路径
+  已在 `mingwX64` 上冒烟通过（`Json` 伴生对象的 release 协程问题已修），
+  `linuxArm64` / `linuxX64` 仍需在对应平台复测。
 
 ## 11. 文件地图
 

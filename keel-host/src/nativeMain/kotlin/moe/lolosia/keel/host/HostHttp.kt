@@ -314,13 +314,18 @@ internal object HostHttp {
             }
         }
 
-        val payload = Json.encodeToString(
+        // release 构建（K/N 2.4.20）里，协程恢复后再去取 `Json` 伴生对象会得到 null
+        // （StringJsonLexer 构造时解空指针）。在挂起前抓一份实例，恢复后只用这个局部值。
+        val json = Json
+
+        val payload = json.encodeToString(
+            HttpRouteRequest.serializer(),
             HttpRouteRequest(
                 routeId = match.routeId,
                 pathParameters = match.pathParameters,
                 request = request,
                 user = user,
-            )
+            ),
         ).encodeToByteArray()
 
         // 进消息泵之前先留一份调用方栈：出错时要能看到「谁发起的」，
@@ -347,7 +352,7 @@ internal object HostHttp {
         }
         val response = reply?.payload?.let {
             try {
-                Json.decodeFromString<HttpRouteResponse>(it.decodeToString())
+                json.decodeFromString(HttpRouteResponse.serializer(), it.decodeToString())
             } catch (e: Throwable) {
                 Log.warn("插件响应无法解码：${e.message}", tag = "Http")
                 null
