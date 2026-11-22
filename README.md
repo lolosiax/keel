@@ -73,6 +73,13 @@ Keel is built around a componentized plug-in model. Components ship as independe
 - Mainline `application.yaml` and per-plugin `config/plugins/<id>.yaml` are read through `Config`; writes preserve comments and blank lines
 - Each plugin gets an isolated storage namespace (`read` / `write` / `delete`) mediated by the host
 
+**Database and ORM**
+
+- `keel-database-api` is the only database dependency a business plugin needs; drivers are `kind: capability` packages in `plugins/`
+- SQLite ships as a statically linked amalgamation; MariaDB ships Connector/C (built from source by `keel-thirdparty`)
+- `@Table` entities generate `EntityMeta`, typed column extensions, and `OrmMetaBootstrap`; query DSL, CRUD, paging, and transactions run through `db.query<T> { ... }`
+- DDL stays in versioned SQL; the ORM does not create tables
+
 **Resource layer**
 
 - Resources inside `.keel` are not extracted. They are read randomly through the zip central directory.
@@ -95,7 +102,10 @@ Keel is built around a componentized plug-in model. Components ship as independe
 - `moe.lolosia.keel.abi` extracts the C ABI static library and injects linker options
 - `moe.lolosia.keel.logger` attaches the log compiler plugin to Kotlin/Native compilation
 - `moe.lolosia.keel.publish` registers a private Maven repository
-- `keel-plugin-ksp` generates the worker entry from `@KeelPluginMain`
+- `moe.lolosia.keel.database` wires `keel-orm-ksp`, ORM dependencies, and the build-time dialect
+- `moe.lolosia.keel.thirdparty` consumes per-target native archives and applies license gating
+- `moe.lolosia.keel.bundle` injects the prebuilt launcher and plugin bundle into a single executable
+- `keel-plugin-ksp` generates the worker entry from `@KeelPluginMain` and the `@PublicApi` api artifacts
 
 ## Architecture
 
@@ -111,14 +121,16 @@ Keel is built around a componentized plug-in model. Components ship as independe
 | --- | --- |
 | `keel-api` | Plugin contract: lifecycle, context, routing, scheduling, logging, events, and messaging |
 | `keel-host` | Host: plugin loading, lifecycle, event pump, Ktor engine, route table, console, and shutdown |
-| `keel-launcher` | Single-file distribution entry: statically links the host. Plugin assembly is still in progress. |
+| `keel-launcher` | Single-file distribution entry: statically links the host and opens the embedded plugin bundle (mingwX64 verified; Linux pending) |
 | `keel-abi` | C ABI headers and per-target static libraries: queues, events, bootstrap, console, and crash handling |
 | `keel-classpath` | Read-only resource layer: zip, directory, prefix view, and streaming reads |
 | `keel-classpath-full` | Host registry, generation-aware resource references, and cross-module proxies |
 | `keel-database-api` | Database capability ABI plus the plugin-side Kotlin facade (`KeelDatabase`, `Row`, `Context.database`) |
 | `keel-orm` | ORM runtime: annotations, `EntityMeta`, SQL dialects, query DSL, CRUD, and paging |
 | `keel-orm-ksp` | Entity code generator: `@Table` to `EntityMeta`, typed columns, and `OrmMetaBootstrap` |
-| `keel-database-sqlite` / `keel-database-mariadb` | `kind: capability` driver packages loaded from `plugins/` |
+| `keel-database-sqlite` / `keel-database-mariadb` | `kind: capability` driver packages loaded from `plugins/`. SQLite is static; MariaDB ships Connector/C (mingwX64 today). |
+| `keel-thirdparty` | Source-based build of native dependencies: 6 codecs, SQLite amalgamation, MariaDB Connector/C, bcrypt, zstd. Publishes per-target zips. |
+| `keel-plugin-basic-biz` / `keel-plugin-basic-rbac` | Default user/account/setting plugin and the replaceable RBAC implementation (`provides: ["authz"]`). |
 | `keel-plugin-*` | Business plugins. Each plugin is a top-level independent Gradle build. |
 | `keel-*-gradle-plugin` | Build-time Gradle plugins: embedding, packaging, ABI injection, logger attachment, database/ORM wiring, and publishing |
 | `keel-router-ksp` | Route table code generator |
@@ -191,22 +203,22 @@ The same compiler plugin instruments exception construction and `throw`, recordi
 ### Requirements
 
 - JDK 21 to run Gradle and KSP processors. The produced binaries do not require a JVM.
-- The first build downloads the Kotlin/Native toolchain into `~/.konan`.
-- Building `linuxArm64` or `linuxX64` on Windows requires WSL2 and the matching `objcopy`.
+- The first build downloads the Kotlin/Native toolchain into `~/.konan`; cross-compiling `linuxArm64` / `linuxX64` uses the clang and sysroots bundled there (no WSL required).
+- CMake and Ninja are needed only when building `keel-thirdparty` (MariaDB Connector/C and the codec converters).
 - `.keel` packaging and console plugin management need no additional services.
 
 ### Build the host and the example plugin
 
 ```powershell
-gradlew :keel-host:linkDebugExecutableMingwX64
-gradlew :keel-plugin-hello:keelPackage
+gradlew -p keel-host linkDebugExecutableMingwX64
+gradlew -p keel-plugin-hello keelPackage
 ```
 
 Artifact locations:
 
 ```text
 keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe
-keel-plugin-hello/build/keel/keel-plugin-hello-0.1.0-SNAPSHOT.keel
+keel-plugin-hello/build/keel/keel-plugin-hello-0.2.0-SNAPSHOT.keel
 ```
 
 Build every independent build:
@@ -274,7 +286,7 @@ stop
 
 ```powershell
 .\keel-host\build\bin\mingwX64\debugExecutable\keel-host.exe `
-    --inspect .\keel-plugin-hello\build\keel\keel-plugin-hello-0.1.0-SNAPSHOT.keel
+    --inspect .\keel-plugin-hello\build\keel\keel-plugin-hello-0.2.0-SNAPSHOT.keel
 ```
 
 `--inspect` reads the manifest and resource entries and verifies that reads fail after unload.
@@ -376,6 +388,8 @@ Place the manifest at `src/commonMain/resources/plugin.json`. Packaging copies i
 | `lib` | Yes | Target name to package-relative native library path. |
 | `resources` | No | Resource prefix inside the package. Defaults to `resources/`. |
 | `name` | No | Display name used in the log module column. |
+| `logTag` | No | Log module column override. Falls back to `name`, then `id`. |
+| `provides` | No | SPI capabilities this plugin provides, currently `authn` / `authz`. |
 | `color` | No | Truecolor for the plugin module column. Accepts `#RRGGBB` and `#RGB`. |
 | `requires` | No | Required capability or plugin ids; drives topological start order and is validated before enable. |
 | `authors` | No | Author list. |
@@ -398,13 +412,13 @@ class HelloPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
-        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) { _, _ ->
+        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) {
             HttpResponse(body = ResponseBody.Text("hello from keel plugin"))
         }
-        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { request, _ ->
+        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { ctx ->
             HttpResponse(
                 body = ResponseBody.Text(
-                    text = request.body.decodeToString(),
+                    text = ctx.request().body.decodeToString(),
                     contentType = "application/json; charset=utf-8",
                 ),
             )
@@ -445,13 +459,13 @@ A class annotated with `@KeelPluginMain` must implement `Plugin` and provide a n
 ### 5. Package and install
 
 ```powershell
-gradlew :keel-plugin-hello:keelPackage
+gradlew -p keel-plugin-hello keelPackage
 ```
 
 Package layout:
 
 ```text
-keel-plugin-hello-0.1.0-SNAPSHOT.keel
+keel-plugin-hello-0.2.0-SNAPSHOT.keel
   plugin.json
   lib/mingwX64/keel_plugin_hello.dll
   resources/hello.txt
@@ -477,8 +491,8 @@ context.routes.register(
         routeId = "hello#user",
         permissions = listOf("hello.user.read"),
     ),
-) { request, pathParameters ->
-    val id = pathParameters["id"]
+) { ctx ->
+    val id = ctx.pathParameters()["id"]
     HttpResponse(body = ResponseBody.Bytes(ByteArray(0)))
 }
 ```
@@ -500,7 +514,7 @@ Responses use `HttpResponse`:
 | Field | Description |
 | --- | --- |
 | `status` | HTTP status code |
-| `headers` | Contract field for response headers. The current wire format does not carry them. |
+| `headers` | Response headers. `Content-Type` / `Content-Length` are written by the host; plugin headers are forwarded with `safeOnly = false`. |
 | `body` | `ResponseBody.Empty`, `Text`, `Bytes`, or `Stream` |
 | `envelope` | Ignored for `HttpResponse`: its body is written as-is. Generated controllers envelope plain business objects. |
 
@@ -526,7 +540,7 @@ val classpath = classpathFromDirectory("src/commonMain/resources")
 val text = classpath.read("hello.txt")?.decodeToString()
 ```
 
-`ctx.classpath` is declared with the same read-only interface. Plugin-side reads of its own resources and cross-plugin remote reads are still being connected. The host registry, `ClasspathRef`, and generation invalidation are available for host resources and development-time validation.
+`ctx.classpath` is declared with the same read-only interface. Plugin-side reads are connected through reversed host requests: own `.keel` resources first, then the host. Cross-plugin reads use `ctx.classpath.of("other")` and return opaque references; stale references fail immediately after unload.
 
 ### 9. Write logs
 
@@ -536,7 +550,7 @@ Log.warn("configuration is missing")
 Log.error("request failed", cause = exception)
 ```
 
-`Log` calls are rewritten by the compiler plugin, so each line contains a class name and line number. `context.logger` remains as a compatibility entry and carries no call site. The plugin module column uses `plugin.json.name` and falls back to `id`.
+`Log` calls are rewritten by the compiler plugin, so each line contains a class name and line number. `context.logger` remains as a compatibility entry and carries no call site. The plugin module column uses `plugin.json.logTag`, falls back to `name`, then `id`.
 
 ## Build Toolchain
 
@@ -548,6 +562,8 @@ Log.error("request failed", cause = exception)
 | `moe.lolosia.keel.logger` | Gradle plugin | Attaches the log compiler plugin to Kotlin/Native compilation |
 | `moe.lolosia.keel.publish` | Gradle plugin | Registers a private Maven repository |
 | `moe.lolosia.keel.database` | Gradle plugin | Wires `keel-orm-ksp`, ORM dependencies, and the build-time SQL dialect |
+| `moe.lolosia.keel.thirdparty` | Gradle plugin | Unpacks per-target native archives and wires cinterop / linker options with license gating |
+| `moe.lolosia.keel.bundle` | Gradle plugin | Applied automatically by `keel.plugin`; injects the prebuilt launcher + plugin bundle into a single executable |
 | `keel-plugin-ksp` | KSP processor | Generates `keel_plugin_worker_main` from `@KeelPluginMain` |
 | `keel-router-ksp` | KSP processor | Generates route tables from controller annotations |
 | `keel-orm-ksp` | KSP processor | Generates `EntityMeta`, typed column extensions, and `OrmMetaBootstrap` |
@@ -615,6 +631,26 @@ keel {
 
 `exceptionTrace` controls instrumentation of exception construction and `throw`. When disabled, logs no longer print creation and throw sites.
 
+### Single executable
+
+`moe.lolosia.keel.bundle` is applied automatically by `moe.lolosia.keel.plugin`. When enabled it produces one executable that embeds the prebuilt launcher, this plugin, and any `include(...)` packages:
+
+```kotlin
+keel {
+    plugin {
+        executable {
+            enabled = true
+            name = "myapp"
+            dataMode = KeelDataMode.PROGRAM
+            include(file("libs/keel-database-mariadb-0.2.0.keel"))
+            include(project(":keel-plugin-hello"))
+        }
+    }
+}
+```
+
+The bundle lives in a PE resource on Windows and in a 32-byte footer trailer on Linux. `.keel` files and their resources are opened in memory; only native libraries are materialized into the cache directory.
+
 ## Command Line
 
 | Option | Description |
@@ -643,14 +679,18 @@ Both default to the program directory: the working directory in `--plugins` mode
 | Task | Description |
 | --- | --- |
 | `gradlew buildAll` | Build every independent Gradle build |
-| `gradlew :keel-host:linkDebugExecutableMingwX64` | Build the Windows debug host |
-| `gradlew :keel-host:linkReleaseExecutableLinuxArm64` | Build the arm64 release host |
-| `gradlew :keel-host:linkReleaseExecutableLinuxX64` | Build the x64 release host |
-| `gradlew :keel-launcher:linkReleaseExecutableMingwX64` | Build the Windows single-file launcher entry |
-| `gradlew :keel-plugin-hello:keelPackage` | Package the example plugin |
-| `gradlew :keel-abi:keelAbiPackage` | Package ABI headers and static libraries |
-| `gradlew :keel-api:build` | Build the plugin contract |
-| `gradlew :keel-plugin-hello:build` | Verify that a consumer compiles |
+| `gradlew -p keel-host linkDebugExecutableMingwX64` | Build the Windows debug host |
+| `gradlew -p keel-host linkReleaseExecutableLinuxArm64` | Build the arm64 release host |
+| `gradlew -p keel-host linkReleaseExecutableLinuxX64` | Build the x64 release host |
+| `gradlew -p keel-launcher linkReleaseExecutableMingwX64` | Build the Windows single-file launcher entry |
+| `gradlew -p keel-plugin-hello keelPackage` | Package the example plugin (debug) |
+| `gradlew -p keel-plugin-hello keelPackageRelease` | Package the example plugin (release + strip) |
+| `gradlew -p keel-plugin-hello keelRun` | Assemble `build/keel-run` and start the host |
+| `gradlew -p keel-thirdparty compileAll` | Cross-compile every native dependency from source |
+| `gradlew -p keel-thirdparty publishToMavenLocal` | Publish the native dependency zips |
+| `gradlew publishAllToMavenLocal` | Publish every publishable Keel artifact to `~/.m2` |
+| `gradlew -p keel-api build` | Build the plugin contract |
+| `gradlew -p keel-plugin-hello build` | Verify that a consumer compiles |
 
 When building one directory on its own, cross-directory dependencies come from Maven coordinates. Local verification can pass `--include-build=../keel-api` and similar options to provide dependent builds. The root composite build performs the substitution automatically.
 
@@ -667,17 +707,21 @@ keel.password=<password>
 Publish order:
 
 ```text
-build plugins and KSP processors
+build-time plugins / KSP processors
+  → keel-thirdparty (sqlite / mariadb / bcrypt / zstd)
   → keel-abi
   → keel-classpath
   → keel-api
+  → keel-database-api
+  → keel-orm
   → keel-classpath-full
   → keel-host
-  → business plugins
+  → keel-database-*
+  → business plugins and their api artifacts
   → keel-launcher
 ```
 
-Each build-time tool configures its own publishing repository in its `build.gradle.kts`. Business plugins apply `moe.lolosia.keel.publish` instead of writing `publishing {}` by hand. After changing `keel-api`, every consumer must be recompiled.
+`gradlew publishAllToMavenLocal` performs this for local use. Each build-time tool configures its own publishing repository in its `build.gradle.kts`. Business plugins apply `moe.lolosia.keel.publish` instead of writing `publishing {}` by hand. After changing `keel-api`, every consumer must be recompiled.
 
 ## Deployment
 
@@ -687,7 +731,7 @@ The runtime needs only the host executable and a plugin directory:
 /opt/keel/
   keel-host
   plugins/
-    hello-0.1.0.keel
+    hello-0.2.0.keel
   config/
     plugins/
   data/
@@ -706,19 +750,30 @@ keel/
 ├── build.gradle.kts                 root build, aggregation only
 ├── settings.gradle.kts              composite build list
 ├── gradle/libs.versions.toml        single version source
+├── keel-gradle-common/              shared keel { } container
 ├── keel-abi/                        C ABI headers, event queues, bootstrap, static libraries
 ├── keel-abi-gradle-plugin/          ABI static library injection
 ├── keel-api/                        plugin contract and plugin-side runtime
 ├── keel-classpath/                  read-only resource layer
 ├── keel-classpath-full/             host registry and cross-module resource references
 ├── keel-classpath-gradle-plugin/    resource merge and executable embedding
+├── keel-database-api/               database ABI and plugin-side facade
+├── keel-orm/                        ORM runtime
+├── keel-orm-ksp/                    entity metadata / column generation
+├── keel-database-gradle-plugin/     ORM / KSP wiring
+├── keel-database-sqlite/            SQLite capability package
+├── keel-database-mariadb/           MariaDB capability package
+├── keel-thirdparty/                 source builds of native dependencies
+├── keel-thirdparty-gradle-plugin/   native archive consumption and license gating
 ├── keel-host/                       host
 ├── keel-launcher/                   single-file distribution entry
 ├── keel-logger-compiler-plugin/     log call-site IR transformation
 ├── keel-logger-gradle-plugin/       logger compiler plugin attachment
-├── keel-plugin-gradle-plugin/       .keel packaging
+├── keel-plugin-gradle-plugin/       .keel packaging and bundling
 ├── keel-plugin-hello/               example plugin
-├── keel-plugin-ksp/                 worker entry generation
+├── keel-plugin-basic-biz/           default user / account / setting plugin
+├── keel-plugin-basic-rbac/          replaceable RBAC implementation
+├── keel-plugin-ksp/                 worker entry and api artifact generation
 ├── keel-publish-gradle-plugin/      publishing repository registration
 ├── keel-router-ksp/                 route table generation
 └── doc/                             design documents and plans
@@ -728,28 +783,33 @@ Every top-level directory is an independent Gradle build. Each directory can be 
 
 ## Current Status
 
-Keel is at `0.1.0-SNAPSHOT`. The host, C ABI, plugin loading, HTTP routing, logging, configuration, authentication, storage, and packaging pipeline are runnable. The following table tracks each capability.
+Keel is at `0.2.0-SNAPSHOT`. The host, C ABI, plugin loading, HTTP routing, logging, configuration, authentication, storage, database/ORM, and packaging pipeline are runnable. The following table tracks each capability.
 
 | Capability | Status | Notes |
 | --- | --- | --- |
 | Plugin scan, validation, loading, enable and disable | Available | `.keel` directory, library cache, and failure isolation |
 | C ABI event pump and request replies | Available | Queues, `correlation`, health checks, logs, HTTP, and console |
-| Cross-runtime handles and callbacks | Contract defined | Host handle table and `CallbackRegistry` are not connected |
+| Shared objects across plugins | Available | `@PublicApi` v2 with contract-first mode, Host logical handle table, CBOR wire, automatic release |
+| C ABI handle table (`handle_new` / `retain` / `release`) | Contract defined | Not connected; `@PublicApi` does not depend on it |
+| `CallbackRegistry` | Contract defined | Not connected |
 | Plugin dependency ordering | Available | Topological start, reverse-order stop, and dependency validation for `requires` |
 | Single-port HTTP and manual routes | Available | `ctx.routes.register`, path parameters, and JSON wire format |
-| Scheduler | Available | Delay, period, and cancellation on the worker thread |
+| Scheduler and coroutine scope | Available | Delay, period, cancellation, and worker-bound `ctx.scope` |
 | Log call sites and exception diagnostics | Available | IR transformation, colors, creation and throw sites |
 | `.keel` packaging and console plugin management | Available | `keelPackage`, `plugins` commands, and `--inspect` |
-| Resource layer | Partially available | Host registry is available. Plugin-side resource reads are not connected. |
+| Resource layer | Available | Host registry plus plugin-side reversed reads; generation invalidation |
 | Cross-module service calls | Available | `@PublicApi` codegen (`ctx.xxx` / `ctx.xxxOrNull`), Host-routed handles, CBOR payloads |
 | Configuration read and write | Available | Host YAML with comment-preserving writes; `ctx.config` and `ctx.server.config` |
-| Plugin storage | Available | Per-plugin `read` / `write` / `delete` under `<workDir>/plugins/<id>/` |
+| Plugin storage | Available | Per-plugin `read` / `write` / `delete` under `<dataRoot>/data/<id>/` |
 | Annotation route generation | Available | `@Controller` / `@GET` etc. generate `KeelPluginRoutes` |
-| Permission checks | Available | Host middleware with `authn` / `authz` SPI, 401 / 403 / 503 |
-| JSON envelope and response headers | Partially available | Generated controllers wrap JSON in the envelope; `HttpResponse.headers` is not on the wire yet |
+| Permission checks | Available | Host middleware with `authn` / `authz` SPI, 401 / 403 / 503; RBAC default implementation |
+| JSON envelope and response headers | Available | Generated controllers envelope business objects; plugin response headers reach the client |
 | Streaming responses | Contract defined | `ResponseBody.Stream` is not connected to HTTP dispatch |
-| Single-file plugin embedding | Entry available | `keel-launcher` currently forwards to the host entry |
-| Publish artifact packaging | Not implemented | `moe.lolosia.keel.publish` registers the repository only. Per-target archiving and publishing are not implemented. |
+| Database drivers | Available | SQLite plus a real MariaDB Connector/C backend (mingwX64); Linux MariaDB pending |
+| ORM (single table) | Available | `@Table` → `EntityMeta` / typed columns / `OrmMetaBootstrap`; query, CRUD, paging, transactions |
+| Release host | Available | HTTP plugin routes smoke-tested on mingwX64; Linux targets pending |
+| Single-file plugin embedding | Available on mingwX64 | Prebuilt launcher + in-memory bundle; Linux trailer reading pending |
+| Publishing artifacts | Available | `gradlew publishAllToMavenLocal`; business plugins apply `moe.lolosia.keel.publish` |
 | Automated tests | Not connected | Validation uses compilation, `--inspect`, and startup smoke tests |
 
 ## Further Reading
@@ -764,6 +824,10 @@ Keel is at `0.1.0-SNAPSHOT`. The host, C ABI, plugin loading, HTTP routing, logg
 | [doc/config-design.md](doc/config-design.md) | Configuration layering, comment preservation, and plugin isolation |
 | [doc/authz-design.md](doc/authz-design.md) | Permission contract and RBAC plugin boundary |
 | [doc/codegen-design.md](doc/codegen-design.md) | Zero-boilerplate module access and code generation |
+| [doc/contract-first-public-api.md](doc/contract-first-public-api.md) | Contract-first `@PublicApi`, Context components, shared object release |
+| [doc/database-orm-plan.md](doc/database-orm-plan.md) | Database capability ABI, ORM runtime, and staged acceptance |
+| [doc/basic-stack-design.md](doc/basic-stack-design.md) | Database / RBAC / basic-biz boundaries and host enforcement points |
+| [doc/thirdparty-licensing.md](doc/thirdparty-licensing.md) | Native dependency manifest, artifact layout, and license rules |
 | [doc/capability-design.md](doc/capability-design.md) | Capability plugins and stable C ABI |
 | [doc/前序讨论.md](doc/前序讨论.md) | Feasibility discussion, hard constraints, and risks |
 

@@ -73,6 +73,13 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 - 主线 `application.yaml` 与每插件 `config/plugins/<id>.yaml` 通过 `Config` 读写，写回保留注释与空行
 - 每个插件有独立的存储命名空间（`read` / `write` / `delete`），由宿主代理
 
+**数据库与 ORM**
+
+- `keel-database-api` 是业务插件唯一的查库依赖；驱动是 `plugins/` 下的 `kind: capability` 包
+- SQLite 以静态 amalgamation 并入；MariaDB 带 Connector/C（由 `keel-thirdparty` 从源码构建）
+- `@Table` 实体生成 `EntityMeta`、类型安全列与 `OrmMetaBootstrap`；查询 DSL、CRUD、分页与事务走 `db.query<T> { ... }`
+- DDL 仍是版本化 SQL，ORM 不建表
+
 **资源层**
 
 - `.keel` 资源不解包，按 zip 中央目录随机读取
@@ -95,7 +102,10 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 - `moe.lolosia.keel.abi`：解出 C ABI 静态库并注入链接参数
 - `moe.lolosia.keel.logger`：把日志编译器插件挂到 Kotlin/Native 编译
 - `moe.lolosia.keel.publish`：注册自建 Maven 发布仓库
-- `keel-plugin-ksp`：从 `@KeelPluginMain` 生成 Worker 入口
+- `moe.lolosia.keel.database`：接线 `keel-orm-ksp`、ORM 依赖与构建期方言
+- `moe.lolosia.keel.thirdparty`：消费按目标的原生库 zip，并做许可门禁
+- `moe.lolosia.keel.bundle`：把预编译 launcher 与插件 bundle 注入单文件
+- `keel-plugin-ksp`：从 `@KeelPluginMain` 生成 Worker 入口，并生成 `@PublicApi` api 工件
 
 ## 架构
 
@@ -111,10 +121,16 @@ Keel 的核心能力是组件化插接：组件以独立部署单元交付，可
 | --- | --- |
 | `keel-api` | 插件契约：生命周期、上下文、路由、调度、日志、事件与消息 |
 | `keel-host` | 宿主：插件加载、生命周期推进、事件泵、Ktor 引擎、路由表、控制台与停机 |
-| `keel-launcher` | 单文件发行版入口：静态链接宿主，插件装配仍在实现 |
+| `keel-launcher` | 单文件发行版入口：静态链接宿主并打开内嵌插件 bundle（mingwX64 已验证，Linux 待验证） |
 | `keel-abi` | C ABI 头文件与每目标静态库：队列、事件、bootstrap、控制台与崩溃处理 |
 | `keel-classpath` | 只读资源层：zip、目录、前缀视图与流式读取 |
 | `keel-classpath-full` | 宿主注册表、带代次的资源引用与跨模块代理 |
+| `keel-database-api` | 数据库能力 ABI 与插件侧 Kotlin 门面（`KeelDatabase` / `Row` / `Context.database`） |
+| `keel-orm` | ORM 运行时：注解、`EntityMeta`、SQL 方言、查询 DSL、CRUD 与分页 |
+| `keel-orm-ksp` | 实体生成器：`@Table` → `EntityMeta` / 类型安全列 / `OrmMetaBootstrap` |
+| `keel-database-sqlite` / `keel-database-mariadb` | `kind: capability` 驱动包；SQLite 静态并入，MariaDB 带 Connector/C（当前 mingwX64） |
+| `keel-thirdparty` | 第三方原生库的源码构建：6 个 codec、SQLite amalgamation、MariaDB Connector/C、bcrypt、zstd |
+| `keel-plugin-basic-biz` / `keel-plugin-basic-rbac` | 默认用户 / 账户 / 设置插件，以及可原位替换的 RBAC 实现（`provides: ["authz"]`） |
 | `keel-plugin-*` | 业务插件，顶层平铺，每个插件一个独立 Gradle 构建 |
 | `keel-*-gradle-plugin` | 构建期 Gradle 插件：资源嵌入、`.keel` 打包、ABI 注入、日志挂载与发布 |
 | `keel-router-ksp` | 路由表代码生成器 |
@@ -187,22 +203,23 @@ Kotlin/Native 运行时无法安全卸载。`dlclose` 之后 TLS 与 GC 可能�
 ### 环境要求
 
 - JDK 21，用于运行 Gradle 与 KSP 处理器；产物本身不依赖 JVM
-- 首次构建会下载 Kotlin/Native 工具链到 `~/.konan`
-- 在 Windows 上构建 `linuxArm64` 或 `linuxX64` 需要 WSL2 与对应的 `objcopy`
+- 首次构建会下载 Kotlin/Native 工具链到 `~/.konan`；交叉编译 `linuxArm64` / `linuxX64`
+  使用其中的 clang 与 sysroot，不需要 WSL
+- 只有构建 `keel-thirdparty`（MariaDB Connector/C 与 codec）时才需要 CMake 与 Ninja
 - 使用 `.keel` 打包与控制台插件管理不需要额外服务
 
 ### 构建宿主与示例插件
 
 ```powershell
-gradlew :keel-host:linkDebugExecutableMingwX64
-gradlew :keel-plugin-hello:keelPackage
+gradlew -p keel-host linkDebugExecutableMingwX64
+gradlew -p keel-plugin-hello keelPackage
 ```
 
 产物位置：
 
 ```text
 keel-host/build/bin/mingwX64/debugExecutable/keel-host.exe
-keel-plugin-hello/build/keel/keel-plugin-hello-0.1.0-SNAPSHOT.keel
+keel-plugin-hello/build/keel/keel-plugin-hello-0.2.0-SNAPSHOT.keel
 ```
 
 构建全部独立构建：
@@ -270,7 +287,7 @@ stop
 
 ```powershell
 .\keel-host\build\bin\mingwX64\debugExecutable\keel-host.exe `
-    --inspect .\keel-plugin-hello\build\keel\keel-plugin-hello-0.1.0-SNAPSHOT.keel
+    --inspect .\keel-plugin-hello\build\keel\keel-plugin-hello-0.2.0-SNAPSHOT.keel
 ```
 
 `--inspect` 读取清单与资源条目，并验证卸载后资源读取立即失效。
@@ -372,6 +389,8 @@ kotlin {
 | `lib` | 是 | 目标名到包内动态库路径的映射 |
 | `resources` | 否 | 资源在包内的前缀，默认 `resources/` |
 | `name` | 否 | 展示名，用于日志模块列 |
+| `logTag` | 否 | 日志模块列覆盖值；缺失时回落 `name`，再回落 `id` |
+| `provides` | 否 | 本插件提供的 SPI 能力，当前为 `authn` / `authz` |
 | `color` | 否 | 日志模块列的 truecolor，支持 `#RRGGBB` 与 `#RGB` |
 | `requires` | 否 | 依赖的能力名或插件 id；参与拓扑启动顺序，启用前校验 |
 | `authors` | 否 | 作者列表 |
@@ -394,13 +413,13 @@ class HelloPlugin : Plugin {
 
     override fun onLoad(context: PluginContext) {
         this.context = context
-        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) { _, _ ->
+        context.routes.register(RouteDescriptor("GET", "/hello", "hello#hello")) {
             HttpResponse(body = ResponseBody.Text("hello from keel plugin"))
         }
-        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { request, _ ->
+        context.routes.register(RouteDescriptor("POST", "/echo", "hello#echo")) { ctx ->
             HttpResponse(
                 body = ResponseBody.Text(
-                    text = request.body.decodeToString(),
+                    text = ctx.request().body.decodeToString(),
                     contentType = "application/json; charset=utf-8",
                 ),
             )
@@ -441,13 +460,13 @@ class HelloPlugin : Plugin {
 ### 5. 打包与安装
 
 ```powershell
-gradlew :keel-plugin-hello:keelPackage
+gradlew -p keel-plugin-hello keelPackage
 ```
 
 产物结构：
 
 ```text
-keel-plugin-hello-0.1.0-SNAPSHOT.keel
+keel-plugin-hello-0.2.0-SNAPSHOT.keel
   plugin.json
   lib/mingwX64/keel_plugin_hello.dll
   resources/hello.txt
@@ -473,8 +492,8 @@ context.routes.register(
         routeId = "hello#user",
         permissions = listOf("hello.user.read"),
     ),
-) { request, pathParameters ->
-    val id = pathParameters["id"]
+) { ctx ->
+    val id = ctx.pathParameters()["id"]
     HttpResponse(body = ResponseBody.Bytes(ByteArray(0)))
 }
 ```
@@ -496,7 +515,7 @@ context.routes.register(
 | 字段 | 说明 |
 | --- | --- |
 | `status` | HTTP 状态码 |
-| `headers` | 契约字段：响应头，当前线格式尚未携带 |
+| `headers` | 响应头。`Content-Type` / `Content-Length` 由宿主统一写；插件给的其它头会以 `safeOnly = false` 转发 |
 | `body` | `ResponseBody.Empty`、`Text`、`Bytes` 或 `Stream` |
 | `envelope` | 对 `HttpResponse` 不生效：响应体原样写出；生成的控制器负责给普通业务对象包信封 |
 
@@ -522,7 +541,7 @@ val classpath = classpathFromDirectory("src/commonMain/resources")
 val text = classpath.read("hello.txt")?.decodeToString()
 ```
 
-插件上下文中的 `ctx.classpath` 已声明为同一个只读接口。插件自身资源读取与跨插件远程读取仍在接入。宿主侧注册表、`ClasspathRef` 与代次失效已经可用，可直接用于宿主资源与开发期验证。
+插件上下文中的 `ctx.classpath` 已声明为同一个只读接口。插件侧读取已经接通：经反向请求 Host，自身 `.keel` 优先、缺失回落宿主；跨插件用 `ctx.classpath.of("other")`，拿到不透明引用，卸载后旧引用立即失效。
 
 ### 9. 输出日志
 
@@ -532,7 +551,7 @@ Log.warn("configuration is missing")
 Log.error("request failed", cause = exception)
 ```
 
-`Log` 会经过编译器插件改写，日志行包含类名与行号。`context.logger` 保留为兼容入口，不带调用点信息。插件模块列默认使用 `plugin.json.name`，缺失时使用 `id`。
+`Log` 会经过编译器插件改写，日志行包含类名与行号。`context.logger` 保留为兼容入口，不带调用点信息。插件模块列默认取 `plugin.json.logTag`，缺失时回落 `name`，再回落 `id`。
 
 ## 构建期工具链
 
@@ -543,6 +562,9 @@ Log.error("request failed", cause = exception)
 | `moe.lolosia.keel.abi` | Gradle 插件 | 解出 `libkeel_abi.a` 与头文件，挂接链接参数与导出列表 |
 | `moe.lolosia.keel.logger` | Gradle 插件 | 把日志编译器插件挂到 Kotlin/Native 编译 |
 | `moe.lolosia.keel.publish` | Gradle 插件 | 注册自建 Maven 发布仓库 |
+| `moe.lolosia.keel.database` | Gradle 插件 | 接线 `keel-orm-ksp`、ORM 依赖与构建期方言 |
+| `moe.lolosia.keel.thirdparty` | Gradle 插件 | 解包按目标的原生库 zip，挂接 cinterop / linkerOpts，并做许可门禁 |
+| `moe.lolosia.keel.bundle` | Gradle 插件 | 由 `keel.plugin` 自动应用；把预编译 launcher 与插件 bundle 注入单文件 |
 | `keel-plugin-ksp` | KSP 处理器 | 从 `@KeelPluginMain` 生成 `keel_plugin_worker_main` |
 | `keel-router-ksp` | KSP 处理器 | 从控制器注解生成路由表 |
 
@@ -609,6 +631,26 @@ keel {
 
 `exceptionTrace` 控制是否为异常构造与 `throw` 插桩。关闭后日志不再输出创建点与抛出点。
 
+### 单文件产出
+
+`moe.lolosia.keel.bundle` 由 `moe.lolosia.keel.plugin` 自动应用。开启后产出单个可执行文件，内嵌预编译 launcher、本插件与 `include(...)` 的包：
+
+```kotlin
+keel {
+    plugin {
+        executable {
+            enabled = true
+            name = "myapp"
+            dataMode = KeelDataMode.PROGRAM
+            include(file("libs/keel-database-mariadb-0.2.0.keel"))
+            include(project(":keel-plugin-hello"))
+        }
+    }
+}
+```
+
+Windows 写进 PE 资源，Linux 追加 32 字节文件尾 trailer。`.keel` 与资源都在内存里打开，只有动态库会物化到缓存目录。
+
 ## 命令行
 
 | 参数 | 说明 |
@@ -643,14 +685,18 @@ keel {
 | 任务 | 说明 |
 | --- | --- |
 | `gradlew buildAll` | 构建所有独立 Gradle 构建 |
-| `gradlew :keel-host:linkDebugExecutableMingwX64` | 构建 Windows 调试宿主 |
-| `gradlew :keel-host:linkReleaseExecutableLinuxArm64` | 构建 arm64 发布宿主 |
-| `gradlew :keel-host:linkReleaseExecutableLinuxX64` | 构建 x64 发布宿主 |
-| `gradlew :keel-launcher:linkReleaseExecutableMingwX64` | 构建 Windows 单文件发行版入口 |
-| `gradlew :keel-plugin-hello:keelPackage` | 打包示例插件 |
-| `gradlew :keel-abi:keelAbiPackage` | 打包 ABI 头文件与静态库 |
-| `gradlew :keel-api:build` | 构建插件契约 |
-| `gradlew :keel-plugin-hello:build` | 验证消费方能够编译 |
+| `gradlew -p keel-host linkDebugExecutableMingwX64` | 构建 Windows 调试宿主 |
+| `gradlew -p keel-host linkReleaseExecutableLinuxArm64` | 构建 arm64 发布宿主 |
+| `gradlew -p keel-host linkReleaseExecutableLinuxX64` | 构建 x64 发布宿主 |
+| `gradlew -p keel-launcher linkReleaseExecutableMingwX64` | 构建 Windows 单文件发行版入口 |
+| `gradlew -p keel-plugin-hello keelPackage` | 打包示例插件（debug） |
+| `gradlew -p keel-plugin-hello keelPackageRelease` | 打包示例插件（release + strip） |
+| `gradlew -p keel-plugin-hello keelRun` | 组装 `build/keel-run` 并启动宿主 |
+| `gradlew -p keel-thirdparty compileAll` | 从源码交叉编译全部原生依赖 |
+| `gradlew -p keel-thirdparty publishToMavenLocal` | 发布原生依赖 zip |
+| `gradlew publishAllToMavenLocal` | 把全部可发布工件发到 `~/.m2` |
+| `gradlew -p keel-api build` | 构建插件契约 |
+| `gradlew -p keel-plugin-hello build` | 验证消费方能够编译 |
 
 单独构建某个目录时，跨目录依赖通过 Maven 坐标获取。本地验证可以用 `--include-build=../keel-api` 之类的参数提供被依赖工程，根 composite 构建会自动完成替换。
 
@@ -668,16 +714,20 @@ keel.password=<password>
 
 ```text
 构建期插件与 KSP 处理器
+  → keel-thirdparty（sqlite / mariadb / bcrypt / zstd）
   → keel-abi
   → keel-classpath
   → keel-api
+  → keel-database-api
+  → keel-orm
   → keel-classpath-full
   → keel-host
-  → 业务插件
+  → keel-database-*
+  → 业务插件及其 api 工件
   → keel-launcher
 ```
 
-构建期工具各自在自己的 `build.gradle.kts` 中配置发布仓库。功能插件应用 `moe.lolosia.keel.publish`，不要在业务构建中手写 `publishing {}`。修改 `keel-api` 后必须确认所有消费方重新编译。
+本地可以直接用 `gradlew publishAllToMavenLocal` 完成整套发布。构建期工具各自在自己的 `build.gradle.kts` 中配置发布仓库。功能插件应用 `moe.lolosia.keel.publish`，不要在业务构建中手写 `publishing {}`。修改 `keel-api` 后必须确认所有消费方重新编译。
 
 ## 部署形态
 
@@ -687,7 +737,7 @@ keel.password=<password>
 /opt/keel/
   keel-host
   plugins/
-    hello-0.1.0.keel
+    hello-0.2.0.keel
   config/
     plugins/
   data/
@@ -706,25 +756,30 @@ keel/
 ├── build.gradle.kts                 根构建，仅聚合 includeBuild
 ├── settings.gradle.kts              composite build 列表
 ├── gradle/libs.versions.toml        唯一版本来源
+├── keel-gradle-common/              共享的 keel { } 根容器
 ├── keel-abi/                        C ABI 头文件、事件队列、bootstrap 与静态库
 ├── keel-abi-gradle-plugin/          ABI 静态库注入
 ├── keel-api/                        插件契约与插件侧运行时
 ├── keel-classpath/                  只读资源层
 ├── keel-classpath-full/             宿主注册表与跨模块资源引用
 ├── keel-classpath-gradle-plugin/    资源合并与可执行文件嵌入
+├── keel-database-api/               数据库 ABI 与插件侧门面
+├── keel-orm/                        ORM 运行时
+├── keel-orm-ksp/                    实体 Meta / 列扩展生成
+├── keel-database-gradle-plugin/     数据库 / ORM 接线
+├── keel-database-sqlite/            SQLite 能力包
+├── keel-database-mariadb/           MariaDB 能力包
+├── keel-thirdparty/                 第三方原生库的源码构建
+├── keel-thirdparty-gradle-plugin/   原生库消费接线与许可门禁
 ├── keel-host/                       宿主
 ├── keel-launcher/                   单文件发行版入口
 ├── keel-logger-compiler-plugin/     日志调用点 IR 改写
 ├── keel-logger-gradle-plugin/       挂载日志编译器插件
-├── keel-plugin-gradle-plugin/       .keel 打包
-├── keel-database-gradle-plugin/     数据库 / ORM 接线
+├── keel-plugin-gradle-plugin/       .keel 打包与单文件注入
 ├── keel-plugin-hello/               示例插件
-├── keel-plugin-ksp/                 Worker 入口生成
-├── keel-orm-ksp/                    实体 Meta / 列扩展生成
-├── keel-database-api/               数据库 ABI 与插件侧门面
-├── keel-orm/                        ORM 运行时
-├── keel-database-sqlite/            SQLite 能力包
-├── keel-database-mariadb/           MariaDB 能力包
+├── keel-plugin-basic-biz/           默认用户 / 账户 / 设置插件
+├── keel-plugin-basic-rbac/          可替换的 RBAC 实现
+├── keel-plugin-ksp/                 Worker 入口与 api 工件生成
 ├── keel-publish-gradle-plugin/      发布仓库注册
 ├── keel-router-ksp/                 路由表生成
 └── doc/                             设计与计划
@@ -734,31 +789,34 @@ keel/
 
 ## 当前状态
 
-Keel 处于 `0.2.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志、配置、认证、存储与打包链路已经可以运行，下表逐项记录状态。
+Keel 处于 `0.2.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日志、配置、认证、存储、数据库 / ORM 与打包链路已经可以运行，下表逐项记录状态。
 
 | 能力 | 状态 | 说明 |
 | --- | --- | --- |
 | 插件扫描、校验、加载与启停 | 可用 | `.keel` 目录、动态库缓存与失败隔离 |
 | C ABI 事件泵与请求应答 | 可用 | 队列、`correlation`、健康检查、日志、HTTP 与控制台 |
-| 跨运行时句柄与回调 | 契约已定义 | 宿主句柄表与 `CallbackRegistry` 尚未接入 |
+| 跨插件共享对象 | 可用 | `@PublicApi` v2（含 contract-first）、Host 逻辑句柄表、CBOR 线格式、自动释放 |
+| C ABI 句柄表（`handle_new` / `retain` / `release`） | 契约已定义 | 尚未接入；`@PublicApi` 不依赖它 |
+| `CallbackRegistry` | 契约已定义 | 尚未接入 |
 | 插件依赖排序 | 可用 | `requires` 参与拓扑启动、反序停用，并在启用前校验依赖 |
 | 单端口 HTTP 与手工路由 | 可用 | `ctx.routes.register`、路径参数与 JSON 线格式 |
-| 调度器 | 可用 | 延时、周期与取消，绑定 Worker 线程 |
+| 调度器与协程作用域 | 可用 | 延时、周期、取消与绑定 Worker 的 `ctx.scope` |
 | 日志调用点与异常诊断 | 可用 | IR 改写、配色、创建点与抛出点 |
 | `.keel` 打包与控制台插件管理 | 可用 | `keelPackage`、`plugins` 子命令与 `--inspect` |
-| 资源层 | 部分可用 | 宿主侧注册表可用，插件侧资源读取未接入 |
+| 资源层 | 可用 | 宿主注册表 + 插件侧反向读取，卸载后按代次失效 |
 | 跨模块服务调用 | 可用 | `@PublicApi` codegen（`ctx.xxx` / `ctx.xxxOrNull`）+ Host 句柄路由，CBOR 载荷 |
 | 配置读写 | 可用 | Host YAML（写入保留注释）+ `ctx.config` / `ctx.server.config` |
 | 插件存储 | 可用 | 每插件命名空间下的 `read` / `write` / `delete` |
 | 注解路由生成 | 可用 | `@Controller` / `@GET` 等生成 `KeelPluginRoutes` |
-| 权限判定 | 可用 | Host 认证 / 授权中间件 + `authn` / `authz` SPI，401 / 403 / 503 |
-| 数据库能力包 | 部分可用 | SQLite 驱动已可用（exec / query / 事务 / 参数 / NULL / BLOB）；MariaDB 仍是 `select 1` 桩 |
+| 权限判定 | 可用 | Host 认证 / 授权中间件 + `authn` / `authz` SPI，401 / 403 / 503；含默认 RBAC 实现 |
+| 数据库能力包 | 可用 | SQLite + 真实 MariaDB Connector/C 后端（mingwX64）；Linux MariaDB 待补 |
 | ORM（单表） | 可用 | `@Table` → `EntityMeta` / 类型安全列 / `OrmMetaBootstrap`；查询 / CRUD / 分页 / 事务 |
 | `Context` 数据库扩展 | 可用 | `ctx.database` / `transaction` / `execute` / `query(sql)`；缺包时 503 |
-| JSON 信封与响应头 | 部分可用 | 生成的控制器会包 JSON 信封；`HttpResponse.headers` 尚未进入线格式 |
+| JSON 信封与响应头 | 可用 | 生成的控制器会包 JSON 信封；插件响应头已能写到客户端 |
 | 流式响应 | 契约已定义 | `ResponseBody.Stream` 尚未接入 HTTP 分发 |
-| 单文件内嵌插件 | 入口已就位 | `keel-launcher` 目前转发到宿主入口 |
-| 发布产物打包 | 未实现 | `moe.lolosia.keel.publish` 只注册仓库，按目标归档与发布未实现 |
+| release 宿主 | 可用 | 插件 HTTP 路由已在 mingwX64 冒烟通过；Linux 目标待复测 |
+| 单文件内嵌插件 | mingwX64 可用 | 预编译 launcher + 内存 bundle；Linux trailer 读取待验证 |
+| 发布产物 | 可用 | `gradlew publishAllToMavenLocal`；业务插件应用 `moe.lolosia.keel.publish` |
 | 自动化测试 | 未接入 | 以编译、`--inspect` 与启动冒烟验证 |
 
 ## 延伸阅读
@@ -773,6 +831,10 @@ Keel 处于 `0.2.0-SNAPSHOT`。宿主、C ABI、插件加载、HTTP 路由、日
 | [doc/config-design.md](doc/config-design.md) | 配置分层、注释保留与插件配置隔离 |
 | [doc/authz-design.md](doc/authz-design.md) | 权限契约与 RBAC 插件边界 |
 | [doc/codegen-design.md](doc/codegen-design.md) | 零样板模块互访与代码生成 |
+| [doc/contract-first-public-api.md](doc/contract-first-public-api.md) | contract-first `@PublicApi`、Context 组件化与共享对象释放 |
+| [doc/database-orm-plan.md](doc/database-orm-plan.md) | 数据库能力 ABI、ORM 运行时与分阶段验收 |
+| [doc/basic-stack-design.md](doc/basic-stack-design.md) | 数据库 / RBAC / basic-biz 边界与宿主强制点 |
+| [doc/thirdparty-licensing.md](doc/thirdparty-licensing.md) | 原生依赖 manifest、工件布局与许可规则 |
 | [doc/capability-design.md](doc/capability-design.md) | 能力插件与稳定 C ABI |
 | [doc/前序讨论.md](doc/前序讨论.md) | 可行性讨论、硬约束与风险清单 |
 

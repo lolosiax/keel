@@ -44,15 +44,15 @@
 
   <rect x="60" y="42" width="28" height="28" rx="8" fill="url(#accent)"/>
   <text x="100" y="65" class="title">组件加载与启动流程</text>
-  <text x="100" y="88" class="subtitle">从 .keel 包到可服务组件的完整链路</text>
+  <text x="100" y="88" class="subtitle">从 .keel / 内嵌 bundle 到可服务组件的完整链路</text>
 
   <g filter="url(#shadow)">
     <rect x="60" y="140" width="240" height="96" rx="14" fill="#111C33" stroke="#253653"/>
     <circle cx="84" cy="170" r="11" fill="#1E293B" stroke="#475569"/>
     <text x="84" y="174" text-anchor="middle" class="step">1</text>
     <text x="108" y="175" class="h3">.keel 扫描</text>
-    <text x="80" y="204" class="body">按文件名排序</text>
-    <text x="80" y="221" class="body">逐个读取组件包</text>
+    <text x="80" y="204" class="body">磁盘 .keel + 内嵌 bundle</text>
+    <text x="80" y="221" class="body">同 id 时磁盘包优先</text>
 
     <rect x="320" y="140" width="240" height="96" rx="14" fill="#111C33" stroke="#253653"/>
     <circle cx="344" cy="170" r="11" fill="#1E293B" stroke="#475569"/>
